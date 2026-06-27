@@ -14,7 +14,7 @@ This Python project aims to provide a tool for analyzing the security of IPs and
 
 ### Installation
 
-        git clone https://github.com
+        git clone https://github.com/detectibr/ThreatTrack.git
 
         pip3 install -r requirements.txt
 
