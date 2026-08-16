@@ -60,6 +60,11 @@ pip install -e .
 
 # Or install dependencies via requirements.txt
 pip install -r requirements.txt
+
+chmod +x detecti-cli
+
+#Install and update Exploit Database
+./detecti-cli update-xdb
 ```
 
 ---
