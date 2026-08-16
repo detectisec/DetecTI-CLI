@@ -1,4 +1,4 @@
-# DetecTI - Cyber Lead Intelligence 🎯
+<h1 align="right">DetecTI - Cyber Lead Intelligence</h1>
 
 <div align="center">
 
