@@ -4,7 +4,7 @@
 
 <img width="90" src="https://avatars.githubusercontent.com/u/129181562?s=200&v=4" alt="DetecTI Security Logo">
 
-### Modern External Attack Surface Management & Threat Intelligence Engine
+### Modern External Attack Surface Mapping & Threat Intelligence Engine
 **Asynchronous • Modular • High-Concurrency • EPSS + CISA KEV Prioritization • Shodan • crt.sh • Reverse WHOIS**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
