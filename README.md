@@ -1,6 +1,8 @@
-<div align="center">
 # DetecTI - Cyber Lead Intelligence 🎯
-<img width="90" src="[example/logo.png](https://avatars.githubusercontent.com/u/129181562?s=200&v=4)" alt="DetecTI Security Logo">
+
+<div align="center">
+
+<img width="90" src="https://avatars.githubusercontent.com/u/129181562?s=200&v=4" alt="DetecTI Security Logo">
 
 ### Modern External Attack Surface Management & Threat Intelligence Engine
 **Asynchronous • Modular • High-Concurrency • EPSS + CISA KEV Prioritization • Shodan • crt.sh • Reverse WHOIS**
