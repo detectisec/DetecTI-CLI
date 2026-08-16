@@ -132,19 +132,20 @@ You can pass custom Shodan search queries directly into the target `-t` paramete
 
 # Search by SSL Certificate Organization
 ./detecti-cli scan -t "ssl.cert.subject.org:'SpaceX'"
-
-### 4. Select Specific Modules
-```bash
-./detecti-cli scan -t example.com -m crtsh,reverse_whois
 ```
 > 💡 **Tip**: Explore all available search filters in the official [Shodan Search Filters Guide](https://www.shodan.io/search/filters).
 
-### 5. Filter Vulnerabilities by CVSS Severity
+### 5. Select Specific Modules
+```bash
+./detecti-cli scan -t example.com -m crtsh,reverse_whois
+```
+
+### 6. Filter Vulnerabilities by CVSS Severity
 ```bash
 ./detecti-cli scan -t 142.250.191.68 --cvss critical
 ```
 
-### 6. Export Reports (JSON & Markdown)
+### 7. Export Reports (JSON & Markdown)
 ```bash
 # Export Markdown executive report
 ./detecti-cli scan -t example.com -o markdown -f report.md
@@ -156,7 +157,7 @@ You can pass custom Shodan search queries directly into the target `-t` paramete
 ./detecti-cli scan -t example.com -o all -d ./reports
 ```
 
-### 7. Update ExploitDB Database
+### 8. Update ExploitDB Database
 ```bash
 ./detecti-cli update-xdb
 ```
