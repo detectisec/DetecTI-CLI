@@ -120,10 +120,24 @@ You can verify your configuration anytime:
 detecti-cli scan -t CVE-2021-44228
 ```
 
+### 4. Advanced Shodan Search Queries
+You can pass custom Shodan search queries directly into the target `-t` parameter. **Always enclose the query in double quotes ("")**.
+
+```bash
+# Search by Organization Name
+./detecti-cli scan -t "org:'ACME LTDA'" -m all -f acme.md
+
+# Search by City and Open Service
+./detecti-cli scan -t "city:'washington' port:8080" -o markdown -f washington.md
+
+# Search by SSL Certificate Organization
+./detecti-cli scan -t "ssl.cert.subject.org:'SpaceX'"
+
 ### 4. Select Specific Modules
 ```bash
 ./detecti-cli scan -t example.com -m crtsh,reverse_whois
 ```
+> 💡 **Tip**: Explore all available search filters in the official [Shodan Search Filters Guide](https://www.shodan.io/search/filters).
 
 ### 5. Filter Vulnerabilities by CVSS Severity
 ```bash
