@@ -1,4 +1,4 @@
-<h1 align="right">DetecTI - Cyber Lead Intelligence</h1>
+<h1 align="center">DetecTI - Cyber Lead Intelligence</h1>
 
 <div align="center">
 
