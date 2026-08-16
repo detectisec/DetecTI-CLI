@@ -153,7 +153,7 @@ detecti-cli scan -t CVE-2021-44228
 
 ```
 DetecTI-CLI/
-├── cli.py                 # Typer & Rich Command Line Interface
+├── detecti-cli            # Typer & Rich Command Line Interface
 ├── config.py              # Pydantic Settings & Environment Loading
 ├── core/                  
 │   ├── engine.py          # Asynchronous Pipeline & Correlation Engine
