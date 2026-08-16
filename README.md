@@ -131,7 +131,7 @@ You can pass custom Shodan search queries directly into the target `-t` paramete
 ./detecti-cli scan -t "city:'washington' port:8080" -o markdown -f washington.md
 
 # Search by SSL Certificate Organization
-./detecti-cli scan -t "ssl.cert.subject.org:'SpaceX'"
+./detecti-cli scan -t "ssl.cert.subject.cn:'SpaceX'"
 ```
 > 💡 **Tip**: Explore all available search filters in the official [Shodan Search Filters Guide](https://www.shodan.io/search/filters).
 
