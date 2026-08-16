@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import asyncio
+import sys
+from pathlib import Path
+
+# Ensure project root is in sys.path when running cli.py directly
+_proj_root = str(Path(__file__).resolve().parent)
+if _proj_root not in sys.path:
+    sys.path.insert(0, _proj_root)
+
+from typing import List, Optional
+import click
+import typer
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
+
+# Click 8.3+ compatibility patch for Typer help formatting
+_orig_make_metavar = click.Option.make_metavar
+
+
+def _compat_make_metavar(self, ctx=None):
+    if ctx is None:
+        try:
+            return _orig_make_metavar(self, None)
+        except TypeError:
+            return self.name.upper() if self.name else "TEXT"
+    return _orig_make_metavar(self, ctx)
+
+
+click.Option.make_metavar = _compat_make_metavar
+
+try:
+    from __init__ import __version__
+except (ImportError, ModuleNotFoundError):
+    __version__ = "2.0.0"
+
+from config import settings
+from core.engine import ThreatTrackEngine, DetectIEngine
+from modules.exploitdb import ExploitDBModule
+from reporters.json_reporter import JSONReporter
+from reporters.markdown_reporter import MarkdownReporter
+from utils.logger import (
+    console,
+    print_banner,
+    print_error,
+    print_info,
+    print_section_header,
+    print_success,
+    print_warning,
+    render_scan_output,
+    render_summary_panel,
+)
+
+# Print banner on --help as well
+_orig_format_help = click.Command.format_help
+
+
+def _banner_format_help(self, ctx, formatter):
+    print_banner()
+    return _orig_format_help(self, ctx, formatter)
+
+
+click.Command.format_help = _banner_format_help
+
+app = typer.Typer(
+    name="detecti",
+    help="DetecTI-CLI: External Attack Surface Mapping & Threat Intelligence Engine",
+    add_completion=False,
+    no_args_is_help=True,
+    rich_markup_mode=None,
+)
+
+
+@app.command(name="scan")
+def scan_command(
+    target: str = typer.Option(
+        ...,
+        "-t",
+        "--target",
+        help="Target IP, CIDR, domain, email, CVE, search query, or file:LIST.txt",
+    ),
+    modules: str = typer.Option(
+        "all",
+        "-m",
+        "--modules",
+        help="Comma-separated list of modules to execute (shodan, censys, crtsh, reverse_whois, nvd, exploitdb, all)",
+    ),
+    output_format: str = typer.Option(
+        "table",
+        "-o",
+        "--format",
+        help="Output report format: table, json, markdown, all",
+    ),
+    output_file: Optional[Path] = typer.Option(
+        None,
+        "-f",
+        "--output-file",
+        help="Custom file path to export the report (e.g., report.json or report.md)",
+    ),
+    output_dir: Optional[Path] = typer.Option(
+        None,
+        "-d",
+        "--output-dir",
+        help="Directory to save generated JSON/Markdown reports",
+    ),
+    cvss_filter: Optional[str] = typer.Option(
+        None,
+        "--cvss",
+        help="Filter vulnerabilities by CVSS severity: critical, high, medium, low",
+    ),
+    xdb_update: bool = typer.Option(
+        False,
+        "--xdbupdate",
+        help="Update local ExploitDB database before scanning",
+    ),
+) -> None:
+    """Execute complete attack surface mapping and threat intelligence analysis."""
+    print_banner()
+
+    if xdb_update:
+        print_info("Updating local ExploitDB searchsploit database...")
+        try:
+            ExploitDBModule.update_database()
+            print_success("ExploitDB database updated successfully.")
+        except Exception as err:
+            print_error(f"Failed to update ExploitDB: {err}")
+
+    # Parse modules list
+    mod_list = [m.strip().lower() for m in modules.split(",") if m.strip()]
+
+    print_section_header("Scan Configuration")
+    console.print(f" [cyan]Target:[/cyan] [bold white]{target}[/bold white]")
+    console.print(f" [cyan]Modules:[/cyan] [bold white]{', '.join(mod_list)}[/bold white]")
+    if cvss_filter:
+        console.print(f" [cyan]CVSS Filter:[/cyan] [bold yellow]{cvss_filter.upper()}[/bold yellow]")
+
+    # Run async engine
+    with Progress(
+        SpinnerColumn(spinner_name="dots"),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        task_id = progress.add_task("[bold cyan]Initializing DetecTI-CLI Intelligence Engine...", total=None)
+
+        def progress_cb(module_name: str, message: str) -> None:
+            progress.update(task_id, description=f"[bold cyan][{module_name}][/bold cyan] {message}")
+
+        engine = ThreatTrackEngine(progress_callback=progress_cb)
+        result = asyncio.run(
+            engine.scan(
+                target=target,
+                enabled_modules=mod_list,
+                cvss_filter=cvss_filter,
+            )
+        )
+
+    # 1. Terminal Output (Organized by Host)
+    if output_format.lower() in ("table", "all") or not output_file:
+        render_scan_output(result)
+
+        # Summary Panel
+        console.print("")
+        console.print(render_summary_panel(result.summary, result.elapsed_seconds))
+
+    # 2. File Export Handling
+    safe_target = "".join(c if c.isalnum() else "_" for c in target)[:40]
+    timestamp = result.started_at.strftime("%Y%m%d_%H%M%S")
+
+    save_dir = output_dir or Path.cwd()
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    # Determine what to export (supports explicit -o or inferred from -f extension)
+    fmt = output_format.lower()
+    export_json = fmt in ("json", "all") or (output_file and output_file.suffix == ".json")
+    export_md = fmt in ("markdown", "md", "all") or (output_file and output_file.suffix in (".md", ".markdown"))
+
+    # JSON Export
+    if export_json:
+        json_path = (
+            output_file
+            if output_file and output_file.suffix == ".json"
+            else save_dir / f"detecti_{safe_target}_{timestamp}.json"
+        )
+        JSONReporter.save(result, json_path)
+        print_success(f"JSON report saved to: [bold underline]{json_path.resolve()}[/bold underline]")
+
+    # Markdown Export
+    if export_md:
+        md_path = (
+            output_file
+            if output_file and output_file.suffix in (".md", ".markdown")
+            else save_dir / f"detecti_{safe_target}_{timestamp}.md"
+        )
+        MarkdownReporter.save(result, md_path)
+        print_success(f"Markdown executive report saved to: [bold underline]{md_path.resolve()}[/bold underline]")
+
+
+@app.command(name="update-xdb")
+def update_xdb_command() -> None:
+    """Update the local ExploitDB / searchsploit vulnerability mapping database."""
+    print_banner()
+    print_info("Refreshing ExploitDB database...")
+    try:
+        ExploitDBModule.update_database()
+        print_success("ExploitDB database successfully updated!")
+    except Exception as exc:
+        print_error(f"Error updating ExploitDB: {exc}")
+
+
+@app.command(name="config-check")
+def config_check_command() -> None:
+    """Check configured API keys, environment settings, and endpoint reachability."""
+    print_banner()
+    print_section_header("API Keys & Environment Status")
+
+    shodan_status = "[bold green]Configured[/bold green]" if settings.shodan_api_key else "[bold yellow]Not Configured (Required for Shodan recon)[/bold yellow]"
+    if settings.censys_pat_token:
+        org_suffix = f" (Org: {settings.censys_org_id})" if settings.censys_org_id else ""
+        censys_status = f"[bold green]Configured (PAT Token{org_suffix})[/bold green]"
+    elif settings.censys_api_id and settings.censys_api_secret:
+        censys_status = "[bold green]Configured (Legacy API)[/bold green]"
+    else:
+        censys_status = "[dim]Not Set (Required for Censys recon)[/dim]"
+
+    nvd_status = "[bold green]Configured (High rate limits)[/bold green]" if settings.nvd_api_key else "[dim]Not Set (Public rate limits apply)[/dim]"
+    whois_status = "[bold green]Configured (WhoisFreaks API)[/bold green]" if settings.whoisfreaks_api_key else "[dim]Not Set (Free HackerTarget fallback active)[/dim]"
+    github_status = "[bold green]Configured[/bold green]" if settings.github_token else "[dim]Not Set (Public PoC API active)[/dim]"
+
+    console.print(f" • [cyan]Shodan API Key:[/cyan] {shodan_status}")
+    console.print(f" • [cyan]Censys Credentials:[/cyan] {censys_status}")
+    console.print(f" • [cyan]NVD API Key:[/cyan] {nvd_status}")
+    console.print(f" • [cyan]WhoisFreaks API Key:[/cyan] {whois_status}")
+    console.print(f" • [cyan]GitHub Token:[/cyan] {github_status}")
+    console.print(f" • [cyan]HTTP Concurrency Limit:[/cyan] {settings.http_concurrency_limit}")
+    console.print(f" • [cyan]HTTP Timeout:[/cyan] {settings.http_timeout}s")
+
+
+@app.command(name="version")
+def version_command() -> None:
+    """Show DetecTI-CLI version and maintainer information."""
+    console.print(f"[bold cyan]DetecTI-CLI[/bold cyan] version [bold white]{__version__}[/bold white] - Cyber Lead Intelligence Engine")
+    console.print("[dim]Developed by Lucas S. (Ls4ss) - https://lucassouza.io[/dim]")
+
+
+def main() -> None:
+    """Main CLI entry point."""
+    app()
+
+
+if __name__ == "__main__":
+    main()
