@@ -250,7 +250,6 @@ class CensysModule(BaseModule):
             return await self.search_query(query)
             
         except CensysQuotaExhaustedError as e:
-            logger.warning(f"Censys API quota exhausted for target {target}")
             print(f"⚠️  Censys API quota/balance exhausted. Skipping further Censys queries.")
             self._quota_exhausted = True  # Set flag to skip future calls
             return []
@@ -292,7 +291,6 @@ class CensysModule(BaseModule):
                     if isinstance(error_data, dict) and "errors" in error_data:
                         for error in error_data.get("errors", []):
                             if isinstance(error, dict) and "insufficient balance" in error.get("message", "").lower():
-                                logger.warning(f"Censys API quota exhausted for host {ip}")
                                 raise CensysQuotaExhaustedError(f"API quota exhausted for IP {ip}")
                 except:
                     pass  # If we can't parse the error, treat it as a regular validation error
@@ -661,7 +659,6 @@ class CensysModule(BaseModule):
                         if isinstance(error_data, dict) and "errors" in error_data:
                             for error in error_data.get("errors", []):
                                 if isinstance(error, dict) and "insufficient balance" in error.get("message", "").lower():
-                                    logger.warning(f"Censys API quota exhausted for query '{query}'")
                                     raise CensysQuotaExhaustedError(f"API quota exhausted for query '{query}'")
                     except:
                         pass  # If we can't parse the error, treat it as a regular validation error
