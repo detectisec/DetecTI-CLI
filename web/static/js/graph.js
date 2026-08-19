@@ -227,7 +227,7 @@ class EASMDashboard {
             console.log('First 3 nodes structure:', elements.nodes.slice(0, 3));
             
             // Extract leads from graph nodes (IP, domain, subdomain)
-            const leadNodes = elements.nodes.filter(node => {
+            let leadNodes = elements.nodes.filter(node => {
                 const nodeData = node.data || node;
                 const nodeType = nodeData.type;
                 console.log(`Checking node: ${nodeData.id} (type: ${nodeType})`);
@@ -239,26 +239,11 @@ class EASMDashboard {
                 return isLead;
             });
             
-            // FALLBACK: If no leads found with standard types, try to find ANY node that could be a lead
+            // IMMEDIATE FALLBACK: If no standard leads, create from ALL nodes
             if (leadNodes.length === 0) {
-                console.warn('No standard leads found, trying fallback approach...');
-                const fallbackLeads = elements.nodes.filter(node => {
-                    const nodeData = node.data || node;
-                    // Look for nodes that have IP addresses or domain-like names
-                    const hasIp = nodeData.ip || (nodeData.label && /\d+\.\d+\.\d+\.\d+/.test(nodeData.label));
-                    const hasDomain = nodeData.name && /[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(nodeData.name);
-                    const isLikelyLead = hasIp || hasDomain || nodeData.type === 'host';
-                    
-                    if (isLikelyLead) {
-                        console.log(`✓ FALLBACK LEAD FOUND: ${nodeData.id} (${nodeData.type}) - IP: ${hasIp}, Domain: ${hasDomain}`);
-                    }
-                    return isLikelyLead;
-                });
-                
-                if (fallbackLeads.length > 0) {
-                    leadNodes.push(...fallbackLeads);
-                    console.log(`Added ${fallbackLeads.length} fallback leads`);
-                }
+                console.warn('No standard leads found, using ALL nodes as leads...');
+                leadNodes = elements.nodes.slice(); // Use all nodes
+                console.log(`Using all ${leadNodes.length} nodes as leads`);
             }
             
             console.log(`Found ${leadNodes.length} potential lead nodes out of ${elements.nodes.length} total nodes`);
@@ -339,13 +324,13 @@ class EASMDashboard {
                 }
             });
             
-            // EMERGENCY FALLBACK: If still no leads, create leads from ALL nodes
-            if (this.leads.length === 0) {
-                console.warn('EMERGENCY FALLBACK: Creating leads from all available nodes...');
+            // FINAL FALLBACK: If still no leads after processing, force create from raw data
+            if (this.leads.length === 0 && elements.nodes.length > 0) {
+                console.warn('FINAL FALLBACK: Force creating leads from raw node data...');
                 elements.nodes.forEach((node, index) => {
                     try {
                         const nodeData = node.data || node;
-                        console.log(`Emergency lead ${index + 1}: ${nodeData.id} (${nodeData.type})`);
+                        console.log(`Force lead ${index + 1}: ${nodeData.id} (${nodeData.type})`);
                         
                         // Create a more descriptive display name
                         let displayName = nodeData.label || nodeData.name || nodeData.ip || nodeData.id;
@@ -372,9 +357,9 @@ class EASMDashboard {
                         };
                         
                         this.leads.push(lead);
-                        console.log(`✓ Emergency lead created: ${lead.display_name}`);
+                        console.log(`✓ Force lead created: ${lead.display_name}`);
                     } catch (error) {
-                        console.error(`Error creating emergency lead ${index}:`, error);
+                        console.error(`Error creating force lead ${index}:`, error);
                     }
                 });
             }
@@ -550,14 +535,18 @@ class EASMDashboard {
         console.log(`Rendering ${this.leads.length} leads`);
 
         if (this.leads.length === 0) {
-            console.warn('No leads to render');
+            console.error('❌ CRITICAL: Still no leads to render after all fallbacks!');
             leadList.innerHTML = `
                 <div class="lead-loading" style="color: #ff4757;">
-                    No leads found in database<br>
-                    <small>This might indicate a data loading issue</small><br>
-                    <button onclick="window.dashboard.populateLeadSelector(window.dashboard.graphData?.elements)" 
+                    ❌ No leads found in database<br>
+                    <small>All fallback methods failed</small><br>
+                    <button onclick="console.log('Graph data:', window.dashboard.graphData); window.dashboard.populateLeadSelector(window.dashboard.graphData?.elements)" 
                             style="margin-top: 10px; padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer;">
-                        Retry Loading Leads
+                        Debug & Retry
+                    </button><br>
+                    <button onclick="location.reload()" 
+                            style="margin-top: 5px; padding: 5px 10px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer;">
+                        Reload Page
                     </button>
                 </div>
             `;
@@ -1088,17 +1077,27 @@ class EASMDashboard {
                 console.log('Populating lead selector...');
                 try {
                     this.populateLeadSelector(this.graphData.elements);
-                    
+                
                     // Apply lead filter first (default: no leads selected = empty graph)
                     this.applyLeadFilter();
-                    
-                    // Fallback: Try again after a short delay if no leads were found
+                
+                    // Multiple fallback attempts
                     if (this.leads.length === 0) {
-                        console.warn('No leads found, trying again in 1 second...');
+                        console.warn('No leads found, trying multiple fallback attempts...');
+                    
+                        // Attempt 1: Retry after 500ms
                         setTimeout(() => {
-                            console.log('Retrying lead selector population...');
+                            console.log('Fallback attempt 1: Retrying lead selector...');
                             this.populateLeadSelector(this.graphData.elements);
-                        }, 1000);
+                        
+                            // Attempt 2: Force populate if still empty
+                            if (this.leads.length === 0) {
+                                setTimeout(() => {
+                                    console.log('Fallback attempt 2: Force populating from Cytoscape...');
+                                    this.forcePopulateFromCytoscape();
+                                }, 500);
+                            }
+                        }, 500);
                     }
                 } catch (error) {
                     console.error('Error in lead selector population:', error);
@@ -1107,6 +1106,11 @@ class EASMDashboard {
                     if (leadList) {
                         leadList.innerHTML = `<div class="lead-loading" style="color: #ff4757;">Failed to load leads: ${error.message}<br><small>Check console for details</small></div>`;
                     }
+                
+                    // Even on error, try to force populate
+                    setTimeout(() => {
+                        this.forcePopulateFromCytoscape();
+                    }, 1000);
                 }
                 
                 // Run layout
@@ -1570,6 +1574,67 @@ class EASMDashboard {
                     </button>
                 </div>
             `;
+        }
+    }
+
+    forcePopulateFromCytoscape() {
+        console.log('🚨 FORCE POPULATE: Attempting to extract leads directly from Cytoscape...');
+        
+        if (!this.cy) {
+            console.error('Cytoscape not initialized, cannot force populate');
+            return;
+        }
+        
+        try {
+            const allNodes = this.cy.nodes();
+            console.log(`Found ${allNodes.length} nodes in Cytoscape`);
+            
+            if (allNodes.length === 0) {
+                console.error('No nodes in Cytoscape to populate from');
+                return;
+            }
+            
+            this.leads = [];
+            
+            allNodes.forEach((node, index) => {
+                try {
+                    const nodeData = node.data();
+                    console.log(`Force processing node ${index + 1}: ${nodeData.id} (${nodeData.type})`);
+                    
+                    let displayName = nodeData.label || nodeData.name || nodeData.ip || nodeData.id;
+                    if (nodeData.ip) {
+                        displayName = nodeData.ip;
+                    } else if (nodeData.label && nodeData.label.includes('\n')) {
+                        displayName = nodeData.label.split('\n')[0];
+                    }
+                    
+                    const lead = {
+                        id: nodeData.id,
+                        type: nodeData.type || 'unknown',
+                        name: nodeData.name || nodeData.ip || nodeData.label || nodeData.id,
+                        display_name: displayName,
+                        org: nodeData.org || 'Unknown',
+                        country: nodeData.country || 'Unknown',
+                        service_count: 0,
+                        vuln_count: 0,
+                        has_kev: false,
+                        has_critical: false,
+                        poc_count: 0,
+                        ip_count: 0
+                    };
+                    
+                    this.leads.push(lead);
+                    console.log(`✓ Force lead created: ${lead.display_name}`);
+                } catch (error) {
+                    console.error(`Error force processing node ${index}:`, error);
+                }
+            });
+            
+            console.log(`🚨 FORCE POPULATE: Created ${this.leads.length} leads`);
+            this.renderLeadSelector();
+            
+        } catch (error) {
+            console.error('Error in forcePopulateFromCytoscape:', error);
         }
     }
 
