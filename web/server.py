@@ -9,6 +9,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from core.database.storage import DatabaseManager
 from web.api.routes import router as api_router
@@ -20,6 +21,15 @@ def create_app(db_path: str) -> FastAPI:
         title="DetecTI-CLI EASM Dashboard",
         description="Interactive External Attack Surface Management Dashboard",
         version="2.0.0"
+    )
+    
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     
     # Verify database exists

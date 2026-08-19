@@ -31,8 +31,8 @@ async def get_summary(db: DatabaseManager = Depends(get_db_manager)) -> Dict:
                 row = cursor.fetchone()
                 if row:
                     target_name = row[0]
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error getting target name: {e}")
         
         return {
             "target": target_name,
@@ -45,6 +45,7 @@ async def get_summary(db: DatabaseManager = Depends(get_db_manager)) -> Dict:
             "high_epss_count": stats.get("high_epss_count", 0)
         }
     except Exception as e:
+        print(f"Summary API error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get summary: {str(e)}")
 
 

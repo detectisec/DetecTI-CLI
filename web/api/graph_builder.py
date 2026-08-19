@@ -189,65 +189,70 @@ class GraphBuilder:
         nodes = []
         edges = []
         
-        cursor = conn.execute("""
-            SELECT id, ip_id, service_id, cve_id, severity, cvss_score, 
-                   epss_score, is_cisa_kev, description
-            FROM vulnerabilities
-        """)
-        
-        for vuln_id, ip_id, service_id, cve_id, severity, cvss_score, epss_score, is_cisa_kev, description in cursor.fetchall():
-            # Build vulnerability label
-            label = cve_id
-            if cvss_score:
-                label += f"\nCVSS: {cvss_score}"
-            if epss_score:
-                label += f"\nEPSS: {epss_score * 100:.1f}%"
+        try:
+            cursor = conn.execute("""
+                SELECT id, ip_id, service_id, cve_id, severity, cvss_score, 
+                       epss_score, is_cisa_kev, description
+                FROM vulnerabilities
+            """)
             
-            # Determine risk level for styling
-            risk_level = "low"
-            if is_cisa_kev:
-                risk_level = "critical"
-            elif epss_score and epss_score > 0.5:
-                risk_level = "high"
-            elif severity in ["CRITICAL", "HIGH"]:
-                risk_level = "high" if severity == "HIGH" else "critical"
-            elif severity == "MEDIUM":
-                risk_level = "medium"
-            
-            nodes.append({
-                "data": {
-                    "id": f"vuln_{vuln_id}",
-                    "label": label,
-                    "type": "vulnerability",
-                    "cve_id": cve_id,
-                    "severity": severity or "UNKNOWN",
-                    "cvss_score": cvss_score or 0,
-                    "epss_score": epss_score or 0,
-                    "is_cisa_kev": bool(is_cisa_kev),
-                    "risk_level": risk_level,
-                    "description": description or ""
-                }
-            })
-            
-            # Edge from service to vulnerability (if service_id exists)
-            if service_id:
-                edges.append({
+            for row in cursor.fetchall():
+                vuln_id, ip_id, service_id, cve_id, severity, cvss_score, epss_score, is_cisa_kev, description = row
+                
+                # Build vulnerability label
+                label = cve_id or "Unknown CVE"
+                if cvss_score:
+                    label += f"\nCVSS: {cvss_score}"
+                if epss_score:
+                    label += f"\nEPSS: {epss_score * 100:.1f}%"
+                
+                # Determine risk level for styling
+                risk_level = "low"
+                if is_cisa_kev:
+                    risk_level = "critical"
+                elif epss_score and epss_score > 0.5:
+                    risk_level = "high"
+                elif severity in ["CRITICAL", "HIGH"]:
+                    risk_level = "high" if severity == "HIGH" else "critical"
+                elif severity == "MEDIUM":
+                    risk_level = "medium"
+                
+                nodes.append({
                     "data": {
-                        "id": f"e_srv_vuln_{service_id}_{vuln_id}",
-                        "source": f"srv_{service_id}",
-                        "target": f"vuln_{vuln_id}",
-                        "label": "HAS_VULN"
+                        "id": f"vuln_{vuln_id}",
+                        "label": label,
+                        "type": "vulnerability",
+                        "cve_id": cve_id or "Unknown",
+                        "severity": severity or "UNKNOWN",
+                        "cvss_score": cvss_score or 0,
+                        "epss_score": epss_score or 0,
+                        "is_cisa_kev": bool(is_cisa_kev),
+                        "risk_level": risk_level,
+                        "description": description or ""
                     }
                 })
-            # Otherwise connect directly to IP
-            elif ip_id:
-                edges.append({
-                    "data": {
-                        "id": f"e_ip_vuln_{ip_id}_{vuln_id}",
-                        "source": f"ip_{ip_id}",
-                        "target": f"vuln_{vuln_id}",
-                        "label": "HAS_VULN"
-                    }
-                })
+                
+                # Edge from service to vulnerability (if service_id exists)
+                if service_id:
+                    edges.append({
+                        "data": {
+                            "id": f"e_srv_vuln_{service_id}_{vuln_id}",
+                            "source": f"srv_{service_id}",
+                            "target": f"vuln_{vuln_id}",
+                            "label": "HAS_VULN"
+                        }
+                    })
+                # Otherwise connect directly to IP
+                elif ip_id:
+                    edges.append({
+                        "data": {
+                            "id": f"e_ip_vuln_{ip_id}_{vuln_id}",
+                            "source": f"ip_{ip_id}",
+                            "target": f"vuln_{vuln_id}",
+                            "label": "HAS_VULN"
+                        }
+                    })
+        except Exception as e:
+            print(f"Error building vulnerability nodes: {e}")
         
         return nodes, edges

@@ -203,35 +203,59 @@ class DatabaseManager:
         with sqlite3.connect(self.db_path) as conn:
             stats = {}
             
-            # Get target from scan results
-            cursor = conn.execute("SELECT target FROM scan_results ORDER BY created_at DESC LIMIT 1")
-            row = cursor.fetchone()
-            if row:
-                stats['target'] = row[0]
+            try:
+                # Get target from scan results
+                cursor = conn.execute("SELECT target FROM scan_results ORDER BY created_at DESC LIMIT 1")
+                row = cursor.fetchone()
+                if row:
+                    stats['target'] = row[0]
+            except Exception:
+                stats['target'] = "Unknown"
             
-            # Count domains and subdomains
-            cursor = conn.execute("SELECT COUNT(*) FROM domains")
-            stats['total_domains'] = cursor.fetchone()[0]
+            try:
+                # Count domains and subdomains
+                cursor = conn.execute("SELECT COUNT(*) FROM domains")
+                stats['total_domains'] = cursor.fetchone()[0]
+            except Exception:
+                stats['total_domains'] = 0
             
-            cursor = conn.execute("SELECT COUNT(*) FROM subdomains")
-            stats['total_subdomains'] = cursor.fetchone()[0]
+            try:
+                cursor = conn.execute("SELECT COUNT(*) FROM subdomains")
+                stats['total_subdomains'] = cursor.fetchone()[0]
+            except Exception:
+                stats['total_subdomains'] = 0
             
-            # Count IPs and services
-            cursor = conn.execute("SELECT COUNT(*) FROM ip_addresses")
-            stats['total_ips'] = cursor.fetchone()[0]
+            try:
+                # Count IPs and services
+                cursor = conn.execute("SELECT COUNT(*) FROM ip_addresses")
+                stats['total_ips'] = cursor.fetchone()[0]
+            except Exception:
+                stats['total_ips'] = 0
             
-            cursor = conn.execute("SELECT COUNT(*) FROM services")
-            stats['open_services'] = cursor.fetchone()[0]
+            try:
+                cursor = conn.execute("SELECT COUNT(*) FROM services")
+                stats['open_services'] = cursor.fetchone()[0]
+            except Exception:
+                stats['open_services'] = 0
             
-            # Count vulnerabilities
-            cursor = conn.execute("SELECT COUNT(*) FROM vulnerabilities")
-            stats['total_vulnerabilities'] = cursor.fetchone()[0]
+            try:
+                # Count vulnerabilities
+                cursor = conn.execute("SELECT COUNT(*) FROM vulnerabilities")
+                stats['total_vulnerabilities'] = cursor.fetchone()[0]
+            except Exception:
+                stats['total_vulnerabilities'] = 0
             
-            cursor = conn.execute("SELECT COUNT(*) FROM vulnerabilities WHERE is_cisa_kev = 1")
-            stats['cisa_kev_count'] = cursor.fetchone()[0]
+            try:
+                cursor = conn.execute("SELECT COUNT(*) FROM vulnerabilities WHERE is_cisa_kev = 1")
+                stats['cisa_kev_count'] = cursor.fetchone()[0]
+            except Exception:
+                stats['cisa_kev_count'] = 0
             
-            cursor = conn.execute("SELECT COUNT(*) FROM vulnerabilities WHERE epss_score > 0.5")
-            stats['high_epss_count'] = cursor.fetchone()[0]
+            try:
+                cursor = conn.execute("SELECT COUNT(*) FROM vulnerabilities WHERE epss_score > 0.5")
+                stats['high_epss_count'] = cursor.fetchone()[0]
+            except Exception:
+                stats['high_epss_count'] = 0
             
             return stats
 
