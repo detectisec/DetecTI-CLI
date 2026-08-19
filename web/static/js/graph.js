@@ -272,7 +272,7 @@ class EASMDashboard {
                     selector: 'node[type="vulnerability"]',
                     style: {
                         'background-color': '#e74c3c',
-                        'label': 'data(label)',
+                        'label': 'data(cve_id)',
                         'color': '#ffffff',
                         'text-valign': 'center',
                         'text-halign': 'center',
