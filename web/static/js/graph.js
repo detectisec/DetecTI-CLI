@@ -6,6 +6,8 @@ class EASMDashboard {
     constructor() {
         this.cy = null;
         this.graphData = null;
+        this.leads = [];
+        this.selectedLeads = new Set();
         this.filters = {
             kev: false,
             highEpss: false,
@@ -171,6 +173,167 @@ class EASMDashboard {
             console.error('Failed to load summary:', error);
             throw error; // Re-throw to be caught by init()
         }
+    }
+
+    async loadLeads() {
+        try {
+            console.log('Fetching leads data...');
+            this.leads = await window.api.getLeads();
+            console.log('Leads data received:', this.leads);
+            
+            this.renderLeadSelector();
+            
+            console.log('Leads data loaded successfully');
+            
+        } catch (error) {
+            console.error('Failed to load leads:', error);
+            throw error; // Re-throw to be caught by init()
+        }
+    }
+
+    renderLeadSelector() {
+        const leadList = document.getElementById('lead-list');
+        if (!leadList) return;
+
+        if (this.leads.length === 0) {
+            leadList.innerHTML = '<div class="lead-loading">No leads found</div>';
+            return;
+        }
+
+        leadList.innerHTML = '';
+
+        this.leads.forEach(lead => {
+            const leadItem = document.createElement('div');
+            leadItem.className = 'lead-item';
+            leadItem.dataset.leadId = lead.id;
+
+            // Build badges
+            const badges = [];
+            if (lead.vuln_count > 0) {
+                badges.push('<span class="lead-badge cve">CVE</span>');
+            }
+            if (lead.poc_count > 0) {
+                badges.push('<span class="lead-badge poc">PoC</span>');
+            }
+            if (lead.has_kev) {
+                badges.push('<span class="lead-badge kev">KEV</span>');
+            }
+            if (lead.has_critical) {
+                badges.push('<span class="lead-badge critical">CRIT</span>');
+            }
+
+            // Build stats
+            let stats = '';
+            if (lead.type === 'ip') {
+                stats = `${lead.service_count} services, ${lead.vuln_count} vulns`;
+            } else if (lead.type === 'domain') {
+                stats = `${lead.ip_count} IPs, ${lead.service_count} services, ${lead.vuln_count} vulns`;
+            }
+
+            leadItem.innerHTML = `
+                <div class="lead-checkbox"></div>
+                <div class="lead-info">
+                    <div class="lead-name">${lead.display_name}</div>
+                    <div class="lead-type">${lead.type}</div>
+                    <div class="lead-badges">${badges.join('')}</div>
+                    <div class="lead-stats">${stats}</div>
+                </div>
+            `;
+
+            leadItem.addEventListener('click', () => {
+                this.toggleLead(lead.id);
+            });
+
+            leadList.appendChild(leadItem);
+        });
+    }
+
+    toggleLead(leadId) {
+        const leadItem = document.querySelector(`[data-lead-id="${leadId}"]`);
+        if (!leadItem) return;
+
+        if (this.selectedLeads.has(leadId)) {
+            this.selectedLeads.delete(leadId);
+            leadItem.classList.remove('selected');
+        } else {
+            this.selectedLeads.add(leadId);
+            leadItem.classList.add('selected');
+        }
+
+        this.applyLeadFilter();
+    }
+
+    selectAllLeads() {
+        this.leads.forEach(lead => {
+            this.selectedLeads.add(lead.id);
+            const leadItem = document.querySelector(`[data-lead-id="${lead.id}"]`);
+            if (leadItem) {
+                leadItem.classList.add('selected');
+            }
+        });
+        this.applyLeadFilter();
+    }
+
+    deselectAllLeads() {
+        this.selectedLeads.clear();
+        document.querySelectorAll('.lead-item').forEach(item => {
+            item.classList.remove('selected');
+        });
+        this.applyLeadFilter();
+    }
+
+    applyLeadFilter() {
+        if (!this.cy) return;
+
+        // If no leads are selected, hide all nodes
+        if (this.selectedLeads.size === 0) {
+            this.cy.nodes().hide();
+            this.cy.edges().hide();
+            return;
+        }
+
+        // Show all nodes first
+        this.cy.nodes().show();
+        this.cy.edges().show();
+
+        // Get selected lead names
+        const selectedLeadNames = new Set();
+        this.leads.forEach(lead => {
+            if (this.selectedLeads.has(lead.id)) {
+                selectedLeadNames.add(lead.name);
+            }
+        });
+
+        // Hide nodes that don't belong to selected leads
+        this.cy.nodes().forEach(node => {
+            const nodeData = node.data();
+            let shouldShow = false;
+
+            // Check if this node belongs to a selected lead
+            if (nodeData.type === 'ip' && selectedLeadNames.has(nodeData.ip)) {
+                shouldShow = true;
+            } else if ((nodeData.type === 'domain' || nodeData.type === 'subdomain') && selectedLeadNames.has(nodeData.name)) {
+                shouldShow = true;
+            } else {
+                // Check if this node is connected to a selected lead (services, vulnerabilities)
+                const connectedNodes = node.neighborhood().nodes();
+                connectedNodes.forEach(connectedNode => {
+                    const connectedData = connectedNode.data();
+                    if (connectedData.type === 'ip' && selectedLeadNames.has(connectedData.ip)) {
+                        shouldShow = true;
+                    } else if ((connectedData.type === 'domain' || connectedData.type === 'subdomain') && selectedLeadNames.has(connectedData.name)) {
+                        shouldShow = true;
+                    }
+                });
+            }
+
+            if (!shouldShow) {
+                node.hide();
+            }
+        });
+
+        // Apply other filters on top of lead filter
+        this.applyFilters();
     }
 
     initCytoscape() {
@@ -474,6 +637,15 @@ class EASMDashboard {
             this.applyFilters();
         });
 
+        // Lead selector controls
+        document.getElementById('select-all-leads').addEventListener('click', () => {
+            this.selectAllLeads();
+        });
+
+        document.getElementById('deselect-all-leads').addEventListener('click', () => {
+            this.deselectAllLeads();
+        });
+
         // Filter checkboxes
         document.getElementById('filter-kev').addEventListener('change', (e) => {
             this.filters.kev = e.target.checked;
@@ -532,13 +704,17 @@ class EASMDashboard {
     applyFilters() {
         if (!this.cy) return;
 
-        // Show all nodes first
-        this.cy.nodes().show();
-        this.cy.edges().show();
+        // First apply lead filter (this handles showing/hiding based on selected leads)
+        // Only apply other filters if we have visible nodes from lead selection
+        if (this.selectedLeads.size === 0) {
+            return; // Lead filter already hid everything
+        }
 
         // Apply search filter
         if (this.searchTerm) {
             this.cy.nodes().forEach(node => {
+                if (node.hidden()) return; // Skip already hidden nodes
+                
                 const data = node.data();
                 const searchableText = [
                     data.label,
@@ -561,6 +737,8 @@ class EASMDashboard {
         // Apply subdomain-only filter
         if (this.filters.subdomainsOnly) {
             this.cy.nodes().forEach(node => {
+                if (node.hidden()) return; // Skip already hidden nodes
+                
                 const nodeType = node.data('type');
                 if (!['subdomain', 'domain'].includes(nodeType)) {
                     node.hide();
@@ -573,6 +751,8 @@ class EASMDashboard {
         
         if (hasVulnFilters) {
             this.cy.nodes('[type="vulnerability"]').forEach(node => {
+                if (node.hidden()) return; // Skip already hidden nodes
+                
                 let shouldShow = false;
                 
                 // Check CISA KEV filter

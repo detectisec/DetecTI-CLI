@@ -60,6 +60,89 @@ async def get_graph_data(db: DatabaseManager = Depends(get_db_manager)) -> Dict:
         raise HTTPException(status_code=500, detail=f"Failed to build graph: {str(e)}")
 
 
+@router.get("/leads")
+async def get_leads(db: DatabaseManager = Depends(get_db_manager)) -> List[Dict]:
+    """Get lead targets (IPs and domains) with vulnerability indicators for the Lead Selector."""
+    try:
+        import sqlite3
+        leads = []
+        
+        with sqlite3.connect(db.db_path) as conn:
+            # Get all IPs with their vulnerability indicators
+            cursor = conn.execute("""
+                SELECT 
+                    ip.ip,
+                    ip.org,
+                    ip.country,
+                    COUNT(DISTINCT s.id) as service_count,
+                    COUNT(DISTINCT v.id) as vuln_count,
+                    MAX(CASE WHEN v.is_cisa_kev = 1 THEN 1 ELSE 0 END) as has_kev,
+                    MAX(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END) as has_critical,
+                    SUM(CASE WHEN v.exploit_count > 0 THEN 1 ELSE 0 END) as poc_count
+                FROM ip_addresses ip
+                LEFT JOIN services s ON ip.id = s.ip_id
+                LEFT JOIN vulnerabilities v ON ip.id = v.ip_id
+                GROUP BY ip.id, ip.ip, ip.org, ip.country
+                ORDER BY has_kev DESC, has_critical DESC, vuln_count DESC, service_count DESC
+            """)
+            
+            for row in cursor.fetchall():
+                leads.append({
+                    "id": f"ip_{row[0]}",
+                    "type": "ip",
+                    "name": row[0],
+                    "display_name": row[0],
+                    "org": row[1] or "Unknown",
+                    "country": row[2] or "Unknown",
+                    "service_count": row[3],
+                    "vuln_count": row[4],
+                    "has_kev": bool(row[5]),
+                    "has_critical": bool(row[6]),
+                    "poc_count": row[7] or 0
+                })
+            
+            # Get all domains with their vulnerability indicators
+            cursor = conn.execute("""
+                SELECT DISTINCT
+                    d.name,
+                    COUNT(DISTINCT ip.id) as ip_count,
+                    COUNT(DISTINCT s.id) as service_count,
+                    COUNT(DISTINCT v.id) as vuln_count,
+                    MAX(CASE WHEN v.is_cisa_kev = 1 THEN 1 ELSE 0 END) as has_kev,
+                    MAX(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END) as has_critical,
+                    SUM(CASE WHEN v.exploit_count > 0 THEN 1 ELSE 0 END) as poc_count
+                FROM domains d
+                LEFT JOIN subdomains sd ON d.id = sd.domain_id
+                LEFT JOIN ip_addresses ip ON sd.ip_id = ip.id OR d.ip_id = ip.id
+                LEFT JOIN services s ON ip.id = s.ip_id
+                LEFT JOIN vulnerabilities v ON ip.id = v.ip_id
+                WHERE d.name NOT LIKE '%.%' OR d.name IN (
+                    SELECT DISTINCT domain_name FROM subdomains WHERE domain_name = d.name
+                )
+                GROUP BY d.id, d.name
+                HAVING ip_count > 0
+                ORDER BY has_kev DESC, has_critical DESC, vuln_count DESC, service_count DESC
+            """)
+            
+            for row in cursor.fetchall():
+                leads.append({
+                    "id": f"domain_{row[0]}",
+                    "type": "domain",
+                    "name": row[0],
+                    "display_name": row[0],
+                    "ip_count": row[1],
+                    "service_count": row[2],
+                    "vuln_count": row[3],
+                    "has_kev": bool(row[4]),
+                    "has_critical": bool(row[5]),
+                    "poc_count": row[6] or 0
+                })
+        
+        return leads
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get leads: {str(e)}")
+
+
 @router.get("/assets")
 async def get_assets(db: DatabaseManager = Depends(get_db_manager)) -> List[Dict]:
     """Get detailed asset list for tabular view."""
