@@ -1,8 +1,21 @@
 """Unit tests for ThreatTrack Engine and Typer CLI."""
 
+import sys
+from pathlib import Path
 import pytest
 from typer.testing import CliRunner
-from cli import app
+
+# Add the project root to sys.path to import the CLI module
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Import the CLI app from the detecti-cli file
+import importlib.util
+cli_path = Path(__file__).parent.parent / "detecti-cli"
+spec = importlib.util.spec_from_file_location("detecti_cli", cli_path)
+detecti_cli = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(detecti_cli)
+app = detecti_cli.app
+
 from core.engine import ThreatTrackEngine, DetectIEngine
 from core.models import Finding, FindingType, PortData
 
