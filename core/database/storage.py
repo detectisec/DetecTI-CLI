@@ -122,7 +122,7 @@ class DatabaseManager:
         return service_ids
 
     def _store_vulnerabilities(self, conn: sqlite3.Connection, ip_id: str, host: HostResult, service_ids: Dict[str, str]) -> None:
-        """Store vulnerabilities for a host."""
+        """Store vulnerabilities for a host, linking to services when possible."""
         for vuln in host.vulnerabilities:
             vuln_id = str(uuid.uuid4())
             
@@ -135,13 +135,50 @@ class DatabaseManager:
             epss_score = vuln.epss.epss_score if vuln.epss else None
             epss_percentile = vuln.epss.epss_percentile if vuln.epss else None
             
+            # Try to associate vulnerability with a specific service
+            # This creates the HOST -> Service -> Vulnerability relationship
+            service_id = None
+            
+            # Look for service associations based on vulnerability metadata
+            # This could be enhanced with more sophisticated matching logic
+            if hasattr(vuln, 'metadata') and vuln.metadata:
+                # Check if vulnerability metadata contains port information
+                vuln_port = vuln.metadata.get('port')
+                if vuln_port:
+                    # Find matching service by port
+                    for port_key, sid in service_ids.items():
+                        if str(vuln_port) in port_key:
+                            service_id = sid
+                            break
+            
+            # If no specific service match, try to associate with common vulnerable services
+            if not service_id and service_ids:
+                # For web vulnerabilities, associate with HTTP/HTTPS services
+                if any(keyword in (vuln.description or "").lower() for keyword in ["web", "http", "ssl", "tls", "apache", "nginx", "iis"]):
+                    # Find HTTP/HTTPS service
+                    for port_key, sid in service_ids.items():
+                        if any(port in port_key for port in ["80/", "443/", "8080/", "8443/"]):
+                            service_id = sid
+                            break
+                
+                # For SSH vulnerabilities, associate with SSH service
+                elif any(keyword in (vuln.description or "").lower() for keyword in ["ssh", "openssh"]):
+                    for port_key, sid in service_ids.items():
+                        if "22/" in port_key:
+                            service_id = sid
+                            break
+                
+                # For other cases, associate with the first available service if only one exists
+                elif len(service_ids) == 1:
+                    service_id = list(service_ids.values())[0]
+            
             conn.execute("""
                 INSERT INTO vulnerabilities (
-                    id, ip_id, cve_id, severity, cvss_score, cvss_version, description,
+                    id, ip_id, service_id, cve_id, severity, cvss_score, cvss_version, description,
                     cwe_id, cwe_name, epss_score, epss_percentile, is_cisa_kev, cisa_kev_data
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                vuln_id, ip_id, vuln.cve_id, vuln.cvss_severity.value,
+                vuln_id, ip_id, service_id, vuln.cve_id, vuln.cvss_severity.value,
                 vuln.cvss_score, vuln.cvss_version, vuln.description,
                 vuln.cwe_id, vuln.cwe_name, epss_score, epss_percentile,
                 vuln.in_cisa_kev, cisa_kev_json

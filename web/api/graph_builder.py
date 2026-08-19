@@ -185,7 +185,7 @@ class GraphBuilder:
         return nodes, edges
     
     def _build_vulnerability_nodes(self, conn: sqlite3.Connection) -> tuple[List[Dict], List[Dict]]:
-        """Build vulnerability nodes with risk indicators."""
+        """Build vulnerability nodes with risk indicators, prioritizing service-level associations."""
         nodes = []
         edges = []
         
@@ -232,7 +232,8 @@ class GraphBuilder:
                     }
                 })
                 
-                # Edge from service to vulnerability (if service_id exists)
+                # ALWAYS prioritize service-level connection if service_id exists
+                # This creates the HOST -> Service -> Vulnerability chain
                 if service_id:
                     edges.append({
                         "data": {
@@ -242,7 +243,7 @@ class GraphBuilder:
                             "label": "HAS_VULN"
                         }
                     })
-                # Otherwise connect directly to IP
+                # Only connect directly to IP if no service association exists
                 elif ip_id:
                     edges.append({
                         "data": {
