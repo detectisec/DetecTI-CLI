@@ -228,6 +228,7 @@ class EASMDashboard {
                 const nodeData = node.data || node;
                 const nodeType = nodeData.type;
                 console.log(`Checking node: ${nodeData.id} (type: ${nodeType})`);
+                console.log('Full node data:', nodeData);
                 const isLead = ['ip', 'domain', 'subdomain'].includes(nodeType);
                 if (isLead) {
                     console.log(`✓ FOUND LEAD: ${nodeData.id} (${nodeType})`);
@@ -235,13 +236,51 @@ class EASMDashboard {
                 return isLead;
             });
             
+            // FALLBACK: If no leads found with standard types, try to find ANY node that could be a lead
+            if (leadNodes.length === 0) {
+                console.warn('No standard leads found, trying fallback approach...');
+                const fallbackLeads = elements.nodes.filter(node => {
+                    const nodeData = node.data || node;
+                    // Look for nodes that have IP addresses or domain-like names
+                    const hasIp = nodeData.ip || (nodeData.label && /\d+\.\d+\.\d+\.\d+/.test(nodeData.label));
+                    const hasDomain = nodeData.name && /[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(nodeData.name);
+                    const isLikelyLead = hasIp || hasDomain || nodeData.type === 'host';
+                    
+                    if (isLikelyLead) {
+                        console.log(`✓ FALLBACK LEAD FOUND: ${nodeData.id} (${nodeData.type}) - IP: ${hasIp}, Domain: ${hasDomain}`);
+                    }
+                    return isLikelyLead;
+                });
+                
+                if (fallbackLeads.length > 0) {
+                    leadNodes.push(...fallbackLeads);
+                    console.log(`Added ${fallbackLeads.length} fallback leads`);
+                }
+            }
+            
             console.log(`Found ${leadNodes.length} potential lead nodes out of ${elements.nodes.length} total nodes`);
             console.log('All node types:', elements.nodes.map(n => (n.data || n).type).filter((v, i, a) => a.indexOf(v) === i));
             console.log('Lead nodes found:', leadNodes.map(n => ({id: (n.data || n).id, type: (n.data || n).type})));
             
             if (leadNodes.length === 0) {
                 console.error('NO LEAD NODES FOUND!');
-                leadList.innerHTML = '<div class="lead-loading">No lead nodes found in graph (IP/domain/subdomain)</div>';
+                console.error('Available node types:', elements.nodes.map(n => (n.data || n).type));
+                console.error('Sample nodes:', elements.nodes.slice(0, 5).map(n => ({
+                    id: (n.data || n).id,
+                    type: (n.data || n).type,
+                    label: (n.data || n).label,
+                    name: (n.data || n).name,
+                    ip: (n.data || n).ip
+                })));
+                
+                // Show a more helpful error message
+                leadList.innerHTML = `
+                    <div class="lead-loading" style="color: #ff4757;">
+                        No lead nodes found!<br>
+                        <small>Available types: ${elements.nodes.map(n => (n.data || n).type).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</small><br>
+                        <button onclick="location.reload()" style="margin-top: 10px; padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer;">Reload Page</button>
+                    </div>
+                `;
                 return;
             }
             
@@ -267,12 +306,19 @@ class EASMDashboard {
                     const serviceCount = connectedServices.length;
                     console.log(`  Found ${serviceCount} services`);
                     
-                    // Create lead object
+                    // Create lead object with better display name handling
+                    let displayName = nodeData.label || nodeData.name || nodeData.ip || nodeData.id;
+                    
+                    // Clean up display name for IPs (remove org/country from label for display)
+                    if (nodeData.type === 'ip' && nodeData.ip) {
+                        displayName = nodeData.ip;
+                    }
+                    
                     const lead = {
                         id: nodeData.id,
-                        type: nodeData.type,
-                        name: nodeData.name || nodeData.ip || nodeData.label,
-                        display_name: nodeData.label || nodeData.name || nodeData.ip,
+                        type: nodeData.type || 'unknown',
+                        name: nodeData.name || nodeData.ip || nodeData.label || nodeData.id,
+                        display_name: displayName,
                         org: nodeData.org || 'Unknown',
                         country: nodeData.country || 'Unknown',
                         service_count: serviceCount,
@@ -289,6 +335,37 @@ class EASMDashboard {
                     console.error(`Error processing lead node ${index}:`, error);
                 }
             });
+            
+            // EMERGENCY FALLBACK: If still no leads, create leads from ALL nodes
+            if (this.leads.length === 0) {
+                console.warn('EMERGENCY FALLBACK: Creating leads from all available nodes...');
+                elements.nodes.forEach((node, index) => {
+                    try {
+                        const nodeData = node.data || node;
+                        console.log(`Emergency lead ${index + 1}: ${nodeData.id} (${nodeData.type})`);
+                        
+                        const lead = {
+                            id: nodeData.id,
+                            type: nodeData.type || 'unknown',
+                            name: nodeData.name || nodeData.ip || nodeData.label || nodeData.id,
+                            display_name: nodeData.label || nodeData.name || nodeData.ip || nodeData.id,
+                            org: nodeData.org || 'Unknown',
+                            country: nodeData.country || 'Unknown',
+                            service_count: 0,
+                            vuln_count: 0,
+                            has_kev: false,
+                            has_critical: false,
+                            poc_count: 0,
+                            ip_count: 0
+                        };
+                        
+                        this.leads.push(lead);
+                        console.log(`✓ Emergency lead created: ${lead.display_name}`);
+                    } catch (error) {
+                        console.error(`Error creating emergency lead ${index}:`, error);
+                    }
+                });
+            }
             
             console.log(`✓ Created ${this.leads.length} leads total`);
             console.log('=== LEAD SELECTOR DEBUG END ===');
@@ -462,7 +539,16 @@ class EASMDashboard {
 
         if (this.leads.length === 0) {
             console.warn('No leads to render');
-            leadList.innerHTML = '<div class="lead-loading">No leads found in database</div>';
+            leadList.innerHTML = `
+                <div class="lead-loading" style="color: #ff4757;">
+                    No leads found in database<br>
+                    <small>This might indicate a data loading issue</small><br>
+                    <button onclick="window.dashboard.populateLeadSelector(window.dashboard.graphData?.elements)" 
+                            style="margin-top: 10px; padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer;">
+                        Retry Loading Leads
+                    </button>
+                </div>
+            `;
             return;
         }
 
