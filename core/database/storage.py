@@ -69,9 +69,10 @@ class DatabaseManager:
         """, (ip_id, host.ip, host.asn, host.org, host.country_name, host.city, host.region_code))
         return ip_id
 
-    def _store_subdomains(self, conn: sqlite3.Connection, findings: List[Finding]) -> None:
-        """Store subdomain findings in database."""
+    def _store_subdomains(self, conn: sqlite3.Connection, findings: List[Finding]) -> Dict[str, str]:
+        """Store subdomain findings in database and return subdomain_name -> subdomain_id mapping."""
         subdomain_findings = [f for f in findings if f.type == FindingType.SUBDOMAIN]
+        subdomain_map = {}
         
         for finding in subdomain_findings:
             # Extract domain from subdomain
@@ -87,12 +88,18 @@ class DatabaseManager:
                         "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
                         (domain_id, subdomain)
                     )
-                    if not cursor.fetchone():
+                    row = cursor.fetchone()
+                    if row:
+                        subdomain_map[subdomain] = row[0]
+                    else:
                         subdomain_id = str(uuid.uuid4())
                         conn.execute("""
                             INSERT INTO subdomains (id, domain_id, name)
                             VALUES (?, ?, ?)
                         """, (subdomain_id, domain_id, subdomain))
+                        subdomain_map[subdomain] = subdomain_id
+        
+        return subdomain_map
 
     def _store_services(self, conn: sqlite3.Connection, ip_id: str, host: HostResult) -> Dict[str, str]:
         """Store services for a host and return service_id mapping."""
@@ -168,12 +175,24 @@ class DatabaseManager:
                 result.elapsed_seconds, modules_json, len(result.findings), len(result.hosts)
             ))
             
-            # Store subdomain findings
-            self._store_subdomains(conn, result.findings)
+            # Store subdomain findings and get mapping
+            subdomain_map = self._store_subdomains(conn, result.findings)
             
-            # Store host data
+            # Store host data and create subdomain-IP mappings
+            ip_map = {}  # hostname -> ip_id mapping
             for host in result.hosts:
                 ip_id = self._get_or_create_ip(conn, host)
+                ip_map[host.ip] = ip_id
+                
+                # Map hostnames to this IP
+                for hostname in host.hostnames:
+                    if hostname in subdomain_map:
+                        # Create subdomain-IP mapping
+                        conn.execute("""
+                            INSERT OR IGNORE INTO subdomain_ips (subdomain_id, ip_id)
+                            VALUES (?, ?)
+                        """, (subdomain_map[hostname], ip_id))
+                
                 service_ids = self._store_services(conn, ip_id, host)
                 self._store_vulnerabilities(conn, ip_id, host, service_ids)
             

@@ -1,0 +1,431 @@
+/* DetecTI-CLI EASM Dashboard Styles */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #0a0a0a;
+    color: #e0e0e0;
+    overflow: hidden;
+}
+
+.dashboard-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* Header */
+.dashboard-header {
+    background: linear-gradient(135deg, #1a1a2e, #16213e);
+    border-bottom: 2px solid #00d4ff;
+    padding: 1rem 2rem;
+    box-shadow: 0 2px 10px rgba(0, 212, 255, 0.3);
+}
+
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.dashboard-header h1 {
+    color: #00d4ff;
+    font-size: 1.8rem;
+    font-weight: 600;
+}
+
+.target-info {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+#target-name {
+    font-size: 1.2rem;
+    font-weight: 500;
+    color: #ffffff;
+}
+
+.db-info {
+    font-size: 0.9rem;
+    color: #888;
+}
+
+/* Main Layout */
+.dashboard-main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Sidebar */
+.sidebar {
+    width: 320px;
+    background: #111111;
+    border-right: 1px solid #333;
+    padding: 1.5rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.panel {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+
+.panel h3 {
+    color: #00d4ff;
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+    border-bottom: 1px solid #333;
+    padding-bottom: 0.5rem;
+}
+
+/* Metrics Panel */
+.metric-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.metric-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1rem;
+    background: #222;
+    border-radius: 6px;
+    border: 1px solid #444;
+    transition: all 0.3s ease;
+}
+
+.metric-item:hover {
+    border-color: #00d4ff;
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+}
+
+.metric-item.critical {
+    border-color: #ff4757;
+}
+
+.metric-item.critical:hover {
+    box-shadow: 0 0 10px rgba(255, 71, 87, 0.3);
+}
+
+.metric-value {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #00d4ff;
+}
+
+.metric-item.critical .metric-value {
+    color: #ff4757;
+}
+
+.metric-label {
+    font-size: 0.85rem;
+    color: #aaa;
+    text-align: center;
+}
+
+/* Filters Panel */
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+
+.filter-checkbox {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    font-size: 0.95rem;
+    color: #ddd;
+    transition: color 0.3s ease;
+}
+
+.filter-checkbox:hover {
+    color: #00d4ff;
+}
+
+.filter-checkbox input[type="checkbox"] {
+    display: none;
+}
+
+.checkmark {
+    width: 18px;
+    height: 18px;
+    background: #333;
+    border: 2px solid #555;
+    border-radius: 3px;
+    margin-right: 0.8rem;
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+.filter-checkbox input[type="checkbox"]:checked + .checkmark {
+    background: #00d4ff;
+    border-color: #00d4ff;
+}
+
+.filter-checkbox input[type="checkbox"]:checked + .checkmark::after {
+    content: '✓';
+    position: absolute;
+    top: -2px;
+    left: 2px;
+    color: #000;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+/* Controls Panel */
+.control-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    margin-bottom: 1rem;
+}
+
+.control-btn {
+    background: #333;
+    border: 1px solid #555;
+    color: #ddd;
+    padding: 0.8rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+}
+
+.control-btn:hover {
+    background: #00d4ff;
+    color: #000;
+    border-color: #00d4ff;
+}
+
+.layout-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.layout-selector label {
+    color: #aaa;
+    font-size: 0.9rem;
+}
+
+.layout-selector select {
+    background: #333;
+    border: 1px solid #555;
+    color: #ddd;
+    padding: 0.6rem;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+/* Graph Container */
+.graph-container {
+    flex: 1;
+    position: relative;
+    background: #0f0f0f;
+}
+
+.cytoscape-graph {
+    width: 100%;
+    height: 100%;
+}
+
+.graph-loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    color: #00d4ff;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #333;
+    border-top: 4px solid #00d4ff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Inspector Drawer */
+.inspector-drawer {
+    position: fixed;
+    right: -400px;
+    top: 0;
+    width: 400px;
+    height: 100vh;
+    background: #111;
+    border-left: 2px solid #00d4ff;
+    box-shadow: -5px 0 20px rgba(0, 0, 0, 0.5);
+    transition: right 0.3s ease;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+}
+
+.inspector-drawer.open {
+    right: 0;
+}
+
+.inspector-header {
+    background: #1a1a2e;
+    padding: 1.5rem;
+    border-bottom: 1px solid #333;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.inspector-header h3 {
+    color: #00d4ff;
+    margin: 0;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    color: #aaa;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 4px;
+    transition: all 0.3s ease;
+}
+
+.close-btn:hover {
+    background: #333;
+    color: #fff;
+}
+
+.inspector-content {
+    flex: 1;
+    padding: 1.5rem;
+    overflow-y: auto;
+    color: #ddd;
+    line-height: 1.6;
+}
+
+.inspector-content h4 {
+    color: #00d4ff;
+    margin: 1rem 0 0.5rem 0;
+    border-bottom: 1px solid #333;
+    padding-bottom: 0.3rem;
+}
+
+.inspector-content .property {
+    display: flex;
+    justify-content: space-between;
+    margin: 0.5rem 0;
+    padding: 0.5rem;
+    background: #1a1a1a;
+    border-radius: 4px;
+}
+
+.inspector-content .property .key {
+    color: #aaa;
+    font-weight: 500;
+}
+
+.inspector-content .property .value {
+    color: #fff;
+    font-family: 'Courier New', monospace;
+}
+
+.inspector-content .vulnerability-badge {
+    display: inline-block;
+    padding: 0.3rem 0.8rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: bold;
+    margin: 0.2rem;
+}
+
+.vulnerability-badge.critical {
+    background: #ff4757;
+    color: #fff;
+}
+
+.vulnerability-badge.high {
+    background: #ff6b35;
+    color: #fff;
+}
+
+.vulnerability-badge.medium {
+    background: #ffa502;
+    color: #000;
+}
+
+.vulnerability-badge.low {
+    background: #2ed573;
+    color: #000;
+}
+
+.vulnerability-badge.kev {
+    background: #ff3838;
+    color: #fff;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(255, 56, 56, 0.7); }
+    70% { box-shadow: 0 0 0 10px rgba(255, 56, 56, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 56, 56, 0); }
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+    .sidebar {
+        width: 280px;
+    }
+    
+    .inspector-drawer {
+        width: 350px;
+        right: -350px;
+    }
+}
+
+@media (max-width: 768px) {
+    .dashboard-main {
+        flex-direction: column;
+    }
+    
+    .sidebar {
+        width: 100%;
+        height: auto;
+        max-height: 40vh;
+        border-right: none;
+        border-bottom: 1px solid #333;
+    }
+    
+    .metric-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    
+    .inspector-drawer {
+        width: 100%;
+        right: -100%;
+    }
+}
