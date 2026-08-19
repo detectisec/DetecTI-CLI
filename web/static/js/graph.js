@@ -63,7 +63,13 @@ class EASMDashboard {
                 return {
                     ...baseOptions,
                     directed: true,
-                    spacingFactor: 1.75
+                    spacingFactor: 1.75,
+                    roots: function(nodes) {
+                        // Use domain and IP nodes as roots for hierarchical layout
+                        return nodes.filter(function(node) {
+                            return node.data('type') === 'domain' || node.data('type') === 'ip';
+                        });
+                    }
                 };
             case 'concentric':
                 return {
@@ -315,12 +321,23 @@ class EASMDashboard {
                     }
                 },
                 
-                // Vulnerability edges (red)
+                // Vulnerability edges (red) - thicker to emphasize the service->vuln relationship
                 {
                     selector: 'edge[label="HAS_VULN"]',
                     style: {
                         'line-color': '#e74c3c',
                         'target-arrow-color': '#e74c3c',
+                        'width': '4px',
+                        'line-style': 'solid'
+                    }
+                },
+                
+                // Service exposure edges (orange)
+                {
+                    selector: 'edge[label="EXPOSES"]',
+                    style: {
+                        'line-color': '#f39c12',
+                        'target-arrow-color': '#f39c12',
                         'width': '3px'
                     }
                 },
@@ -574,12 +591,25 @@ class EASMDashboard {
             const kevBadge = data.is_cisa_kev === 'true' ? '<span class="vulnerability-badge kev">CISA KEV</span>' : '';
             const severityClass = (data.severity || 'unknown').toLowerCase();
             
+            // Find connected service to show the relationship
+            const connectedService = this.cy.edges(`[target="${data.id}"][label="HAS_VULN"]`).source();
+            let serviceInfo = '';
+            if (connectedService.length > 0) {
+                const serviceData = connectedService.data();
+                serviceInfo = `
+                <div class="property">
+                    <span class="key">Affected Service:</span>
+                    <span class="value">${serviceData.port}/${serviceData.protocol} (${serviceData.service || 'Unknown'})</span>
+                </div>`;
+            }
+            
             html = `
                 <h4>Vulnerability Details</h4>
                 <div class="property">
                     <span class="key">CVE ID:</span>
                     <span class="value">${data.cve_id}</span>
                 </div>
+                ${serviceInfo}
                 <div class="property">
                     <span class="key">Severity:</span>
                     <span class="value">
