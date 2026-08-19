@@ -303,7 +303,7 @@ def start_server(
         help="Port for the HTTP server",
     ),
     host: str = typer.Option(
-        "127.0.0.1",
+        "0.0.0.0",
         "--host",
         "-h",
         help="Host binding address",

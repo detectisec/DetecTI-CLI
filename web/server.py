@@ -93,7 +93,7 @@ def main():
     
     parser = argparse.ArgumentParser(description="DetecTI-CLI Web Server")
     parser.add_argument("--db-path", required=True, help="Path to SQLite database")
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
     
     args = parser.parse_args()
