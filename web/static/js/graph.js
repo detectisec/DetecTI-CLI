@@ -185,13 +185,24 @@ class EASMDashboard {
             this.leads = await window.api.getLeads();
             console.log('Leads data received:', this.leads);
             
+            // Always render the lead selector, even if empty
             this.renderLeadSelector();
             
             console.log('Leads data loaded successfully');
             
         } catch (error) {
             console.error('Failed to load leads:', error);
-            throw error; // Re-throw to be caught by init()
+            
+            // Show error in lead selector instead of throwing
+            const leadList = document.getElementById('lead-list');
+            if (leadList) {
+                leadList.innerHTML = `
+                    <div class="lead-loading" style="color: #ff4757;">
+                        ⚠️ Error loading leads: ${error.message}
+                        <br><small>Check console for details</small>
+                    </div>
+                `;
+            }
         }
     }
 

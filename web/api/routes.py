@@ -68,17 +68,19 @@ async def get_leads(db: DatabaseManager = Depends(get_db_manager)) -> List[Dict]
         leads = []
         
         with sqlite3.connect(db.db_path) as conn:
-            # Get all IPs with their vulnerability indicators
+            conn.row_factory = sqlite3.Row  # Enable column access by name
+            
+            # First, get all IPs with their vulnerability indicators
             cursor = conn.execute("""
                 SELECT 
                     ip.ip,
-                    ip.org,
-                    ip.country,
+                    COALESCE(ip.org, 'Unknown') as org,
+                    COALESCE(ip.country, 'Unknown') as country,
                     COUNT(DISTINCT s.id) as service_count,
                     COUNT(DISTINCT v.id) as vuln_count,
                     MAX(CASE WHEN v.is_cisa_kev = 1 THEN 1 ELSE 0 END) as has_kev,
                     MAX(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END) as has_critical,
-                    SUM(CASE WHEN v.exploit_count > 0 THEN 1 ELSE 0 END) as poc_count
+                    COALESCE(SUM(CASE WHEN v.exploit_count > 0 THEN 1 ELSE 0 END), 0) as poc_count
                 FROM ip_addresses ip
                 LEFT JOIN services s ON ip.id = s.ip_id
                 LEFT JOIN vulnerabilities v ON ip.id = v.ip_id
@@ -86,22 +88,27 @@ async def get_leads(db: DatabaseManager = Depends(get_db_manager)) -> List[Dict]
                 ORDER BY has_kev DESC, has_critical DESC, vuln_count DESC, service_count DESC
             """)
             
-            for row in cursor.fetchall():
-                leads.append({
-                    "id": f"ip_{row[0]}",
-                    "type": "ip",
-                    "name": row[0],
-                    "display_name": row[0],
-                    "org": row[1] or "Unknown",
-                    "country": row[2] or "Unknown",
-                    "service_count": row[3],
-                    "vuln_count": row[4],
-                    "has_kev": bool(row[5]),
-                    "has_critical": bool(row[6]),
-                    "poc_count": row[7] or 0
-                })
+            rows = cursor.fetchall()
+            print(f"Found {len(rows)} IP addresses")
             
-            # Get all domains with their vulnerability indicators
+            for row in rows:
+                lead = {
+                    "id": f"ip_{row['ip']}",
+                    "type": "ip",
+                    "name": row['ip'],
+                    "display_name": row['ip'],
+                    "org": row['org'],
+                    "country": row['country'],
+                    "service_count": row['service_count'],
+                    "vuln_count": row['vuln_count'],
+                    "has_kev": bool(row['has_kev']),
+                    "has_critical": bool(row['has_critical']),
+                    "poc_count": row['poc_count']
+                }
+                leads.append(lead)
+                print(f"Added IP lead: {lead}")
+            
+            # Then get all domains with their vulnerability indicators
             cursor = conn.execute("""
                 SELECT DISTINCT
                     d.name,
@@ -110,33 +117,44 @@ async def get_leads(db: DatabaseManager = Depends(get_db_manager)) -> List[Dict]
                     COUNT(DISTINCT v.id) as vuln_count,
                     MAX(CASE WHEN v.is_cisa_kev = 1 THEN 1 ELSE 0 END) as has_kev,
                     MAX(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END) as has_critical,
-                    SUM(CASE WHEN v.exploit_count > 0 THEN 1 ELSE 0 END) as poc_count
+                    COALESCE(SUM(CASE WHEN v.exploit_count > 0 THEN 1 ELSE 0 END), 0) as poc_count
                 FROM domains d
                 LEFT JOIN subdomains sd ON d.id = sd.domain_id
                 LEFT JOIN ip_addresses ip ON sd.ip_id = ip.id OR d.ip_id = ip.id
                 LEFT JOIN services s ON ip.id = s.ip_id
                 LEFT JOIN vulnerabilities v ON ip.id = v.ip_id
+                WHERE d.name IS NOT NULL
                 GROUP BY d.id, d.name
                 HAVING COUNT(DISTINCT ip.id) > 0
                 ORDER BY has_kev DESC, has_critical DESC, vuln_count DESC, service_count DESC
             """)
             
-            for row in cursor.fetchall():
-                leads.append({
-                    "id": f"domain_{row[0]}",
+            domain_rows = cursor.fetchall()
+            print(f"Found {len(domain_rows)} domains")
+            
+            for row in domain_rows:
+                lead = {
+                    "id": f"domain_{row['name']}",
                     "type": "domain",
-                    "name": row[0],
-                    "display_name": row[0],
-                    "ip_count": row[1],
-                    "service_count": row[2],
-                    "vuln_count": row[3],
-                    "has_kev": bool(row[4]),
-                    "has_critical": bool(row[5]),
-                    "poc_count": row[6] or 0
-                })
+                    "name": row['name'],
+                    "display_name": row['name'],
+                    "ip_count": row['ip_count'],
+                    "service_count": row['service_count'],
+                    "vuln_count": row['vuln_count'],
+                    "has_kev": bool(row['has_kev']),
+                    "has_critical": bool(row['has_critical']),
+                    "poc_count": row['poc_count']
+                }
+                leads.append(lead)
+                print(f"Added domain lead: {lead}")
         
+        print(f"Returning {len(leads)} total leads")
         return leads
+        
     except Exception as e:
+        print(f"Error in get_leads: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to get leads: {str(e)}")
 
 
