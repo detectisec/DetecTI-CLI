@@ -127,5 +127,28 @@
 
     <script src="/static/js/api.js"></script>
     <script src="/static/js/graph.js"></script>
+    
+    <script>
+        // Debug logging
+        console.log('DetecTI-CLI Dashboard loaded');
+        console.log('Cytoscape available:', typeof cytoscape !== 'undefined');
+        console.log('Current URL:', window.location.href);
+        
+        // Check if all required elements exist
+        document.addEventListener('DOMContentLoaded', () => {
+            const requiredElements = [
+                'target-name', 'domains-count', 'subdomains-count', 
+                'ips-count', 'services-count', 'vulns-count', 'kev-count',
+                'cy', 'graph-loading'
+            ];
+            
+            requiredElements.forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) {
+                    console.error(`Required element missing: ${id}`);
+                }
+            });
+        });
+    </script>
 </body>
 </html>

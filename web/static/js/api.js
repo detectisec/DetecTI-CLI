@@ -11,19 +11,27 @@ class APIClient {
         const url = `${this.baseURL}${endpoint}`;
         
         try {
+            console.log(`Making API request to: ${url}`);
+            
             const response = await fetch(url, {
                 headers: {
-                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
                     ...options.headers
                 },
                 ...options
             });
 
+            console.log(`API response status: ${response.status}`);
+
             if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`API error response: ${errorText}`);
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
 
-            return await response.json();
+            const data = await response.json();
+            console.log(`API response data:`, data);
+            return data;
         } catch (error) {
             console.error(`API request failed: ${endpoint}`, error);
             throw error;
