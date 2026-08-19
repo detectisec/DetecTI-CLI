@@ -288,16 +288,22 @@ class CensysModule(BaseModule):
                 raise CensysAuthError(f"Authentication failed for IP {ip}: HTTP {resp.status_code}")
             elif resp.status_code == 422:
                 # Check if it's a quota exhaustion error first
+                is_quota_exhausted = False
                 try:
                     error_data = resp.json()
                     if isinstance(error_data, dict) and "errors" in error_data:
                         for error in error_data.get("errors", []):
                             if isinstance(error, dict) and "insufficient balance" in error.get("message", "").lower():
+                                is_quota_exhausted = True
                                 raise CensysQuotaExhaustedError(f"API quota exhausted for IP {ip}")
+                except CensysQuotaExhaustedError:
+                    raise  # Re-raise quota exhaustion error
                 except Exception:
                     pass  # If we can't parse the error, treat it as a regular validation error
                 
-                logger.error(f"Censys validation error (422) for host {ip}: {resp.text}")
+                # Only log if it's not a quota exhaustion error
+                if not is_quota_exhausted:
+                    logger.error(f"Censys validation error (422) for host {ip}: {resp.text}")
                 raise CensysAPIError(f"Validation error for IP {ip}: {resp.text}")
             elif resp.status_code == 429:
                 logger.warning(f"Censys Rate limit exceeded for host lookup: {ip}")
@@ -656,16 +662,22 @@ class CensysModule(BaseModule):
                     raise CensysAuthError(f"Authentication failed for query '{query}': HTTP 401")
                 elif resp.status_code == 422:
                     # Check if it's a quota exhaustion error first
+                    is_quota_exhausted = False
                     try:
                         error_data = resp.json()
                         if isinstance(error_data, dict) and "errors" in error_data:
                             for error in error_data.get("errors", []):
                                 if isinstance(error, dict) and "insufficient balance" in error.get("message", "").lower():
+                                    is_quota_exhausted = True
                                     raise CensysQuotaExhaustedError(f"API quota exhausted for query '{query}'")
+                    except CensysQuotaExhaustedError:
+                        raise  # Re-raise quota exhaustion error
                     except Exception:
                         pass  # If we can't parse the error, treat it as a regular validation error
                     
-                    logger.error(f"Censys CenQL Validation Error (422): {resp.text}")
+                    # Only log if it's not a quota exhaustion error
+                    if not is_quota_exhausted:
+                        logger.error(f"Censys CenQL Validation Error (422): {resp.text}")
                     raise CensysAPIError(f"Query validation error for '{query}': {resp.text}")
                 elif resp.status_code == 429:
                     logger.warning("Censys Rate limit exceeded during search query.")
