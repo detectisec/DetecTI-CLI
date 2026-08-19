@@ -87,7 +87,15 @@ class WebServerManager:
             if data_db_path.exists():
                 db_path = str(data_db_path.resolve())
             else:
-                db_path = str(Path(db_path).resolve())
+                # Try without .sqlite extension
+                if not db_path.endswith('.sqlite'):
+                    data_db_path_with_ext = Path.cwd() / "data" / "dbs" / f"{db_path}.sqlite"
+                    if data_db_path_with_ext.exists():
+                        db_path = str(data_db_path_with_ext.resolve())
+                    else:
+                        db_path = str(Path(db_path).resolve())
+                else:
+                    db_path = str(Path(db_path).resolve())
         
         if not Path(db_path).exists():
             raise FileNotFoundError(f"Database file not found: {db_path}")

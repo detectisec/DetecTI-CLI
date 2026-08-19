@@ -164,7 +164,7 @@ class DatabaseManager:
             # Store scan metadata
             modules_json = json.dumps(result.modules_run)
             conn.execute("""
-                INSERT INTO scan_results (
+                INSERT OR REPLACE INTO scan_results (
                     id, target, target_type, started_at, completed_at, elapsed_seconds,
                     modules_run, total_findings, total_hosts
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -202,6 +202,12 @@ class DatabaseManager:
         """Get summary statistics for the database."""
         with sqlite3.connect(self.db_path) as conn:
             stats = {}
+            
+            # Get target from scan results
+            cursor = conn.execute("SELECT target FROM scan_results ORDER BY created_at DESC LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                stats['target'] = row[0]
             
             # Count domains and subdomains
             cursor = conn.execute("SELECT COUNT(*) FROM domains")
