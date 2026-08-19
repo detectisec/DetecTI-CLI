@@ -118,16 +118,6 @@ def scan_command(
         "--cvss",
         help="Filter vulnerabilities by CVSS severity: critical, high, medium, low",
     ),
-    xdb_update: bool = typer.Option(
-        False,
-        "--xdbupdate",
-        help="Update local ExploitDB database before scanning",
-    ),
-    persist: bool = typer.Option(
-        False,
-        "--persist",
-        help="Store scan results in SQLite database for web dashboard access",
-    ),
     create_db: Optional[str] = typer.Option(
         None,
         "--create-db",
@@ -143,18 +133,10 @@ def scan_command(
     
     Examples:
       detecti scan -t example.com --create-db mycompany
-      detecti scan -t 192.168.1.0/24 --persist
+      detecti scan -t 192.168.1.0/24 --create-db network_scan
       detecti scan -t CVE-2021-44228 -o json
     """
     print_banner()
-
-    if xdb_update:
-        print_info("Updating local ExploitDB searchsploit database...")
-        try:
-            ExploitDBModule.update_database()
-            print_success("ExploitDB database updated successfully.")
-        except Exception as err:
-            print_error(f"Failed to update ExploitDB: {err}")
 
     # Parse modules list
     mod_list = [m.strip().lower() for m in modules.split(",") if m.strip()]
@@ -186,8 +168,8 @@ def scan_command(
             )
         )
 
-        # Store in SQLite database if persistence is enabled or create_db is specified
-        if persist or create_db:
+        # Store in SQLite database if create_db is specified
+        if create_db:
             try:
                 from core.database.storage import DatabaseManager
                 
