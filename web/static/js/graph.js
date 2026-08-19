@@ -289,7 +289,7 @@ class EASMDashboard {
     applyLeadFilter() {
         if (!this.cy) return;
 
-        // If no leads are selected, hide all nodes
+        // If no leads are selected, hide all nodes (default behavior)
         if (this.selectedLeads.size === 0) {
             this.cy.nodes().hide();
             this.cy.edges().hide();
@@ -308,31 +308,56 @@ class EASMDashboard {
             }
         });
 
-        // Hide nodes that don't belong to selected leads
+        // Build a set of nodes that should be visible (lead nodes + their entire sub-tree)
+        const visibleNodes = new Set();
+
+        // First pass: Find all lead nodes that are selected
         this.cy.nodes().forEach(node => {
             const nodeData = node.data();
-            let shouldShow = false;
-
-            // Check if this node belongs to a selected lead
+            
+            // Check if this is a selected lead node
             if (nodeData.type === 'ip' && selectedLeadNames.has(nodeData.ip)) {
-                shouldShow = true;
+                visibleNodes.add(node.id());
             } else if ((nodeData.type === 'domain' || nodeData.type === 'subdomain') && selectedLeadNames.has(nodeData.name)) {
-                shouldShow = true;
-            } else {
-                // Check if this node is connected to a selected lead (services, vulnerabilities)
-                const connectedNodes = node.neighborhood().nodes();
-                connectedNodes.forEach(connectedNode => {
-                    const connectedData = connectedNode.data();
-                    if (connectedData.type === 'ip' && selectedLeadNames.has(connectedData.ip)) {
-                        shouldShow = true;
-                    } else if ((connectedData.type === 'domain' || connectedData.type === 'subdomain') && selectedLeadNames.has(connectedData.name)) {
-                        shouldShow = true;
-                    }
-                });
+                visibleNodes.add(node.id());
             }
+        });
 
-            if (!shouldShow) {
+        // Second pass: Add all nodes connected to selected leads (services, vulnerabilities, etc.)
+        const addConnectedNodes = (nodeId) => {
+            const node = this.cy.getElementById(nodeId);
+            if (!node.length) return;
+            
+            // Add all neighbors (connected nodes)
+            const neighbors = node.neighborhood().nodes();
+            neighbors.forEach(neighbor => {
+                const neighborId = neighbor.id();
+                if (!visibleNodes.has(neighborId)) {
+                    visibleNodes.add(neighborId);
+                    // Recursively add their connections (for vulnerability -> exploit chains)
+                    addConnectedNodes(neighborId);
+                }
+            });
+        };
+
+        // Add all connected nodes for each selected lead
+        visibleNodes.forEach(nodeId => {
+            addConnectedNodes(nodeId);
+        });
+
+        // Third pass: Hide all nodes that are not in the visible set
+        this.cy.nodes().forEach(node => {
+            if (!visibleNodes.has(node.id())) {
                 node.hide();
+            }
+        });
+
+        // Hide edges connected to hidden nodes
+        this.cy.edges().forEach(edge => {
+            const source = edge.source();
+            const target = edge.target();
+            if (source.hidden() || target.hidden()) {
+                edge.hide();
             }
         });
 
@@ -592,7 +617,9 @@ class EASMDashboard {
                 
                 this.cy.elements().remove();
                 this.cy.add(this.graphData.elements);
-                this.applyFilters();
+                
+                // Apply lead filter first (starts with empty selection = hidden graph)
+                this.applyLeadFilter();
                 
                 // Run layout
                 const layoutName = this.getAvailableLayout();
