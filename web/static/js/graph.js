@@ -100,6 +100,12 @@ class EASMDashboard {
         try {
             console.log('Initializing EASM Dashboard...');
             
+            // Set loading timeout
+            const loadingTimeout = setTimeout(() => {
+                console.error('Dashboard initialization timeout');
+                this.showError('Dashboard loading timeout - please refresh the page');
+            }, 30000); // 30 second timeout
+            
             // Check if API client is available
             if (!window.api) {
                 throw new Error('API client not available');
@@ -123,6 +129,9 @@ class EASMDashboard {
             
             // Set the correct default layout in the selector
             this.updateLayoutSelector();
+            
+            // Clear timeout since we succeeded
+            clearTimeout(loadingTimeout);
             
             // Hide loading indicator
             const loadingEl = document.getElementById('graph-loading');
@@ -211,17 +220,16 @@ class EASMDashboard {
             const leadNodes = elements.nodes.filter(node => {
                 const nodeData = node.data || node;
                 const nodeType = nodeData.type;
+                console.log(`Checking node: ${nodeData.id} (type: ${nodeType})`);
                 return ['ip', 'domain', 'subdomain'].includes(nodeType);
             });
             
-            console.log(`Found ${leadNodes.length} potential lead nodes`);
+            console.log(`Found ${leadNodes.length} potential lead nodes out of ${elements.nodes.length} total nodes`);
+            console.log('All node types:', elements.nodes.map(n => (n.data || n).type).filter((v, i, a) => a.indexOf(v) === i));
             console.log('Sample lead nodes:', leadNodes.slice(0, 3).map(n => (n.data || n)));
             
             if (leadNodes.length === 0) {
-                const leadList = document.getElementById('lead-list');
-                if (leadList) {
-                    leadList.innerHTML = '<div class="lead-loading">No lead nodes found in graph</div>';
-                }
+                leadList.innerHTML = '<div class="lead-loading">No lead nodes found in graph (IP/domain/subdomain)</div>';
                 return;
             }
             
@@ -266,6 +274,8 @@ class EASMDashboard {
             });
             
             console.log(`Created ${this.leads.length} leads total`);
+            
+            // Always try to render, even if we have 0 leads
             this.renderLeadSelector();
             
         } catch (error) {
@@ -277,6 +287,7 @@ class EASMDashboard {
                     <div class="lead-loading" style="color: #ff4757;">
                         ⚠️ Error loading leads: ${error.message}
                         <br><small>Check console for details</small>
+                        <br><button onclick="location.reload()" style="margin-top: 10px; padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer;">Reload Page</button>
                     </div>
                 `;
             }
@@ -935,6 +946,14 @@ class EASMDashboard {
             if (this.graphData && this.graphData.elements) {
                 console.log(`Adding ${this.graphData.elements.nodes?.length || 0} nodes and ${this.graphData.elements.edges?.length || 0} edges`);
                 
+                // Debug: Log node types
+                const nodeTypes = {};
+                this.graphData.elements.nodes.forEach(node => {
+                    const type = node.data.type;
+                    nodeTypes[type] = (nodeTypes[type] || 0) + 1;
+                });
+                console.log('Node types in graph:', nodeTypes);
+                
                 this.cy.elements().remove();
                 this.cy.add(this.graphData.elements);
                 
@@ -947,9 +966,10 @@ class EASMDashboard {
                     this.applyLeadFilter();
                 } catch (error) {
                     console.error('Error in lead selector population:', error);
+                    console.error('Error stack:', error.stack);
                     const leadList = document.getElementById('lead-list');
                     if (leadList) {
-                        leadList.innerHTML = `<div class="lead-loading" style="color: #ff4757;">Failed to load leads: ${error.message}</div>`;
+                        leadList.innerHTML = `<div class="lead-loading" style="color: #ff4757;">Failed to load leads: ${error.message}<br><small>Check console for details</small></div>`;
                     }
                 }
                 
