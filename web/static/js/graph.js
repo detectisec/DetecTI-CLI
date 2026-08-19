@@ -180,6 +180,18 @@ class EASMDashboard {
             console.log('Populating lead selector from graph data...');
             this.leads = [];
             
+            // Try to get elements from Cytoscape if not provided
+            if (!elements && this.cy) {
+                console.log('Getting elements from Cytoscape instance...');
+                const cyNodes = this.cy.nodes().jsons();
+                const cyEdges = this.cy.edges().jsons();
+                elements = {
+                    nodes: cyNodes,
+                    edges: cyEdges
+                };
+                console.log(`Got ${cyNodes.length} nodes and ${cyEdges.length} edges from Cytoscape`);
+            }
+            
             if (!elements || !elements.nodes || !Array.isArray(elements.nodes)) {
                 console.warn('No valid graph elements available for lead selector');
                 const leadList = document.getElementById('lead-list');
@@ -194,12 +206,13 @@ class EASMDashboard {
             
             // Extract leads from graph nodes (IP, domain, subdomain)
             const leadNodes = elements.nodes.filter(node => {
-                const nodeType = node.data && node.data.type;
+                const nodeData = node.data || node;
+                const nodeType = nodeData.type;
                 return ['ip', 'domain', 'subdomain'].includes(nodeType);
             });
             
             console.log(`Found ${leadNodes.length} potential lead nodes`);
-            console.log('Lead node types:', leadNodes.map(n => n.data.type));
+            console.log('Sample lead nodes:', leadNodes.slice(0, 3).map(n => (n.data || n)));
             
             if (leadNodes.length === 0) {
                 const leadList = document.getElementById('lead-list');
@@ -211,7 +224,7 @@ class EASMDashboard {
             
             // Process each lead node
             leadNodes.forEach((node, index) => {
-                const nodeData = node.data;
+                const nodeData = node.data || node;
                 console.log(`Processing lead ${index + 1}/${leadNodes.length}: ${nodeData.id} (${nodeData.type})`);
                 
                 // Find connected vulnerabilities to determine threat level
@@ -270,15 +283,27 @@ class EASMDashboard {
     findConnectedVulnerabilities(nodeId, elements) {
         const vulnerabilities = [];
         
+        if (!elements.edges || !Array.isArray(elements.edges)) {
+            console.warn('No edges available for vulnerability lookup');
+            return vulnerabilities;
+        }
+        
         // Find all paths: node -> service -> vulnerability
         const connectedServices = this.findConnectedServices(nodeId, elements);
         
         connectedServices.forEach(service => {
             elements.edges.forEach(edge => {
-                if (edge.data.source === service.id && edge.data.label === 'HAS_VULN') {
-                    const vulnNode = elements.nodes.find(n => n.data.id === edge.data.target);
-                    if (vulnNode && vulnNode.data.type === 'vulnerability') {
-                        vulnerabilities.push(vulnNode.data);
+                const edgeData = edge.data || edge;
+                if (edgeData.source === service.id && edgeData.label === 'HAS_VULN') {
+                    const vulnNode = elements.nodes.find(n => {
+                        const nodeData = n.data || n;
+                        return nodeData.id === edgeData.target;
+                    });
+                    if (vulnNode) {
+                        const vulnData = vulnNode.data || vulnNode;
+                        if (vulnData.type === 'vulnerability') {
+                            vulnerabilities.push(vulnData);
+                        }
                     }
                 }
             });
@@ -286,10 +311,17 @@ class EASMDashboard {
         
         // Also check for direct vulnerability connections (if any)
         elements.edges.forEach(edge => {
-            if (edge.data.source === nodeId && edge.data.label === 'HAS_VULN') {
-                const vulnNode = elements.nodes.find(n => n.data.id === edge.data.target);
-                if (vulnNode && vulnNode.data.type === 'vulnerability') {
-                    vulnerabilities.push(vulnNode.data);
+            const edgeData = edge.data || edge;
+            if (edgeData.source === nodeId && edgeData.label === 'HAS_VULN') {
+                const vulnNode = elements.nodes.find(n => {
+                    const nodeData = n.data || n;
+                    return nodeData.id === edgeData.target;
+                });
+                if (vulnNode) {
+                    const vulnData = vulnNode.data || vulnNode;
+                    if (vulnData.type === 'vulnerability') {
+                        vulnerabilities.push(vulnData);
+                    }
                 }
             }
         });
@@ -305,22 +337,41 @@ class EASMDashboard {
     findConnectedServices(nodeId, elements) {
         const services = [];
         
+        if (!elements.edges || !Array.isArray(elements.edges)) {
+            console.warn('No edges available for service lookup');
+            return services;
+        }
+        
         // Find services connected FROM this node (IP/domain exposes services)
         elements.edges.forEach(edge => {
-            if (edge.data.source === nodeId && edge.data.label === 'EXPOSES') {
-                const serviceNode = elements.nodes.find(n => n.data.id === edge.data.target);
-                if (serviceNode && ['service', 'http', 'https'].includes(serviceNode.data.type)) {
-                    services.push(serviceNode.data);
+            const edgeData = edge.data || edge;
+            if (edgeData.source === nodeId && edgeData.label === 'EXPOSES') {
+                const serviceNode = elements.nodes.find(n => {
+                    const nodeData = n.data || n;
+                    return nodeData.id === edgeData.target;
+                });
+                if (serviceNode) {
+                    const serviceData = serviceNode.data || serviceNode;
+                    if (['service', 'http', 'https'].includes(serviceData.type)) {
+                        services.push(serviceData);
+                    }
                 }
             }
         });
         
         // Also find services that belong to this node (reverse direction)
         elements.edges.forEach(edge => {
-            if (edge.data.target === nodeId && edge.data.label === 'BELONGS_TO') {
-                const serviceNode = elements.nodes.find(n => n.data.id === edge.data.source);
-                if (serviceNode && ['service', 'http', 'https'].includes(serviceNode.data.type)) {
-                    services.push(serviceNode.data);
+            const edgeData = edge.data || edge;
+            if (edgeData.target === nodeId && edgeData.label === 'BELONGS_TO') {
+                const serviceNode = elements.nodes.find(n => {
+                    const nodeData = n.data || n;
+                    return nodeData.id === edgeData.source;
+                });
+                if (serviceNode) {
+                    const serviceData = serviceNode.data || serviceNode;
+                    if (['service', 'http', 'https'].includes(serviceData.type)) {
+                        services.push(serviceData);
+                    }
                 }
             }
         });
@@ -853,12 +904,14 @@ class EASMDashboard {
                 this.cy.elements().remove();
                 this.cy.add(this.graphData.elements);
                 
-                // Populate lead selector from graph data after layout is complete
+                // Populate lead selector from graph data after elements are added
                 console.log('Populating lead selector...');
-                this.populateLeadSelector(this.graphData.elements);
-                
-                // Apply lead filter first (default: no leads selected = empty graph)
-                this.applyLeadFilter();
+                setTimeout(() => {
+                    this.populateLeadSelector(this.graphData.elements);
+                    
+                    // Apply lead filter first (default: no leads selected = empty graph)
+                    this.applyLeadFilter();
+                }, 500);
                 
                 // Run layout
                 const layoutName = this.getAvailableLayout();
