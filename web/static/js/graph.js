@@ -182,7 +182,10 @@ class EASMDashboard {
             
             if (!elements || !elements.nodes) {
                 console.warn('No graph elements available for lead selector');
-                this.renderLeadSelector();
+                const leadList = document.getElementById('lead-list');
+                if (leadList) {
+                    leadList.innerHTML = '<div class="lead-loading">No graph data available</div>';
+                }
                 return;
             }
             
@@ -192,7 +195,14 @@ class EASMDashboard {
             );
             
             console.log(`Found ${leadNodes.length} potential lead nodes`);
-            console.log('Sample lead nodes:', leadNodes.slice(0, 3).map(n => n.data));
+            
+            if (leadNodes.length === 0) {
+                const leadList = document.getElementById('lead-list');
+                if (leadList) {
+                    leadList.innerHTML = '<div class="lead-loading">No lead nodes found in graph</div>';
+                }
+                return;
+            }
             
             // Process each lead node
             leadNodes.forEach(node => {
@@ -203,7 +213,7 @@ class EASMDashboard {
                 
                 // Calculate threat indicators
                 const vulnCount = connectedVulns.length;
-                const hasKev = connectedVulns.some(v => v.is_cisa_kev === true || v.is_cisa_kev === 'true');
+                const hasKev = connectedVulns.some(v => v.is_cisa_kev === true || v.is_cisa_kev === 'true' || v.is_cisa_kev === 1);
                 const hasCritical = connectedVulns.some(v => v.severity === 'CRITICAL');
                 const pocCount = connectedVulns.filter(v => (v.exploit_count || 0) > 0).length;
                 
@@ -227,29 +237,19 @@ class EASMDashboard {
                     ip_count: nodeData.type === 'domain' ? this.countConnectedIPs(nodeData.id, elements) : 0
                 };
                 
-                console.log(`Processing lead ${nodeData.id}:`, {
-                    services: serviceCount,
-                    vulns: vulnCount,
-                    kev: hasKev,
-                    critical: hasCritical,
-                    pocs: pocCount
-                });
-                
                 this.leads.push(lead);
             });
             
-            console.log(`Created ${this.leads.length} leads:`, this.leads);
+            console.log(`Created ${this.leads.length} leads`);
             this.renderLeadSelector();
             
         } catch (error) {
             console.error('Failed to populate lead selector:', error);
-            console.error('Error stack:', error.stack);
             const leadList = document.getElementById('lead-list');
             if (leadList) {
                 leadList.innerHTML = `
                     <div class="lead-loading" style="color: #ff4757;">
                         ⚠️ Error loading leads: ${error.message}
-                        <br><small>Check console for details</small>
                     </div>
                 `;
             }
@@ -281,25 +281,34 @@ class EASMDashboard {
             
         vulnerabilities.push(...directVulns);
         
-        return vulnerabilities;
+        // Remove duplicates
+        const uniqueVulns = vulnerabilities.filter((vuln, index, self) => 
+            index === self.findIndex(v => v.id === vuln.id)
+        );
+        
+        return uniqueVulns;
     }
     
     findConnectedServices(nodeId, elements) {
-        // Find services connected TO this node (IP/domain exposes services)
+        const services = [];
+        
+        // Find services connected FROM this node (IP/domain exposes services)
         const exposedServices = elements.edges
             .filter(edge => edge.data.source === nodeId && edge.data.label === 'EXPOSES')
             .map(edge => elements.nodes.find(n => n.data.id === edge.data.target))
-            .filter(n => n && ['service', 'http', 'https'].includes(n.data.type))
-            .map(n => n.data);
+            .filter(n => n && ['service', 'http', 'https'].includes(n.data.type));
             
+        services.push(...exposedServices);
+        
         // Also find services that belong to this node (reverse direction)
         const belongingServices = elements.edges
             .filter(edge => edge.data.target === nodeId && edge.data.label === 'BELONGS_TO')
             .map(edge => elements.nodes.find(n => n.data.id === edge.data.source))
-            .filter(n => n && ['service', 'http', 'https'].includes(n.data.type))
-            .map(n => n.data);
+            .filter(n => n && ['service', 'http', 'https'].includes(n.data.type));
             
-        return [...exposedServices, ...belongingServices];
+        services.push(...belongingServices);
+        
+        return services.map(n => n.data);
     }
     
     countConnectedIPs(domainId, elements) {
@@ -824,12 +833,10 @@ class EASMDashboard {
                 
                 // Populate lead selector from graph data
                 console.log('Populating lead selector...');
-                setTimeout(() => {
-                    this.populateLeadSelector(this.graphData.elements);
-                    
-                    // Apply lead filter first (default: no leads selected = empty graph)
-                    this.applyLeadFilter();
-                }, 100);
+                this.populateLeadSelector(this.graphData.elements);
+                
+                // Apply lead filter first (default: no leads selected = empty graph)
+                this.applyLeadFilter();
                 
                 // Run layout
                 const layoutName = this.getAvailableLayout();
@@ -904,8 +911,8 @@ class EASMDashboard {
                 }
             }
             
-            // Apply visibility changes
-            this.applyLeadVisibilityFilter(nodeId, isChecked);
+            // Apply lead filter to show/hide entire subtrees
+            this.applyLeadFilter();
         };
 
         // Filter checkboxes
