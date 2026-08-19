@@ -8,3 +8,10 @@ cve-searchsploit>=0.3.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
 requests>=2.31.0
+# Phase 1: Database Infrastructure
+sqlalchemy>=2.0.0
+# Phase 2: Web Server (for future implementation)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+# Process management for background server
+psutil>=5.9.0

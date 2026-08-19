@@ -72,6 +72,14 @@ app = typer.Typer(
     rich_markup_mode=None,
 )
 
+# Create serve subcommand group
+serve_app = typer.Typer(
+    name="serve",
+    help="Web server and dashboard management commands",
+    add_completion=False,
+)
+app.add_typer(serve_app, name="serve")
+
 
 @app.command(name="scan")
 def scan_command(
@@ -115,6 +123,16 @@ def scan_command(
         "--xdbupdate",
         help="Update local ExploitDB database before scanning",
     ),
+    persist: bool = typer.Option(
+        False,
+        "--persist",
+        help="Store scan results in SQLite database for web dashboard access",
+    ),
+    db_path: Optional[Path] = typer.Option(
+        None,
+        "--db-path",
+        help="Custom SQLite database path (default: ./data/dbs/<target>.sqlite)",
+    ),
 ) -> None:
     """Execute complete attack surface mapping and threat intelligence analysis."""
     print_banner()
@@ -156,6 +174,25 @@ def scan_command(
                 cvss_filter=cvss_filter,
             )
         )
+
+        # Store in SQLite database if persistence is enabled
+        if persist:
+            try:
+                from core.database.storage import DatabaseManager
+                
+                # Determine database path
+                if db_path:
+                    final_db_path = db_path
+                else:
+                    final_db_path = DatabaseManager.get_db_path_for_target(target)
+                
+                progress.update(task_id, description="[bold cyan]Storing results in SQLite database...")
+                db_manager = DatabaseManager(final_db_path)
+                db_manager.store_scan_result(result)
+                
+                print_success(f"Scan results stored in database: [bold underline]{final_db_path.resolve()}[/bold underline]")
+            except Exception as e:
+                print_error(f"Failed to store results in database: {e}")
 
     # 1. Terminal Output (Organized by Host)
     if output_format.lower() in ("table", "all") or not output_file:
@@ -236,6 +273,89 @@ def config_check_command() -> None:
     console.print(f" • [cyan]GitHub Token:[/cyan] {github_status}")
     console.print(f" • [cyan]HTTP Concurrency Limit:[/cyan] {settings.http_concurrency_limit}")
     console.print(f" • [cyan]HTTP Timeout:[/cyan] {settings.http_timeout}s")
+
+
+@serve_app.command("start")
+def start_server(
+    db: str = typer.Option(
+        ...,
+        "--db",
+        "-d",
+        help="Target SQLite database file inside ./data/dbs/ or full path",
+    ),
+    port: int = typer.Option(
+        8000,
+        "--port",
+        "-p",
+        help="Port for the HTTP server",
+    ),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        "-h",
+        help="Host binding address",
+    ),
+) -> None:
+    """Start the non-blocking EASM graph webserver in the background."""
+    print_banner()
+    print_info("Starting DetecTI-CLI web server...")
+    print_warning("Web server functionality will be implemented in Phase 2")
+    print_info(f"Planned configuration: {host}:{port} with database: {db}")
+
+
+@serve_app.command("status")
+def server_status() -> None:
+    """Check the status of the background webserver."""
+    print_banner()
+    print_info("Checking web server status...")
+    print_warning("Web server functionality will be implemented in Phase 2")
+
+
+@serve_app.command("stop")
+def stop_server() -> None:
+    """Stop the background webserver gracefully."""
+    print_banner()
+    print_info("Stopping web server...")
+    print_warning("Web server functionality will be implemented in Phase 2")
+
+
+@serve_app.command("list-dbs")
+def list_databases() -> None:
+    """List all available EASM target SQLite databases in ./data/dbs/."""
+    print_banner()
+    
+    data_dir = Path.cwd() / "data" / "dbs"
+    if not data_dir.exists():
+        print_warning("No databases directory found. Run a scan with --persist to create databases.")
+        return
+    
+    db_files = list(data_dir.glob("*.sqlite"))
+    if not db_files:
+        print_warning("No SQLite databases found in ./data/dbs/")
+        return
+    
+    print_section_header(f"Available EASM Databases ({len(db_files)} found)")
+    
+    from rich.table import Table
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Database File", style="bold white")
+    table.add_column("Size", style="dim")
+    table.add_column("Modified", style="dim")
+    
+    for db_file in sorted(db_files):
+        size_mb = db_file.stat().st_size / (1024 * 1024)
+        modified = db_file.stat().st_mtime
+        from datetime import datetime
+        mod_time = datetime.fromtimestamp(modified).strftime("%Y-%m-%d %H:%M")
+        
+        table.add_row(
+            db_file.name,
+            f"{size_mb:.2f} MB",
+            mod_time
+        )
+    
+    console.print(table)
+    print_info("Use 'detecti serve start --db <database_name>' to start the web dashboard")
 
 
 @app.command(name="version")
