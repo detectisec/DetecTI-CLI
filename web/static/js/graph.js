@@ -109,6 +109,10 @@ class EASMDashboard {
             console.log('Loading summary data...');
             await this.loadSummary();
             
+            // Load leads data
+            console.log('Loading leads data...');
+            await this.loadLeads();
+            
             // Initialize Cytoscape
             console.log('Initializing Cytoscape...');
             this.initCytoscape();
