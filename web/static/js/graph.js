@@ -286,13 +286,23 @@ class EASMDashboard {
                     }
                 },
                 
-                // Critical vulnerabilities (pulsing animation)
+                // High severity vulnerabilities
+                {
+                    selector: 'node[risk_level="high"]',
+                    style: {
+                        'background-color': '#ff8c00',
+                        'border-color': '#ff7f00',
+                        'border-width': '2px'
+                    }
+                },
+                
+                // Critical vulnerabilities (darker red with pulsing animation)
                 {
                     selector: 'node[risk_level="critical"]',
                     style: {
-                        'background-color': '#ff3838',
-                        'border-color': '#ff1744',
-                        'border-width': '3px'
+                        'background-color': '#8b0000',
+                        'border-color': '#dc143c',
+                        'border-width': '4px'
                     }
                 },
                 

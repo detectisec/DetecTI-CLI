@@ -407,12 +407,12 @@ body {
 }
 
 .vulnerability-badge.critical {
-    background: #ff4757;
+    background: #dc143c;
     color: #fff;
 }
 
 .vulnerability-badge.high {
-    background: #ff6b35;
+    background: #ff8c00;
     color: #fff;
 }
 
@@ -427,15 +427,15 @@ body {
 }
 
 .vulnerability-badge.kev {
-    background: #ff3838;
+    background: #8b0000;
     color: #fff;
     animation: pulse 2s infinite;
 }
 
 @keyframes pulse {
-    0% { box-shadow: 0 0 0 0 rgba(255, 56, 56, 0.7); }
-    70% { box-shadow: 0 0 0 10px rgba(255, 56, 56, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(255, 56, 56, 0); }
+    0% { box-shadow: 0 0 0 0 rgba(220, 20, 60, 0.7); }
+    70% { box-shadow: 0 0 0 10px rgba(220, 20, 60, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(220, 20, 60, 0); }
 }
 
 /* Exploit/PoC styling in inspector */
