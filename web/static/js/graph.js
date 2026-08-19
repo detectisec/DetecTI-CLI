@@ -180,6 +180,12 @@ class EASMDashboard {
             console.log('Populating lead selector from graph data...');
             this.leads = [];
             
+            const leadList = document.getElementById('lead-list');
+            if (!leadList) {
+                console.error('Lead list element not found');
+                return;
+            }
+            
             // Try to get elements from Cytoscape if not provided
             if (!elements && this.cy) {
                 console.log('Getting elements from Cytoscape instance...');
@@ -194,10 +200,7 @@ class EASMDashboard {
             
             if (!elements || !elements.nodes || !Array.isArray(elements.nodes)) {
                 console.warn('No valid graph elements available for lead selector');
-                const leadList = document.getElementById('lead-list');
-                if (leadList) {
-                    leadList.innerHTML = '<div class="lead-loading">No graph data available</div>';
-                }
+                leadList.innerHTML = '<div class="lead-loading">No graph data available</div>';
                 return;
             }
             
@@ -283,105 +286,131 @@ class EASMDashboard {
     findConnectedVulnerabilities(nodeId, elements) {
         const vulnerabilities = [];
         
-        if (!elements.edges || !Array.isArray(elements.edges)) {
+        if (!elements || !elements.edges || !Array.isArray(elements.edges)) {
             console.warn('No edges available for vulnerability lookup');
             return vulnerabilities;
         }
         
-        // Find all paths: node -> service -> vulnerability
-        const connectedServices = this.findConnectedServices(nodeId, elements);
-        
-        connectedServices.forEach(service => {
+        try {
+            // Find all paths: node -> service -> vulnerability
+            const connectedServices = this.findConnectedServices(nodeId, elements);
+            
+            connectedServices.forEach(service => {
+                elements.edges.forEach(edge => {
+                    try {
+                        const edgeData = edge.data || edge;
+                        if (edgeData.source === service.id && edgeData.label === 'HAS_VULN') {
+                            const vulnNode = elements.nodes.find(n => {
+                                const nodeData = n.data || n;
+                                return nodeData.id === edgeData.target;
+                            });
+                            if (vulnNode) {
+                                const vulnData = vulnNode.data || vulnNode;
+                                if (vulnData.type === 'vulnerability') {
+                                    vulnerabilities.push(vulnData);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Error processing edge for vulnerability:', e);
+                    }
+                });
+            });
+            
+            // Also check for direct vulnerability connections (if any)
             elements.edges.forEach(edge => {
-                const edgeData = edge.data || edge;
-                if (edgeData.source === service.id && edgeData.label === 'HAS_VULN') {
-                    const vulnNode = elements.nodes.find(n => {
-                        const nodeData = n.data || n;
-                        return nodeData.id === edgeData.target;
-                    });
-                    if (vulnNode) {
-                        const vulnData = vulnNode.data || vulnNode;
-                        if (vulnData.type === 'vulnerability') {
-                            vulnerabilities.push(vulnData);
+                try {
+                    const edgeData = edge.data || edge;
+                    if (edgeData.source === nodeId && edgeData.label === 'HAS_VULN') {
+                        const vulnNode = elements.nodes.find(n => {
+                            const nodeData = n.data || n;
+                            return nodeData.id === edgeData.target;
+                        });
+                        if (vulnNode) {
+                            const vulnData = vulnNode.data || vulnNode;
+                            if (vulnData.type === 'vulnerability') {
+                                vulnerabilities.push(vulnData);
+                            }
                         }
                     }
+                } catch (e) {
+                    console.warn('Error processing direct vulnerability edge:', e);
                 }
             });
-        });
-        
-        // Also check for direct vulnerability connections (if any)
-        elements.edges.forEach(edge => {
-            const edgeData = edge.data || edge;
-            if (edgeData.source === nodeId && edgeData.label === 'HAS_VULN') {
-                const vulnNode = elements.nodes.find(n => {
-                    const nodeData = n.data || n;
-                    return nodeData.id === edgeData.target;
-                });
-                if (vulnNode) {
-                    const vulnData = vulnNode.data || vulnNode;
-                    if (vulnData.type === 'vulnerability') {
-                        vulnerabilities.push(vulnData);
-                    }
-                }
-            }
-        });
-        
-        // Remove duplicates
-        const uniqueVulns = vulnerabilities.filter((vuln, index, self) => 
-            index === self.findIndex(v => v.id === vuln.id)
-        );
-        
-        return uniqueVulns;
+            
+            // Remove duplicates
+            const uniqueVulns = vulnerabilities.filter((vuln, index, self) => 
+                index === self.findIndex(v => v.id === vuln.id)
+            );
+            
+            return uniqueVulns;
+        } catch (error) {
+            console.error('Error in findConnectedVulnerabilities:', error);
+            return [];
+        }
     }
     
     findConnectedServices(nodeId, elements) {
         const services = [];
         
-        if (!elements.edges || !Array.isArray(elements.edges)) {
+        if (!elements || !elements.edges || !Array.isArray(elements.edges)) {
             console.warn('No edges available for service lookup');
             return services;
         }
         
-        // Find services connected FROM this node (IP/domain exposes services)
-        elements.edges.forEach(edge => {
-            const edgeData = edge.data || edge;
-            if (edgeData.source === nodeId && edgeData.label === 'EXPOSES') {
-                const serviceNode = elements.nodes.find(n => {
-                    const nodeData = n.data || n;
-                    return nodeData.id === edgeData.target;
-                });
-                if (serviceNode) {
-                    const serviceData = serviceNode.data || serviceNode;
-                    if (['service', 'http', 'https'].includes(serviceData.type)) {
-                        services.push(serviceData);
+        try {
+            // Find services connected FROM this node (IP/domain exposes services)
+            elements.edges.forEach(edge => {
+                try {
+                    const edgeData = edge.data || edge;
+                    if (edgeData.source === nodeId && edgeData.label === 'EXPOSES') {
+                        const serviceNode = elements.nodes.find(n => {
+                            const nodeData = n.data || n;
+                            return nodeData.id === edgeData.target;
+                        });
+                        if (serviceNode) {
+                            const serviceData = serviceNode.data || serviceNode;
+                            if (['service', 'http', 'https'].includes(serviceData.type)) {
+                                services.push(serviceData);
+                            }
+                        }
                     }
+                } catch (e) {
+                    console.warn('Error processing service edge:', e);
                 }
-            }
-        });
-        
-        // Also find services that belong to this node (reverse direction)
-        elements.edges.forEach(edge => {
-            const edgeData = edge.data || edge;
-            if (edgeData.target === nodeId && edgeData.label === 'BELONGS_TO') {
-                const serviceNode = elements.nodes.find(n => {
-                    const nodeData = n.data || n;
-                    return nodeData.id === edgeData.source;
-                });
-                if (serviceNode) {
-                    const serviceData = serviceNode.data || serviceNode;
-                    if (['service', 'http', 'https'].includes(serviceData.type)) {
-                        services.push(serviceData);
+            });
+            
+            // Also find services that belong to this node (reverse direction)
+            elements.edges.forEach(edge => {
+                try {
+                    const edgeData = edge.data || edge;
+                    if (edgeData.target === nodeId && edgeData.label === 'BELONGS_TO') {
+                        const serviceNode = elements.nodes.find(n => {
+                            const nodeData = n.data || n;
+                            return nodeData.id === edgeData.source;
+                        });
+                        if (serviceNode) {
+                            const serviceData = serviceNode.data || serviceNode;
+                            if (['service', 'http', 'https'].includes(serviceData.type)) {
+                                services.push(serviceData);
+                            }
+                        }
                     }
+                } catch (e) {
+                    console.warn('Error processing reverse service edge:', e);
                 }
-            }
-        });
-        
-        // Remove duplicates
-        const uniqueServices = services.filter((service, index, self) => 
-            index === self.findIndex(s => s.id === service.id)
-        );
-        
-        return uniqueServices;
+            });
+            
+            // Remove duplicates
+            const uniqueServices = services.filter((service, index, self) => 
+                index === self.findIndex(s => s.id === service.id)
+            );
+            
+            return uniqueServices;
+        } catch (error) {
+            console.error('Error in findConnectedServices:', error);
+            return [];
+        }
     }
     
     countConnectedIPs(domainId, elements) {
@@ -394,10 +423,15 @@ class EASMDashboard {
 
     renderLeadSelector() {
         const leadList = document.getElementById('lead-list');
-        if (!leadList) return;
+        if (!leadList) {
+            console.error('Lead list element not found in renderLeadSelector');
+            return;
+        }
+
+        console.log(`Rendering ${this.leads.length} leads`);
 
         if (this.leads.length === 0) {
-            leadList.innerHTML = '<div class="lead-loading">No leads found</div>';
+            leadList.innerHTML = '<div class="lead-loading">No leads found in database</div>';
             return;
         }
 
@@ -906,12 +940,18 @@ class EASMDashboard {
                 
                 // Populate lead selector from graph data after elements are added
                 console.log('Populating lead selector...');
-                setTimeout(() => {
+                try {
                     this.populateLeadSelector(this.graphData.elements);
                     
                     // Apply lead filter first (default: no leads selected = empty graph)
                     this.applyLeadFilter();
-                }, 500);
+                } catch (error) {
+                    console.error('Error in lead selector population:', error);
+                    const leadList = document.getElementById('lead-list');
+                    if (leadList) {
+                        leadList.innerHTML = `<div class="lead-loading" style="color: #ff4757;">Failed to load leads: ${error.message}</div>`;
+                    }
+                }
                 
                 // Run layout
                 const layoutName = this.getAvailableLayout();
