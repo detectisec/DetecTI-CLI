@@ -56,9 +56,13 @@
                     </div>
                 </div>
 
-                <!-- Filters Panel -->
-                <div class="panel filters-panel">
-                    <h3>🔧 Graph Filters</h3>
+                <!-- Search Panel -->
+                <div class="panel search-panel">
+                    <h3>🔍 Search & Filters</h3>
+                    <div class="search-group">
+                        <input type="text" id="search-input" placeholder="Search nodes (IP, domain, CVE, port...)" class="search-input">
+                        <button id="clear-search" class="clear-btn">✕</button>
+                    </div>
                     <div class="filter-group">
                         <label class="filter-checkbox">
                             <input type="checkbox" id="filter-kev">
@@ -76,9 +80,14 @@
                             Show Only Critical Vulns
                         </label>
                         <label class="filter-checkbox">
-                            <input type="checkbox" id="filter-https">
+                            <input type="checkbox" id="filter-with-pocs">
                             <span class="checkmark"></span>
-                            Show Only HTTPS Services
+                            Show Only Vulns with PoCs
+                        </label>
+                        <label class="filter-checkbox">
+                            <input type="checkbox" id="filter-subdomains-only">
+                            <span class="checkmark"></span>
+                            Show Only Subdomains
                         </label>
                     </div>
                 </div>
