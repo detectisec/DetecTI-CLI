@@ -253,14 +253,8 @@ class GraphBuilder:
             for row in cursor.fetchall():
                 vuln_id, ip_id, service_id, cve_id, severity, cvss_score, epss_score, is_cisa_kev, description, exploit_count = row
                 
-                # Build vulnerability label
+                # Build vulnerability label - keep it simple with just CVE ID
                 label = cve_id or "Unknown CVE"
-                if cvss_score:
-                    label += f"\nCVSS: {cvss_score}"
-                if epss_score:
-                    label += f"\nEPSS: {epss_score * 100:.1f}%"
-                if exploit_count > 0:
-                    label += f"\n{exploit_count} PoCs"
                 
                 # Determine risk level for styling
                 risk_level = "low"
