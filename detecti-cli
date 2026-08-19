@@ -128,13 +128,24 @@ def scan_command(
         "--persist",
         help="Store scan results in SQLite database for web dashboard access",
     ),
+    create_db: Optional[str] = typer.Option(
+        None,
+        "--create-db",
+        help="Create named database and store results (e.g. --create-db mycompany). Enables persistence automatically",
+    ),
     db_path: Optional[Path] = typer.Option(
         None,
         "--db-path",
         help="Custom SQLite database path (default: ./data/dbs/<target>.sqlite)",
     ),
 ) -> None:
-    """Execute complete attack surface mapping and threat intelligence analysis."""
+    """Execute complete attack surface mapping and threat intelligence analysis.
+    
+    Examples:
+      detecti scan -t example.com --create-db mycompany
+      detecti scan -t 192.168.1.0/24 --persist
+      detecti scan -t CVE-2021-44228 -o json
+    """
     print_banner()
 
     if xdb_update:
@@ -175,13 +186,17 @@ def scan_command(
             )
         )
 
-        # Store in SQLite database if persistence is enabled
-        if persist:
+        # Store in SQLite database if persistence is enabled or create_db is specified
+        if persist or create_db:
             try:
                 from core.database.storage import DatabaseManager
                 
                 # Determine database path
-                if db_path:
+                if create_db:
+                    # Use custom database name
+                    db_name = create_db if create_db.endswith('.sqlite') else f"{create_db}.sqlite"
+                    final_db_path = Path.cwd() / "data" / "dbs" / db_name
+                elif db_path:
                     final_db_path = db_path
                 else:
                     final_db_path = DatabaseManager.get_db_path_for_target(target)

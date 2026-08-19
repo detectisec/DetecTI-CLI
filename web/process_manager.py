@@ -87,13 +87,19 @@ class WebServerManager:
             if data_db_path.exists():
                 db_path = str(data_db_path.resolve())
             else:
-                # Try without .sqlite extension
+                # Try with .sqlite extension if not present
                 if not db_path.endswith('.sqlite'):
                     data_db_path_with_ext = Path.cwd() / "data" / "dbs" / f"{db_path}.sqlite"
                     if data_db_path_with_ext.exists():
                         db_path = str(data_db_path_with_ext.resolve())
                     else:
-                        db_path = str(Path(db_path).resolve())
+                        # Try removing underscores and using dots (example_com -> example.com)
+                        normalized_name = db_path.replace('_', '.')
+                        data_db_normalized = Path.cwd() / "data" / "dbs" / f"{normalized_name}.sqlite"
+                        if data_db_normalized.exists():
+                            db_path = str(data_db_normalized.resolve())
+                        else:
+                            db_path = str(Path(db_path).resolve())
                 else:
                     db_path = str(Path(db_path).resolve())
         
