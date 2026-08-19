@@ -46,6 +46,10 @@ class APIClient {
         return this.request('/graph');
     }
 
+    async getLeads() {
+        return this.request('/leads');
+    }
+
     async getAssets() {
         return this.request('/assets');
     }
