@@ -12,27 +12,30 @@ class GraphBuilder:
         self.db = db_manager
     
     def build_graph(self) -> Dict:
-        """Build complete graph with nodes and edges for Cytoscape.js."""
+        """Build complete graph with nodes and edges for Cytoscape.js.
+        
+        Hierarchy: IP -> Domain/Subdomain -> Services -> Vulnerabilities
+        """
         nodes = []
         edges = []
         
         with sqlite3.connect(self.db.db_path) as conn:
-            # Build domain nodes
-            domain_nodes, domain_edges = self._build_domain_nodes(conn)
-            nodes.extend(domain_nodes)
-            edges.extend(domain_edges)
-            
-            # Build IP nodes and their connections
+            # Build IP nodes first (root level)
             ip_nodes, ip_edges = self._build_ip_nodes(conn)
             nodes.extend(ip_nodes)
             edges.extend(ip_edges)
             
-            # Build service nodes
+            # Build domain/subdomain nodes connected to IPs
+            domain_nodes, domain_edges = self._build_domain_nodes(conn)
+            nodes.extend(domain_nodes)
+            edges.extend(domain_edges)
+            
+            # Build service nodes connected to IPs
             service_nodes, service_edges = self._build_service_nodes(conn)
             nodes.extend(service_nodes)
             edges.extend(service_edges)
             
-            # Build vulnerability nodes
+            # Build vulnerability nodes connected to services
             vuln_nodes, vuln_edges = self._build_vulnerability_nodes(conn)
             nodes.extend(vuln_nodes)
             edges.extend(vuln_edges)
@@ -45,28 +48,41 @@ class GraphBuilder:
         }
     
     def _build_domain_nodes(self, conn: sqlite3.Connection) -> tuple[List[Dict], List[Dict]]:
-        """Build domain and subdomain nodes with relationships."""
+        """Build domain and subdomain nodes connected to IPs."""
         nodes = []
         edges = []
         
-        # Root domains
-        cursor = conn.execute("SELECT id, name FROM domains")
-        for domain_id, domain_name in cursor.fetchall():
-            nodes.append({
-                "data": {
-                    "id": f"dom_{domain_id}",
-                    "label": domain_name,
-                    "type": "domain",
-                    "name": domain_name
-                }
-            })
+        # Get all subdomains with their IP connections
+        cursor = conn.execute("""
+            SELECT DISTINCT s.id, s.name, s.domain_id, d.name as domain_name,
+                   si.ip_id, ip.ip
+            FROM subdomains s
+            JOIN domains d ON s.domain_id = d.id
+            LEFT JOIN subdomain_ips si ON s.id = si.subdomain_id
+            LEFT JOIN ip_addresses ip ON si.ip_id = ip.id
+            ORDER BY s.name
+        """)
+        
+        processed_subdomains = set()
+        processed_domains = set()
+        
+        for row in cursor.fetchall():
+            sub_id, sub_name, domain_id, domain_name, ip_id, ip_address = row
             
-            # Subdomains for this domain
-            sub_cursor = conn.execute(
-                "SELECT id, name FROM subdomains WHERE domain_id = ?",
-                (domain_id,)
-            )
-            for sub_id, sub_name in sub_cursor.fetchall():
+            # Add domain node if not already added
+            if domain_id not in processed_domains:
+                nodes.append({
+                    "data": {
+                        "id": f"dom_{domain_id}",
+                        "label": domain_name,
+                        "type": "domain",
+                        "name": domain_name
+                    }
+                })
+                processed_domains.add(domain_id)
+            
+            # Add subdomain node if not already added
+            if sub_id not in processed_subdomains:
                 nodes.append({
                     "data": {
                         "id": f"sub_{sub_id}",
@@ -75,14 +91,26 @@ class GraphBuilder:
                         "name": sub_name
                     }
                 })
+                processed_subdomains.add(sub_id)
                 
-                # Edge from domain to subdomain
+                # Connect subdomain to domain
                 edges.append({
                     "data": {
                         "id": f"e_dom_sub_{domain_id}_{sub_id}",
                         "source": f"dom_{domain_id}",
                         "target": f"sub_{sub_id}",
                         "label": "HAS_SUBDOMAIN"
+                    }
+                })
+            
+            # Connect subdomain to IP if there's a resolution
+            if ip_id and ip_address:
+                edges.append({
+                    "data": {
+                        "id": f"e_ip_sub_{ip_id}_{sub_id}",
+                        "source": f"ip_{ip_id}",
+                        "target": f"sub_{sub_id}",
+                        "label": "RESOLVES_TO"
                     }
                 })
         
@@ -117,22 +145,8 @@ class GraphBuilder:
                 }
             })
             
-            # Connect subdomains to IPs (DNS resolution)
-            dns_cursor = conn.execute("""
-                SELECT si.subdomain_id 
-                FROM subdomain_ips si 
-                WHERE si.ip_id = ?
-            """, (ip_id,))
-            
-            for (subdomain_id,) in dns_cursor.fetchall():
-                edges.append({
-                    "data": {
-                        "id": f"e_sub_ip_{subdomain_id}_{ip_id}",
-                        "source": f"sub_{subdomain_id}",
-                        "target": f"ip_{ip_id}",
-                        "label": "RESOLVES_TO"
-                    }
-                })
+            # Note: Subdomain-IP connections are now handled in _build_domain_nodes
+            # to maintain proper hierarchy: IP -> Subdomain
         
         return nodes, edges
     
@@ -185,19 +199,23 @@ class GraphBuilder:
         return nodes, edges
     
     def _build_vulnerability_nodes(self, conn: sqlite3.Connection) -> tuple[List[Dict], List[Dict]]:
-        """Build vulnerability nodes with risk indicators, prioritizing service-level associations."""
+        """Build vulnerability nodes with risk indicators and PoC information."""
         nodes = []
         edges = []
         
         try:
             cursor = conn.execute("""
-                SELECT id, ip_id, service_id, cve_id, severity, cvss_score, 
-                       epss_score, is_cisa_kev, description
-                FROM vulnerabilities
+                SELECT v.id, v.ip_id, v.service_id, v.cve_id, v.severity, v.cvss_score, 
+                       v.epss_score, v.is_cisa_kev, v.description,
+                       COUNT(e.id) as exploit_count
+                FROM vulnerabilities v
+                LEFT JOIN exploits e ON v.id = e.vulnerability_id
+                GROUP BY v.id, v.ip_id, v.service_id, v.cve_id, v.severity, v.cvss_score, 
+                         v.epss_score, v.is_cisa_kev, v.description
             """)
             
             for row in cursor.fetchall():
-                vuln_id, ip_id, service_id, cve_id, severity, cvss_score, epss_score, is_cisa_kev, description = row
+                vuln_id, ip_id, service_id, cve_id, severity, cvss_score, epss_score, is_cisa_kev, description, exploit_count = row
                 
                 # Build vulnerability label
                 label = cve_id or "Unknown CVE"
@@ -205,6 +223,8 @@ class GraphBuilder:
                     label += f"\nCVSS: {cvss_score}"
                 if epss_score:
                     label += f"\nEPSS: {epss_score * 100:.1f}%"
+                if exploit_count > 0:
+                    label += f"\n{exploit_count} PoCs"
                 
                 # Determine risk level for styling
                 risk_level = "low"
@@ -217,6 +237,24 @@ class GraphBuilder:
                 elif severity == "MEDIUM":
                     risk_level = "medium"
                 
+                # Get exploit details for this vulnerability
+                exploit_cursor = conn.execute("""
+                    SELECT title, source, url, verified, author, date, exploit_type
+                    FROM exploits WHERE vulnerability_id = ?
+                """, (vuln_id,))
+                
+                exploits = []
+                for exploit_row in exploit_cursor.fetchall():
+                    exploits.append({
+                        "title": exploit_row[0],
+                        "source": exploit_row[1],
+                        "url": exploit_row[2],
+                        "verified": bool(exploit_row[3]),
+                        "author": exploit_row[4],
+                        "date": exploit_row[5],
+                        "exploit_type": exploit_row[6]
+                    })
+                
                 nodes.append({
                     "data": {
                         "id": f"vuln_{vuln_id}",
@@ -228,12 +266,14 @@ class GraphBuilder:
                         "epss_score": epss_score or 0,
                         "is_cisa_kev": bool(is_cisa_kev),
                         "risk_level": risk_level,
-                        "description": description or ""
+                        "description": description or "",
+                        "exploit_count": exploit_count,
+                        "exploits": exploits,
+                        "has_pocs": exploit_count > 0
                     }
                 })
                 
                 # ALWAYS prioritize service-level connection if service_id exists
-                # This creates the HOST -> Service -> Vulnerability chain
                 if service_id:
                     edges.append({
                         "data": {

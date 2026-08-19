@@ -10,8 +10,10 @@ class EASMDashboard {
             kev: false,
             highEpss: false,
             critical: false,
-            https: false
+            withPocs: false,
+            subdomainsOnly: false
         };
+        this.searchTerm = '';
         
         // Don't auto-initialize, wait for DOM
     }
@@ -411,6 +413,18 @@ class EASMDashboard {
             }
         });
 
+        // Search functionality
+        document.getElementById('search-input').addEventListener('input', (e) => {
+            this.searchTerm = e.target.value.toLowerCase();
+            this.applyFilters();
+        });
+
+        document.getElementById('clear-search').addEventListener('click', () => {
+            document.getElementById('search-input').value = '';
+            this.searchTerm = '';
+            this.applyFilters();
+        });
+
         // Filter checkboxes
         document.getElementById('filter-kev').addEventListener('change', (e) => {
             this.filters.kev = e.target.checked;
@@ -427,8 +441,13 @@ class EASMDashboard {
             this.applyFilters();
         });
 
-        document.getElementById('filter-https').addEventListener('change', (e) => {
-            this.filters.https = e.target.checked;
+        document.getElementById('filter-with-pocs').addEventListener('change', (e) => {
+            this.filters.withPocs = e.target.checked;
+            this.applyFilters();
+        });
+
+        document.getElementById('filter-subdomains-only').addEventListener('change', (e) => {
+            this.filters.subdomainsOnly = e.target.checked;
             this.applyFilters();
         });
 
@@ -468,8 +487,40 @@ class EASMDashboard {
         this.cy.nodes().show();
         this.cy.edges().show();
 
-        // Apply vulnerability filters - when any filter is active, hide non-matching vulnerabilities
-        const hasVulnFilters = this.filters.kev || this.filters.highEpss || this.filters.critical;
+        // Apply search filter
+        if (this.searchTerm) {
+            this.cy.nodes().forEach(node => {
+                const data = node.data();
+                const searchableText = [
+                    data.label,
+                    data.name,
+                    data.ip,
+                    data.cve_id,
+                    data.service,
+                    data.product,
+                    data.org,
+                    data.country,
+                    data.port ? data.port.toString() : ''
+                ].filter(Boolean).join(' ').toLowerCase();
+                
+                if (!searchableText.includes(this.searchTerm)) {
+                    node.hide();
+                }
+            });
+        }
+
+        // Apply subdomain-only filter
+        if (this.filters.subdomainsOnly) {
+            this.cy.nodes().forEach(node => {
+                const nodeType = node.data('type');
+                if (!['subdomain', 'domain'].includes(nodeType)) {
+                    node.hide();
+                }
+            });
+        }
+
+        // Apply vulnerability filters
+        const hasVulnFilters = this.filters.kev || this.filters.highEpss || this.filters.critical || this.filters.withPocs;
         
         if (hasVulnFilters) {
             this.cy.nodes('[type="vulnerability"]').forEach(node => {
@@ -493,17 +544,12 @@ class EASMDashboard {
                     shouldShow = true;
                 }
                 
-                if (!shouldShow) {
-                    node.hide();
+                // Check PoCs filter
+                if (this.filters.withPocs && node.data('has_pocs') === true) {
+                    shouldShow = true;
                 }
-            });
-        }
-
-        // Apply HTTPS service filter
-        if (this.filters.https) {
-            // Hide non-HTTPS services
-            this.cy.nodes('[type="service"], [type="http"]').forEach(node => {
-                if (node.data('type') !== 'https' && node.data('ssl') !== true) {
+                
+                if (!shouldShow) {
                     node.hide();
                 }
             });
@@ -588,7 +634,7 @@ class EASMDashboard {
                 </div>
             `;
         } else if (data.type === 'vulnerability') {
-            const kevBadge = data.is_cisa_kev === 'true' ? '<span class="vulnerability-badge kev">CISA KEV</span>' : '';
+            const kevBadge = data.is_cisa_kev === true ? '<span class="vulnerability-badge kev">CISA KEV</span>' : '';
             const severityClass = (data.severity || 'unknown').toLowerCase();
             
             // Find connected service to show the relationship
@@ -601,6 +647,33 @@ class EASMDashboard {
                     <span class="key">Affected Service:</span>
                     <span class="value">${serviceData.port}/${serviceData.protocol} (${serviceData.service || 'Unknown'})</span>
                 </div>`;
+            }
+            
+            // Build exploits/PoCs section
+            let exploitsSection = '';
+            if (data.exploits && data.exploits.length > 0) {
+                exploitsSection = '<h4>Available Exploits & PoCs</h4>';
+                data.exploits.forEach(exploit => {
+                    const verifiedBadge = exploit.verified ? '<span class="exploit-badge verified">✓ Verified</span>' : '';
+                    const sourceClass = exploit.source.toLowerCase().includes('github') ? 'github' : 'exploitdb';
+                    
+                    exploitsSection += `
+                    <div class="exploit-item">
+                        <div class="exploit-header">
+                            <span class="exploit-source ${sourceClass}">${exploit.source}</span>
+                            ${verifiedBadge}
+                        </div>
+                        <div class="exploit-title">${exploit.title}</div>
+                        <div class="exploit-details">
+                            ${exploit.author ? `<span>Author: ${exploit.author}</span>` : ''}
+                            ${exploit.date ? `<span>Date: ${exploit.date}</span>` : ''}
+                            ${exploit.exploit_type ? `<span>Type: ${exploit.exploit_type}</span>` : ''}
+                        </div>
+                        <div class="exploit-url">
+                            <a href="${exploit.url}" target="_blank" rel="noopener">${exploit.url}</a>
+                        </div>
+                    </div>`;
+                });
             }
             
             html = `
@@ -629,10 +702,15 @@ class EASMDashboard {
                     <span class="key">Risk Level:</span>
                     <span class="value">${data.risk_level || 'Unknown'}</span>
                 </div>
+                <div class="property">
+                    <span class="key">Available PoCs:</span>
+                    <span class="value">${data.exploit_count || 0}</span>
+                </div>
                 ${data.description ? `
                 <h4>Description</h4>
                 <p>${data.description}</p>
                 ` : ''}
+                ${exploitsSection}
             `;
         }
 
