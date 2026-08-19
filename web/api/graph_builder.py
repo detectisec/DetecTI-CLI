@@ -52,6 +52,22 @@ class GraphBuilder:
         nodes = []
         edges = []
         
+        # Get all domains first
+        cursor = conn.execute("SELECT id, name FROM domains ORDER BY name")
+        processed_domains = set()
+        
+        for domain_id, domain_name in cursor.fetchall():
+            if domain_id not in processed_domains:
+                nodes.append({
+                    "data": {
+                        "id": f"dom_{domain_id}",
+                        "label": domain_name,
+                        "type": "domain",
+                        "name": domain_name
+                    }
+                })
+                processed_domains.add(domain_id)
+        
         # Get all subdomains with their IP connections
         cursor = conn.execute("""
             SELECT DISTINCT s.id, s.name, s.domain_id, d.name as domain_name,
@@ -64,24 +80,55 @@ class GraphBuilder:
         """)
         
         processed_subdomains = set()
-        processed_domains = set()
         
         for row in cursor.fetchall():
             sub_id, sub_name, domain_id, domain_name, ip_id, ip_address = row
             
-            # Add domain node if not already added
-            if domain_id not in processed_domains:
+            # Add subdomain node if not already added
+            if sub_id not in processed_subdomains:
                 nodes.append({
                     "data": {
-                        "id": f"dom_{domain_id}",
-                        "label": domain_name,
-                        "type": "domain",
-                        "name": domain_name
+                        "id": f"sub_{sub_id}",
+                        "label": sub_name,
+                        "type": "subdomain",
+                        "name": sub_name
                     }
                 })
-                processed_domains.add(domain_id)
-            
-            # Add subdomain node if not already added
+                processed_subdomains.add(sub_id)
+                
+                # Connect IP to subdomain (IP -> Subdomain hierarchy)
+                if ip_id and ip_address:
+                    edges.append({
+                        "data": {
+                            "id": f"e_ip_sub_{ip_id}_{sub_id}",
+                            "source": f"ip_{ip_id}",
+                            "target": f"sub_{sub_id}",
+                            "label": "HAS_SUBDOMAIN"
+                        }
+                    })
+                
+                # Connect subdomain to domain
+                edges.append({
+                    "data": {
+                        "id": f"e_sub_dom_{sub_id}_{domain_id}",
+                        "source": f"sub_{sub_id}",
+                        "target": f"dom_{domain_id}",
+                        "label": "BELONGS_TO"
+                    }
+                })
+        
+        # Also get subdomains that might not have IP mappings yet
+        cursor = conn.execute("""
+            SELECT s.id, s.name, s.domain_id, d.name as domain_name
+            FROM subdomains s
+            JOIN domains d ON s.domain_id = d.id
+            WHERE s.id NOT IN (
+                SELECT DISTINCT subdomain_id FROM subdomain_ips WHERE subdomain_id IS NOT NULL
+            )
+            ORDER BY s.name
+        """)
+        
+        for sub_id, sub_name, domain_id, domain_name in cursor.fetchall():
             if sub_id not in processed_subdomains:
                 nodes.append({
                     "data": {
@@ -96,21 +143,10 @@ class GraphBuilder:
                 # Connect subdomain to domain
                 edges.append({
                     "data": {
-                        "id": f"e_dom_sub_{domain_id}_{sub_id}",
-                        "source": f"dom_{domain_id}",
-                        "target": f"sub_{sub_id}",
-                        "label": "HAS_SUBDOMAIN"
-                    }
-                })
-            
-            # Connect subdomain to IP if there's a resolution
-            if ip_id and ip_address:
-                edges.append({
-                    "data": {
-                        "id": f"e_ip_sub_{ip_id}_{sub_id}",
-                        "source": f"ip_{ip_id}",
-                        "target": f"sub_{sub_id}",
-                        "label": "RESOLVES_TO"
+                        "id": f"e_sub_dom_{sub_id}_{domain_id}",
+                        "source": f"sub_{sub_id}",
+                        "target": f"dom_{domain_id}",
+                        "label": "BELONGS_TO"
                     }
                 })
         
@@ -273,7 +309,7 @@ class GraphBuilder:
                     }
                 })
                 
-                # ALWAYS prioritize service-level connection if service_id exists
+                # ALWAYS prioritize service-level connection if service_id exists (Services -> Vulnerabilities)
                 if service_id:
                     edges.append({
                         "data": {
@@ -283,7 +319,7 @@ class GraphBuilder:
                             "label": "HAS_VULN"
                         }
                     })
-                # Only connect directly to IP if no service association exists
+                # Only connect directly to IP if no service association exists (IP -> Vulnerabilities)
                 elif ip_id:
                     edges.append({
                         "data": {

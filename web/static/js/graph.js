@@ -67,9 +67,9 @@ class EASMDashboard {
                     directed: true,
                     spacingFactor: 1.75,
                     roots: function(nodes) {
-                        // Use domain and IP nodes as roots for hierarchical layout
+                        // Use IP nodes as roots for hierarchical layout (IP -> Domain/Sub -> Services -> Vulns)
                         return nodes.filter(function(node) {
-                            return node.data('type') === 'domain' || node.data('type') === 'ip';
+                            return node.data('type') === 'ip';
                         });
                     }
                 };
@@ -649,31 +649,61 @@ class EASMDashboard {
                 </div>`;
             }
             
-            // Build exploits/PoCs section
+            // Build exploits/PoCs section with GitHub and ExploitDB separation
             let exploitsSection = '';
             if (data.exploits && data.exploits.length > 0) {
+                const githubExploits = data.exploits.filter(e => e.source.toLowerCase().includes('github'));
+                const exploitdbExploits = data.exploits.filter(e => !e.source.toLowerCase().includes('github'));
+                
                 exploitsSection = '<h4>Available Exploits & PoCs</h4>';
-                data.exploits.forEach(exploit => {
-                    const verifiedBadge = exploit.verified ? '<span class="exploit-badge verified">✓ Verified</span>' : '';
-                    const sourceClass = exploit.source.toLowerCase().includes('github') ? 'github' : 'exploitdb';
-                    
-                    exploitsSection += `
-                    <div class="exploit-item">
-                        <div class="exploit-header">
-                            <span class="exploit-source ${sourceClass}">${exploit.source}</span>
-                            ${verifiedBadge}
-                        </div>
-                        <div class="exploit-title">${exploit.title}</div>
-                        <div class="exploit-details">
-                            ${exploit.author ? `<span>Author: ${exploit.author}</span>` : ''}
-                            ${exploit.date ? `<span>Date: ${exploit.date}</span>` : ''}
-                            ${exploit.exploit_type ? `<span>Type: ${exploit.exploit_type}</span>` : ''}
-                        </div>
-                        <div class="exploit-url">
-                            <a href="${exploit.url}" target="_blank" rel="noopener">${exploit.url}</a>
-                        </div>
-                    </div>`;
-                });
+                
+                if (githubExploits.length > 0) {
+                    exploitsSection += '<h5 style="color: #00d4ff; margin: 1rem 0 0.5rem 0;">🐙 GitHub PoCs</h5>';
+                    githubExploits.forEach(exploit => {
+                        const verifiedBadge = exploit.verified ? '<span class="exploit-badge verified">✓ Verified</span>' : '';
+                        
+                        exploitsSection += `
+                        <div class="exploit-item">
+                            <div class="exploit-header">
+                                <span class="exploit-source github">${exploit.source}</span>
+                                ${verifiedBadge}
+                            </div>
+                            <div class="exploit-title">${exploit.title}</div>
+                            <div class="exploit-details">
+                                ${exploit.author ? `<span>👤 Author: ${exploit.author}</span>` : ''}
+                                ${exploit.date ? `<span>📅 Date: ${exploit.date}</span>` : ''}
+                                ${exploit.exploit_type ? `<span>🏷️ Type: ${exploit.exploit_type}</span>` : ''}
+                            </div>
+                            <div class="exploit-url">
+                                <a href="${exploit.url}" target="_blank" rel="noopener">🔗 ${exploit.url}</a>
+                            </div>
+                        </div>`;
+                    });
+                }
+                
+                if (exploitdbExploits.length > 0) {
+                    exploitsSection += '<h5 style="color: #e74c3c; margin: 1rem 0 0.5rem 0;">💥 ExploitDB</h5>';
+                    exploitdbExploits.forEach(exploit => {
+                        const verifiedBadge = exploit.verified ? '<span class="exploit-badge verified">✓ Verified</span>' : '';
+                        
+                        exploitsSection += `
+                        <div class="exploit-item">
+                            <div class="exploit-header">
+                                <span class="exploit-source exploitdb">${exploit.source}</span>
+                                ${verifiedBadge}
+                            </div>
+                            <div class="exploit-title">${exploit.title}</div>
+                            <div class="exploit-details">
+                                ${exploit.author ? `<span>👤 Author: ${exploit.author}</span>` : ''}
+                                ${exploit.date ? `<span>📅 Date: ${exploit.date}</span>` : ''}
+                                ${exploit.exploit_type ? `<span>🏷️ Type: ${exploit.exploit_type}</span>` : ''}
+                            </div>
+                            <div class="exploit-url">
+                                <a href="${exploit.url}" target="_blank" rel="noopener">🔗 ${exploit.url}</a>
+                            </div>
+                        </div>`;
+                    });
+                }
             }
             
             html = `
