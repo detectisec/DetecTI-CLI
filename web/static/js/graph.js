@@ -144,6 +144,9 @@ class EASMDashboard {
         } catch (error) {
             console.error('Failed to initialize dashboard:', error);
             this.showError(`Failed to load dashboard data: ${error.message}`);
+            
+            // Emergency fallback: Show basic lead selector even if API fails
+            this.showEmergencyLeadSelector();
         }
     }
 
@@ -344,11 +347,20 @@ class EASMDashboard {
                         const nodeData = node.data || node;
                         console.log(`Emergency lead ${index + 1}: ${nodeData.id} (${nodeData.type})`);
                         
+                        // Create a more descriptive display name
+                        let displayName = nodeData.label || nodeData.name || nodeData.ip || nodeData.id;
+                        if (nodeData.ip) {
+                            displayName = nodeData.ip;
+                        } else if (nodeData.label && nodeData.label.includes('\n')) {
+                            // Extract first line for display
+                            displayName = nodeData.label.split('\n')[0];
+                        }
+                        
                         const lead = {
                             id: nodeData.id,
                             type: nodeData.type || 'unknown',
                             name: nodeData.name || nodeData.ip || nodeData.label || nodeData.id,
-                            display_name: nodeData.label || nodeData.name || nodeData.ip || nodeData.id,
+                            display_name: displayName,
                             org: nodeData.org || 'Unknown',
                             country: nodeData.country || 'Unknown',
                             service_count: 0,
@@ -1051,6 +1063,10 @@ class EASMDashboard {
     async loadGraph() {
         try {
             console.log('Fetching graph data...');
+            
+            // Test API connection first
+            await this.testAPIConnection();
+            
             this.graphData = await window.api.getGraphData();
             console.log('Graph data received:', this.graphData);
             
@@ -1111,6 +1127,22 @@ class EASMDashboard {
         } catch (error) {
             console.error('Failed to load graph data:', error);
             throw error; // Re-throw to be caught by init()
+        }
+    }
+
+    async testAPIConnection() {
+        try {
+            console.log('Testing API connection...');
+            const response = await fetch('/api/v1/summary');
+            if (!response.ok) {
+                throw new Error(`API returned ${response.status}: ${response.statusText}`);
+            }
+            const data = await response.json();
+            console.log('✓ API connection successful:', data);
+            return true;
+        } catch (error) {
+            console.error('❌ API connection failed:', error);
+            throw new Error(`API connection failed: ${error.message}`);
         }
     }
 
@@ -1515,9 +1547,29 @@ class EASMDashboard {
                     <h3>⚠️ Error</h3>
                     <p>${message}</p>
                     <p style="font-size: 0.9em; color: #aaa;">Check browser console for details</p>
+                    <button onclick="location.reload()" style="margin-top: 15px; padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                        Reload Dashboard
+                    </button>
                 </div>
             `;
             loading.style.display = 'flex';
+        }
+    }
+
+    showEmergencyLeadSelector() {
+        console.log('Showing emergency lead selector fallback...');
+        const leadList = document.getElementById('lead-list');
+        if (leadList) {
+            leadList.innerHTML = `
+                <div class="lead-loading" style="color: #ff9500;">
+                    ⚠️ API Connection Failed<br>
+                    <small>Unable to load leads from database</small><br>
+                    <button onclick="location.reload()" 
+                            style="margin-top: 10px; padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer;">
+                        Retry Connection
+                    </button>
+                </div>
+            `;
         }
     }
 
