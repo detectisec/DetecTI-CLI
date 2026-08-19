@@ -262,8 +262,10 @@ class CensysModule(BaseModule):
             print(f"❌ Censys authentication failed. Please check your API credentials.")
             return []
         except CensysAPIError as e:
-            logger.error(f"Censys API error for target {target}: {e}")
-            print(f"⚠️  Censys API error: {e}")
+            # Don't log/print if it's actually a quota exhaustion that wasn't caught properly
+            if "insufficient balance" not in str(e).lower():
+                logger.error(f"Censys API error for target {target}: {e}")
+                print(f"⚠️  Censys API error: {e}")
             return []
         except Exception as e:
             logger.error(f"Censys module error for target {target}: {e}")
