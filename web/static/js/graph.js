@@ -327,31 +327,47 @@ class EASMDashboard {
 
         // Show all nodes first
         this.cy.nodes().show();
+        this.cy.edges().show();
 
-        // Apply filters - when checked, show ONLY those types
-        if (this.filters.kev) {
-            // Show only CISA KEV vulnerabilities
-            this.cy.nodes('[type="vulnerability"][is_cisa_kev!="true"]').hide();
-        }
-
-        if (this.filters.highEpss) {
-            // Show only high EPSS vulnerabilities (>50%)
+        // Apply vulnerability filters - when any filter is active, hide non-matching vulnerabilities
+        const hasVulnFilters = this.filters.kev || this.filters.highEpss || this.filters.critical;
+        
+        if (hasVulnFilters) {
             this.cy.nodes('[type="vulnerability"]').forEach(node => {
-                const epssScore = node.data('epss_score') || 0;
-                if (epssScore <= 0.5) {
+                let shouldShow = false;
+                
+                // Check CISA KEV filter
+                if (this.filters.kev && node.data('is_cisa_kev') === true) {
+                    shouldShow = true;
+                }
+                
+                // Check high EPSS filter
+                if (this.filters.highEpss) {
+                    const epssScore = node.data('epss_score') || 0;
+                    if (epssScore > 0.5) {
+                        shouldShow = true;
+                    }
+                }
+                
+                // Check critical severity filter
+                if (this.filters.critical && node.data('severity') === 'CRITICAL') {
+                    shouldShow = true;
+                }
+                
+                if (!shouldShow) {
                     node.hide();
                 }
             });
         }
 
-        if (this.filters.critical) {
-            // Show only critical vulnerabilities
-            this.cy.nodes('[type="vulnerability"][severity!="CRITICAL"]').hide();
-        }
-
+        // Apply HTTPS service filter
         if (this.filters.https) {
-            // Show only HTTPS services
-            this.cy.nodes('[type="service"][ssl!="true"], [type="http"]').hide();
+            // Hide non-HTTPS services
+            this.cy.nodes('[type="service"], [type="http"]').forEach(node => {
+                if (node.data('type') !== 'https' && node.data('ssl') !== true) {
+                    node.hide();
+                }
+            });
         }
 
         // Hide edges connected to hidden nodes
@@ -360,8 +376,6 @@ class EASMDashboard {
             const target = edge.target();
             if (source.hidden() || target.hidden()) {
                 edge.hide();
-            } else {
-                edge.show();
             }
         });
     }
