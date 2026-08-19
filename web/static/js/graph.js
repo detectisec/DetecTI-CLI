@@ -206,42 +206,87 @@ class EASMDashboard {
 
         leadList.innerHTML = '';
 
-        this.leads.forEach(lead => {
+        // Sort leads by priority: KEV > Critical > PoC count > Vuln count > Service count
+        const sortedLeads = [...this.leads].sort((a, b) => {
+            // CISA KEV first
+            if (a.has_kev && !b.has_kev) return -1;
+            if (!a.has_kev && b.has_kev) return 1;
+            
+            // Critical vulnerabilities second
+            if (a.has_critical && !b.has_critical) return -1;
+            if (!a.has_critical && b.has_critical) return 1;
+            
+            // PoC count third
+            if (a.poc_count !== b.poc_count) return b.poc_count - a.poc_count;
+            
+            // Vulnerability count fourth
+            if (a.vuln_count !== b.vuln_count) return b.vuln_count - a.vuln_count;
+            
+            // Service count last
+            return b.service_count - a.service_count;
+        });
+
+        sortedLeads.forEach(lead => {
             const leadItem = document.createElement('div');
             leadItem.className = 'lead-item';
             leadItem.dataset.leadId = lead.id;
 
-            // Build badges
+            // Build priority badges with proper visual indicators
             const badges = [];
-            if (lead.vuln_count > 0) {
-                badges.push('<span class="lead-badge cve">CVE</span>');
-            }
-            if (lead.poc_count > 0) {
-                badges.push('<span class="lead-badge poc">PoC</span>');
-            }
+            
+            // CISA KEV badge (highest priority - red with pulse)
             if (lead.has_kev) {
-                badges.push('<span class="lead-badge kev">KEV</span>');
+                badges.push('<span class="lead-badge kev" title="CISA Known Exploited Vulnerability">🚨 KEV</span>');
             }
+            
+            // Critical vulnerabilities badge
             if (lead.has_critical) {
-                badges.push('<span class="lead-badge critical">CRIT</span>');
+                badges.push('<span class="lead-badge critical" title="Critical Severity Vulnerabilities">⚠️ CRIT</span>');
+            }
+            
+            // PoC/Exploit availability badge
+            if (lead.poc_count > 0) {
+                badges.push(`<span class="lead-badge poc" title="${lead.poc_count} Proof-of-Concept(s) Available">💥 ${lead.poc_count} PoC</span>`);
+            }
+            
+            // CVE count badge
+            if (lead.vuln_count > 0) {
+                badges.push(`<span class="lead-badge cve" title="${lead.vuln_count} CVE(s) Found">🔍 ${lead.vuln_count} CVE</span>`);
             }
 
-            // Build stats
+            // Build detailed stats
             let stats = '';
             if (lead.type === 'ip') {
-                stats = `${lead.service_count} services, ${lead.vuln_count} vulns`;
+                const orgInfo = lead.org && lead.org !== 'Unknown' ? ` (${lead.org})` : '';
+                const countryInfo = lead.country && lead.country !== 'Unknown' ? ` [${lead.country}]` : '';
+                stats = `${lead.service_count} services, ${lead.vuln_count} vulns${orgInfo}${countryInfo}`;
             } else if (lead.type === 'domain') {
                 stats = `${lead.ip_count} IPs, ${lead.service_count} services, ${lead.vuln_count} vulns`;
+            }
+
+            // Add risk level indicator
+            let riskClass = '';
+            if (lead.has_kev) {
+                riskClass = 'risk-critical';
+            } else if (lead.has_critical || lead.poc_count > 0) {
+                riskClass = 'risk-high';
+            } else if (lead.vuln_count > 0) {
+                riskClass = 'risk-medium';
+            } else {
+                riskClass = 'risk-low';
             }
 
             leadItem.innerHTML = `
                 <div class="lead-checkbox"></div>
                 <div class="lead-info">
-                    <div class="lead-name">${lead.display_name}</div>
-                    <div class="lead-type">${lead.type}</div>
+                    <div class="lead-header">
+                        <div class="lead-name">${lead.display_name}</div>
+                        <div class="lead-type ${lead.type}">${lead.type.toUpperCase()}</div>
+                    </div>
                     <div class="lead-badges">${badges.join('')}</div>
                     <div class="lead-stats">${stats}</div>
                 </div>
+                <div class="lead-risk-indicator ${riskClass}"></div>
             `;
 
             leadItem.addEventListener('click', () => {
@@ -289,14 +334,14 @@ class EASMDashboard {
     applyLeadFilter() {
         if (!this.cy) return;
 
-        // If no leads are selected, hide all nodes (default behavior)
+        // Default behavior: If no leads are selected, hide all nodes and edges
         if (this.selectedLeads.size === 0) {
             this.cy.nodes().hide();
             this.cy.edges().hide();
             return;
         }
 
-        // Show all nodes first
+        // Show all nodes and edges first
         this.cy.nodes().show();
         this.cy.edges().show();
 
@@ -323,26 +368,29 @@ class EASMDashboard {
             }
         });
 
-        // Second pass: Add all nodes connected to selected leads (services, vulnerabilities, etc.)
-        const addConnectedNodes = (nodeId) => {
+        // Second pass: Recursively add all connected nodes (services, vulnerabilities, exploits)
+        const addConnectedSubtree = (nodeId, visited = new Set()) => {
+            if (visited.has(nodeId)) return;
+            visited.add(nodeId);
+            
             const node = this.cy.getElementById(nodeId);
             if (!node.length) return;
             
-            // Add all neighbors (connected nodes)
-            const neighbors = node.neighborhood().nodes();
-            neighbors.forEach(neighbor => {
-                const neighborId = neighbor.id();
-                if (!visibleNodes.has(neighborId)) {
-                    visibleNodes.add(neighborId);
-                    // Recursively add their connections (for vulnerability -> exploit chains)
-                    addConnectedNodes(neighborId);
+            // Add all connected nodes (both incoming and outgoing edges)
+            const connectedNodes = node.neighborhood().nodes();
+            connectedNodes.forEach(connectedNode => {
+                const connectedId = connectedNode.id();
+                if (!visibleNodes.has(connectedId)) {
+                    visibleNodes.add(connectedId);
+                    // Recursively add their connections
+                    addConnectedSubtree(connectedId, visited);
                 }
             });
         };
 
-        // Add all connected nodes for each selected lead
-        visibleNodes.forEach(nodeId => {
-            addConnectedNodes(nodeId);
+        // Add all connected subtrees for each selected lead
+        Array.from(visibleNodes).forEach(nodeId => {
+            addConnectedSubtree(nodeId);
         });
 
         // Third pass: Hide all nodes that are not in the visible set
@@ -618,7 +666,7 @@ class EASMDashboard {
                 this.cy.elements().remove();
                 this.cy.add(this.graphData.elements);
                 
-                // Apply lead filter first (starts with empty selection = hidden graph)
+                // Apply lead filter first (default: no leads selected = empty graph)
                 this.applyLeadFilter();
                 
                 // Run layout

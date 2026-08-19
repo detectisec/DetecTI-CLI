@@ -492,14 +492,21 @@ body {
     border-bottom: 1px solid #222;
     cursor: pointer;
     transition: all 0.3s ease;
+    position: relative;
 }
 
 .lead-item:hover {
     background: #1a1a1a;
+    border-left: 3px solid #00d4ff;
 }
 
 .lead-item:last-child {
     border-bottom: none;
+}
+
+.lead-item.selected {
+    background: #1a2332;
+    border-left: 3px solid #00d4ff;
 }
 
 .lead-checkbox {
@@ -535,16 +542,36 @@ body {
     gap: 0.3rem;
 }
 
+.lead-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
 .lead-name {
     font-weight: 500;
     color: #fff;
     font-size: 0.9rem;
+    font-family: 'Courier New', monospace;
 }
 
 .lead-type {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     color: #888;
     text-transform: uppercase;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    background: #333;
+}
+
+.lead-type.ip {
+    background: #9b59b6;
+    color: #fff;
+}
+
+.lead-type.domain {
+    background: #00d4ff;
+    color: #000;
 }
 
 .lead-badges {
@@ -563,24 +590,28 @@ body {
 }
 
 .lead-badge.cve {
-    background: #e74c3c;
+    background: #3498db;
     color: #fff;
 }
 
 .lead-badge.poc {
     background: #f39c12;
     color: #000;
+    font-weight: bold;
 }
 
 .lead-badge.kev {
     background: #8b0000;
     color: #fff;
     animation: pulse-badge 2s infinite;
+    font-weight: bold;
+    border: 1px solid #ff1744;
 }
 
 .lead-badge.critical {
     background: #dc143c;
     color: #fff;
+    font-weight: bold;
 }
 
 @keyframes pulse-badge {
@@ -593,6 +624,34 @@ body {
     font-size: 0.75rem;
     color: #666;
     margin-top: 0.2rem;
+    line-height: 1.3;
+}
+
+/* Risk level indicator */
+.lead-risk-indicator {
+    width: 4px;
+    height: 100%;
+    position: absolute;
+    right: 0;
+    top: 0;
+    border-radius: 0 4px 4px 0;
+}
+
+.lead-risk-indicator.risk-critical {
+    background: linear-gradient(180deg, #8b0000, #dc143c);
+    box-shadow: 0 0 8px rgba(220, 20, 60, 0.5);
+}
+
+.lead-risk-indicator.risk-high {
+    background: linear-gradient(180deg, #dc143c, #ff6b6b);
+}
+
+.lead-risk-indicator.risk-medium {
+    background: linear-gradient(180deg, #f39c12, #ffa502);
+}
+
+.lead-risk-indicator.risk-low {
+    background: linear-gradient(180deg, #27ae60, #2ed573);
 }
 
 /* Exploit/PoC styling in inspector */
