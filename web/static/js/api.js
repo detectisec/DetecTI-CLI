@@ -46,16 +46,7 @@ class APIClient {
         return this.request('/graph');
     }
 
-    async getLeads() {
-        try {
-            const result = await this.request('/leads');
-            console.log('API getLeads result:', result);
-            return result;
-        } catch (error) {
-            console.error('API getLeads error:', error);
-            throw error;
-        }
-    }
+    // Removed getLeads() - Lead Selector is now 100% frontend-based using graph data
 
     async getAssets() {
         return this.request('/assets');

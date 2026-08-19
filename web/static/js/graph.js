@@ -109,10 +109,6 @@ class EASMDashboard {
             console.log('Loading summary data...');
             await this.loadSummary();
             
-            // Load leads data
-            console.log('Loading leads data...');
-            await this.loadLeads();
-            
             // Initialize Cytoscape
             console.log('Initializing Cytoscape...');
             this.initCytoscape();
@@ -179,31 +175,109 @@ class EASMDashboard {
         }
     }
 
-    async loadLeads() {
+    populateLeadSelector(elements) {
         try {
-            console.log('Fetching leads data...');
-            this.leads = await window.api.getLeads();
-            console.log('Leads data received:', this.leads);
+            console.log('Populating lead selector from graph data...');
+            this.leads = [];
             
-            // Always render the lead selector, even if empty
+            if (!elements || !elements.nodes) {
+                console.warn('No graph elements available for lead selector');
+                this.renderLeadSelector();
+                return;
+            }
+            
+            // Extract leads from graph nodes (IP, domain, subdomain)
+            const leadNodes = elements.nodes.filter(node => 
+                ['ip', 'domain', 'subdomain'].includes(node.data.type)
+            );
+            
+            console.log(`Found ${leadNodes.length} potential lead nodes`);
+            
+            // Process each lead node
+            leadNodes.forEach(node => {
+                const nodeData = node.data;
+                
+                // Find connected vulnerabilities to determine threat level
+                const connectedVulns = this.findConnectedVulnerabilities(nodeData.id, elements);
+                
+                // Calculate threat indicators
+                const vulnCount = connectedVulns.length;
+                const hasKev = connectedVulns.some(v => v.is_cisa_kev === true);
+                const hasCritical = connectedVulns.some(v => v.severity === 'CRITICAL');
+                const pocCount = connectedVulns.filter(v => v.exploit_count > 0).length;
+                
+                // Find connected services
+                const connectedServices = this.findConnectedServices(nodeData.id, elements);
+                const serviceCount = connectedServices.length;
+                
+                // Create lead object
+                const lead = {
+                    id: nodeData.id,
+                    type: nodeData.type,
+                    name: nodeData.name || nodeData.ip || nodeData.label,
+                    display_name: nodeData.label || nodeData.name || nodeData.ip,
+                    org: nodeData.org || 'Unknown',
+                    country: nodeData.country || 'Unknown',
+                    service_count: serviceCount,
+                    vuln_count: vulnCount,
+                    has_kev: hasKev,
+                    has_critical: hasCritical,
+                    poc_count: pocCount,
+                    ip_count: nodeData.type === 'domain' ? this.countConnectedIPs(nodeData.id, elements) : 0
+                };
+                
+                this.leads.push(lead);
+            });
+            
+            console.log(`Created ${this.leads.length} leads:`, this.leads);
             this.renderLeadSelector();
             
-            console.log('Leads data loaded successfully');
-            
         } catch (error) {
-            console.error('Failed to load leads:', error);
-            
-            // Show error in lead selector instead of throwing
+            console.error('Failed to populate lead selector:', error);
             const leadList = document.getElementById('lead-list');
             if (leadList) {
                 leadList.innerHTML = `
                     <div class="lead-loading" style="color: #ff4757;">
                         ⚠️ Error loading leads: ${error.message}
-                        <br><small>Check console for details</small>
                     </div>
                 `;
             }
         }
+    }
+    
+    findConnectedVulnerabilities(nodeId, elements) {
+        const vulnerabilities = [];
+        
+        // Find all paths: node -> service -> vulnerability
+        const connectedServices = this.findConnectedServices(nodeId, elements);
+        
+        connectedServices.forEach(service => {
+            const serviceVulns = elements.edges
+                .filter(edge => edge.data.source === service.id && edge.data.label === 'HAS_VULN')
+                .map(edge => elements.nodes.find(n => n.data.id === edge.data.target))
+                .filter(n => n && n.data.type === 'vulnerability')
+                .map(n => n.data);
+            
+            vulnerabilities.push(...serviceVulns);
+        });
+        
+        return vulnerabilities;
+    }
+    
+    findConnectedServices(nodeId, elements) {
+        return elements.edges
+            .filter(edge => edge.data.target === nodeId && edge.data.label === 'EXPOSES')
+            .map(edge => elements.nodes.find(n => n.data.id === edge.data.source))
+            .filter(n => n && ['service', 'http', 'https'].includes(n.data.type))
+            .map(n => n.data);
+    }
+    
+    countConnectedIPs(domainId, elements) {
+        return elements.edges
+            .filter(edge => edge.data.source === domainId)
+            .map(edge => elements.nodes.find(n => n.data.id === edge.data.target))
+            .filter(n => n && n.data.type === 'ip')
+            .length;
     }
 
     renderLeadSelector() {
@@ -301,7 +375,8 @@ class EASMDashboard {
             `;
 
             leadItem.addEventListener('click', () => {
-                this.toggleLead(lead.id);
+                const isCurrentlySelected = this.selectedLeads.has(lead.id);
+                window.toggleLeadVisibility(lead.id, !isCurrentlySelected);
             });
 
             leadList.appendChild(leadItem);
@@ -356,26 +431,15 @@ class EASMDashboard {
         this.cy.nodes().show();
         this.cy.edges().show();
 
-        // Get selected lead names
-        const selectedLeadNames = new Set();
-        this.leads.forEach(lead => {
-            if (this.selectedLeads.has(lead.id)) {
-                selectedLeadNames.add(lead.name);
-            }
-        });
-
-        // Build a set of nodes that should be visible (lead nodes + their entire sub-tree)
+        // Get selected lead IDs
+        const selectedLeadIds = Array.from(this.selectedLeads);
         const visibleNodes = new Set();
 
-        // First pass: Find all lead nodes that are selected
-        this.cy.nodes().forEach(node => {
-            const nodeData = node.data();
-            
-            // Check if this is a selected lead node
-            if (nodeData.type === 'ip' && selectedLeadNames.has(nodeData.ip)) {
-                visibleNodes.add(node.id());
-            } else if ((nodeData.type === 'domain' || nodeData.type === 'subdomain') && selectedLeadNames.has(nodeData.name)) {
-                visibleNodes.add(node.id());
+        // First pass: Find all selected lead nodes
+        selectedLeadIds.forEach(leadId => {
+            const node = this.cy.getElementById(leadId);
+            if (node.length > 0) {
+                visibleNodes.add(leadId);
             }
         });
 
@@ -422,6 +486,57 @@ class EASMDashboard {
 
         // Apply other filters on top of lead filter
         this.applyFilters();
+    }
+    
+    applyLeadVisibilityFilter(nodeId, isVisible) {
+        if (!this.cy) return;
+        
+        const node = this.cy.getElementById(nodeId);
+        if (!node.length) return;
+        
+        if (isVisible) {
+            // Show the node and its entire subtree
+            const nodesToShow = new Set([nodeId]);
+            
+            const addConnectedSubtree = (currentNodeId, visited = new Set()) => {
+                if (visited.has(currentNodeId)) return;
+                visited.add(currentNodeId);
+                
+                const currentNode = this.cy.getElementById(currentNodeId);
+                if (!currentNode.length) return;
+                
+                const connectedNodes = currentNode.neighborhood().nodes();
+                connectedNodes.forEach(connectedNode => {
+                    const connectedId = connectedNode.id();
+                    if (!nodesToShow.has(connectedId)) {
+                        nodesToShow.add(connectedId);
+                        addConnectedSubtree(connectedId, visited);
+                    }
+                });
+            };
+            
+            addConnectedSubtree(nodeId);
+            
+            // Show all nodes in the subtree
+            nodesToShow.forEach(id => {
+                const nodeToShow = this.cy.getElementById(id);
+                if (nodeToShow.length) {
+                    nodeToShow.show();
+                }
+            });
+            
+            // Show edges between visible nodes
+            this.cy.edges().forEach(edge => {
+                const source = edge.source();
+                const target = edge.target();
+                if (nodesToShow.has(source.id()) && nodesToShow.has(target.id())) {
+                    edge.show();
+                }
+            });
+        }
+        
+        // Re-apply the main lead filter to ensure consistency
+        this.applyLeadFilter();
     }
 
     initCytoscape() {
@@ -677,6 +792,10 @@ class EASMDashboard {
                 this.cy.elements().remove();
                 this.cy.add(this.graphData.elements);
                 
+                // Populate lead selector from graph data
+                console.log('Populating lead selector...');
+                this.populateLeadSelector(this.graphData.elements);
+                
                 // Apply lead filter first (default: no leads selected = empty graph)
                 this.applyLeadFilter();
                 
@@ -727,14 +846,35 @@ class EASMDashboard {
             this.applyFilters();
         });
 
-        // Lead selector controls
-        document.getElementById('select-all-leads').addEventListener('click', () => {
-            this.selectAllLeads();
-        });
-
-        document.getElementById('deselect-all-leads').addEventListener('click', () => {
-            this.deselectAllLeads();
-        });
+        // Lead selector controls (using global functions as specified in HTML)
+        window.selectAllLeads = (selectAll) => {
+            if (selectAll) {
+                this.selectAllLeads();
+            } else {
+                this.deselectAllLeads();
+            }
+        };
+        
+        window.toggleLeadVisibility = (nodeId, isChecked) => {
+            if (isChecked) {
+                this.selectedLeads.add(nodeId);
+            } else {
+                this.selectedLeads.delete(nodeId);
+            }
+            
+            // Update UI
+            const leadItem = document.querySelector(`[data-lead-id="${nodeId}"]`);
+            if (leadItem) {
+                if (isChecked) {
+                    leadItem.classList.add('selected');
+                } else {
+                    leadItem.classList.remove('selected');
+                }
+            }
+            
+            // Apply visibility changes
+            this.applyLeadVisibilityFilter(nodeId, isChecked);
+        };
 
         // Filter checkboxes
         document.getElementById('filter-kev').addEventListener('change', (e) => {
