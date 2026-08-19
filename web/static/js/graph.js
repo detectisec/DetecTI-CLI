@@ -344,6 +344,25 @@ class EASMDashboard {
                     }
                 },
                 
+                // Domain relationship edges
+                {
+                    selector: 'edge[label="HAS_SUBDOMAIN"]',
+                    style: {
+                        'line-color': '#4ecdc4',
+                        'target-arrow-color': '#4ecdc4',
+                        'width': '2px'
+                    }
+                },
+                
+                {
+                    selector: 'edge[label="BELONGS_TO"]',
+                    style: {
+                        'line-color': '#9b59b6',
+                        'target-arrow-color': '#9b59b6',
+                        'width': '2px'
+                    }
+                },
+                
                 // Selected nodes
                 {
                     selector: 'node:selected',
