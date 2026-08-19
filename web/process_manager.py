@@ -9,7 +9,10 @@ import time
 from pathlib import Path
 from typing import Dict, Optional
 
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 
 class WebServerManager:
@@ -20,6 +23,9 @@ class WebServerManager:
     
     def is_running(self) -> bool:
         """Check if web server is currently running."""
+        if not psutil:
+            return False
+            
         if not self.state_file.exists():
             return False
         
@@ -36,6 +42,9 @@ class WebServerManager:
     
     def get_status(self) -> Optional[Dict]:
         """Get current server status information."""
+        if not psutil:
+            return None
+            
         if not self.state_file.exists():
             return None
         
@@ -126,6 +135,9 @@ class WebServerManager:
     
     def stop_server(self) -> bool:
         """Stop the background web server."""
+        if not psutil:
+            return False
+            
         if not self.is_running():
             return False
         
