@@ -186,6 +186,7 @@ class EASMDashboard {
 
     populateLeadSelector(elements) {
         try {
+            console.log('=== LEAD SELECTOR DEBUG START ===');
             console.log('Populating lead selector from graph data...');
             this.leads = [];
             
@@ -194,6 +195,9 @@ class EASMDashboard {
                 console.error('Lead list element not found');
                 return;
             }
+            
+            // Clear loading message immediately
+            leadList.innerHTML = '<div class="lead-loading">Processing leads...</div>';
             
             // Try to get elements from Cytoscape if not provided
             if (!elements && this.cy) {
@@ -216,70 +220,84 @@ class EASMDashboard {
             console.log(`Total nodes in graph: ${elements.nodes.length}`);
             console.log(`Total edges in graph: ${elements.edges ? elements.edges.length : 0}`);
             
+            // Debug: Log first few nodes to see structure
+            console.log('First 3 nodes structure:', elements.nodes.slice(0, 3));
+            
             // Extract leads from graph nodes (IP, domain, subdomain)
             const leadNodes = elements.nodes.filter(node => {
                 const nodeData = node.data || node;
                 const nodeType = nodeData.type;
                 console.log(`Checking node: ${nodeData.id} (type: ${nodeType})`);
-                return ['ip', 'domain', 'subdomain'].includes(nodeType);
+                const isLead = ['ip', 'domain', 'subdomain'].includes(nodeType);
+                if (isLead) {
+                    console.log(`✓ FOUND LEAD: ${nodeData.id} (${nodeType})`);
+                }
+                return isLead;
             });
             
             console.log(`Found ${leadNodes.length} potential lead nodes out of ${elements.nodes.length} total nodes`);
             console.log('All node types:', elements.nodes.map(n => (n.data || n).type).filter((v, i, a) => a.indexOf(v) === i));
-            console.log('Sample lead nodes:', leadNodes.slice(0, 3).map(n => (n.data || n)));
+            console.log('Lead nodes found:', leadNodes.map(n => ({id: (n.data || n).id, type: (n.data || n).type})));
             
             if (leadNodes.length === 0) {
+                console.error('NO LEAD NODES FOUND!');
                 leadList.innerHTML = '<div class="lead-loading">No lead nodes found in graph (IP/domain/subdomain)</div>';
                 return;
             }
             
             // Process each lead node
             leadNodes.forEach((node, index) => {
-                const nodeData = node.data || node;
-                console.log(`Processing lead ${index + 1}/${leadNodes.length}: ${nodeData.id} (${nodeData.type})`);
-                
-                // Find connected vulnerabilities to determine threat level
-                const connectedVulns = this.findConnectedVulnerabilities(nodeData.id, elements);
-                console.log(`  Found ${connectedVulns.length} vulnerabilities`);
-                
-                // Calculate threat indicators
-                const vulnCount = connectedVulns.length;
-                const hasKev = connectedVulns.some(v => v.is_cisa_kev === true || v.is_cisa_kev === 'true' || v.is_cisa_kev === 1);
-                const hasCritical = connectedVulns.some(v => v.severity === 'CRITICAL');
-                const pocCount = connectedVulns.filter(v => (v.exploit_count || 0) > 0).length;
-                
-                // Find connected services
-                const connectedServices = this.findConnectedServices(nodeData.id, elements);
-                const serviceCount = connectedServices.length;
-                console.log(`  Found ${serviceCount} services`);
-                
-                // Create lead object
-                const lead = {
-                    id: nodeData.id,
-                    type: nodeData.type,
-                    name: nodeData.name || nodeData.ip || nodeData.label,
-                    display_name: nodeData.label || nodeData.name || nodeData.ip,
-                    org: nodeData.org || 'Unknown',
-                    country: nodeData.country || 'Unknown',
-                    service_count: serviceCount,
-                    vuln_count: vulnCount,
-                    has_kev: hasKev,
-                    has_critical: hasCritical,
-                    poc_count: pocCount,
-                    ip_count: nodeData.type === 'domain' ? this.countConnectedIPs(nodeData.id, elements) : 0
-                };
-                
-                console.log(`  Lead created:`, lead);
-                this.leads.push(lead);
+                try {
+                    const nodeData = node.data || node;
+                    console.log(`Processing lead ${index + 1}/${leadNodes.length}: ${nodeData.id} (${nodeData.type})`);
+                    console.log('Node data:', nodeData);
+                    
+                    // Find connected vulnerabilities to determine threat level
+                    const connectedVulns = this.findConnectedVulnerabilities(nodeData.id, elements);
+                    console.log(`  Found ${connectedVulns.length} vulnerabilities`);
+                    
+                    // Calculate threat indicators
+                    const vulnCount = connectedVulns.length;
+                    const hasKev = connectedVulns.some(v => v.is_cisa_kev === true || v.is_cisa_kev === 'true' || v.is_cisa_kev === 1);
+                    const hasCritical = connectedVulns.some(v => v.severity === 'CRITICAL');
+                    const pocCount = connectedVulns.filter(v => (v.exploit_count || 0) > 0).length;
+                    
+                    // Find connected services
+                    const connectedServices = this.findConnectedServices(nodeData.id, elements);
+                    const serviceCount = connectedServices.length;
+                    console.log(`  Found ${serviceCount} services`);
+                    
+                    // Create lead object
+                    const lead = {
+                        id: nodeData.id,
+                        type: nodeData.type,
+                        name: nodeData.name || nodeData.ip || nodeData.label,
+                        display_name: nodeData.label || nodeData.name || nodeData.ip,
+                        org: nodeData.org || 'Unknown',
+                        country: nodeData.country || 'Unknown',
+                        service_count: serviceCount,
+                        vuln_count: vulnCount,
+                        has_kev: hasKev,
+                        has_critical: hasCritical,
+                        poc_count: pocCount,
+                        ip_count: nodeData.type === 'domain' ? this.countConnectedIPs(nodeData.id, elements) : 0
+                    };
+                    
+                    console.log(`  ✓ Lead created successfully:`, lead);
+                    this.leads.push(lead);
+                } catch (error) {
+                    console.error(`Error processing lead node ${index}:`, error);
+                }
             });
             
-            console.log(`Created ${this.leads.length} leads total`);
+            console.log(`✓ Created ${this.leads.length} leads total`);
+            console.log('=== LEAD SELECTOR DEBUG END ===');
             
             // Always try to render, even if we have 0 leads
             this.renderLeadSelector();
             
         } catch (error) {
-            console.error('Failed to populate lead selector:', error);
+            console.error('❌ CRITICAL ERROR in populateLeadSelector:', error);
             console.error('Error stack:', error.stack);
             const leadList = document.getElementById('lead-list');
             if (leadList) {
@@ -433,19 +451,22 @@ class EASMDashboard {
     }
 
     renderLeadSelector() {
+        console.log('=== RENDER LEAD SELECTOR START ===');
         const leadList = document.getElementById('lead-list');
         if (!leadList) {
-            console.error('Lead list element not found in renderLeadSelector');
+            console.error('❌ Lead list element not found in renderLeadSelector');
             return;
         }
 
         console.log(`Rendering ${this.leads.length} leads`);
 
         if (this.leads.length === 0) {
+            console.warn('No leads to render');
             leadList.innerHTML = '<div class="lead-loading">No leads found in database</div>';
             return;
         }
 
+        console.log('✓ Clearing lead list and rendering leads...');
         leadList.innerHTML = '';
 
         // Sort leads by priority: KEV > Critical > PoC count > Vuln count > Service count
@@ -537,7 +558,11 @@ class EASMDashboard {
             });
 
             leadList.appendChild(leadItem);
+            console.log(`✓ Added lead item for: ${lead.display_name}`);
         });
+        
+        console.log(`✓ Rendered ${this.leads.length} lead items successfully`);
+        console.log('=== RENDER LEAD SELECTOR END ===');
     }
 
     toggleLead(leadId) {
@@ -964,6 +989,15 @@ class EASMDashboard {
                     
                     // Apply lead filter first (default: no leads selected = empty graph)
                     this.applyLeadFilter();
+                    
+                    // Fallback: Try again after a short delay if no leads were found
+                    if (this.leads.length === 0) {
+                        console.warn('No leads found, trying again in 1 second...');
+                        setTimeout(() => {
+                            console.log('Retrying lead selector population...');
+                            this.populateLeadSelector(this.graphData.elements);
+                        }, 1000);
+                    }
                 } catch (error) {
                     console.error('Error in lead selector population:', error);
                     console.error('Error stack:', error.stack);
