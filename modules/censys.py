@@ -196,36 +196,53 @@ class CensysModule(BaseModule):
 
         target = target.strip()
 
-        # Clean prefix markers if present
-        clean_target = target
-        if clean_target.startswith("host:"):
-            clean_target = clean_target[5:]
-        elif clean_target.startswith("domain:"):
-            clean_target = clean_target[7:]
+        try:
+            # Clean prefix markers if present
+            clean_target = target
+            if clean_target.startswith("host:"):
+                clean_target = clean_target[5:]
+            elif clean_target.startswith("domain:"):
+                clean_target = clean_target[7:]
 
-        # 1. CIDR Network Check (e.g., 192.168.1.0/24) -> CenQL ip: 192.168.1.0/24
-        if "/" in clean_target:
+            # 1. CIDR Network Check (e.g., 192.168.1.0/24) -> CenQL ip: 192.168.1.0/24
+            if "/" in clean_target:
+                try:
+                    ipaddress.ip_network(clean_target, strict=False)
+                    return await self.search_query(f"ip: {clean_target}")
+                except ValueError:
+                    pass
+
+            # 2. Direct IP Address Check -> GET /v3/global/asset/host/{ip}
             try:
-                ipaddress.ip_network(clean_target, strict=False)
-                return await self.search_query(f"ip: {clean_target}")
+                ipaddress.ip_address(clean_target)
+                return await self.get_host_info(clean_target)
             except ValueError:
                 pass
 
-        # 2. Direct IP Address Check -> GET /v3/global/asset/host/{ip}
-        try:
-            ipaddress.ip_address(clean_target)
-            return await self.get_host_info(clean_target)
-        except ValueError:
-            pass
+            # 3. Domain Check -> CenQL names: example.com
+            if target.startswith("domain:") or ("." in target and " " not in target and ":" not in target):
+                domain_name = clean_target
+                return await self.search_query(f"names: {domain_name}")
 
-        # 3. Domain Check -> CenQL names: example.com
-        if target.startswith("domain:") or ("." in target and " " not in target and ":" not in target):
-            domain_name = clean_target
-            return await self.search_query(f"names: {domain_name}")
-
-        # 4. Search Query / CenQL Query
-        query = clean_target
-        return await self.search_query(query)
+            # 4. Search Query / CenQL Query
+            query = clean_target
+            return await self.search_query(query)
+            
+        except CensysRateLimitError as e:
+            logger.warning(f"Censys API rate limit exceeded for target {target}")
+            print(f"⚠️  Censys API rate limit exceeded. Please wait before making more requests or upgrade your plan.")
+            return []
+        except CensysAuthError as e:
+            logger.error(f"Censys authentication error for target {target}")
+            print(f"❌ Censys authentication failed. Please check your API credentials.")
+            return []
+        except CensysAPIError as e:
+            logger.error(f"Censys API error for target {target}: {e}")
+            print(f"⚠️  Censys API error: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Censys module error for target {target}: {e}")
+            return []
 
     async def get_host_info(self, ip: str) -> List[Finding]:
         """Fetch complete host dossier and open services from Censys Platform API v3."""
@@ -241,19 +258,22 @@ class CensysModule(BaseModule):
                 return []
             elif resp.status_code in (401, 403):
                 logger.error(f"Censys Authentication/Permission error ({resp.status_code}): {resp.text}")
-                return []
+                raise CensysAuthError(f"Authentication failed for IP {ip}: HTTP {resp.status_code}")
             elif resp.status_code == 422:
                 logger.error(f"Censys validation error (422) for host {ip}: {resp.text}")
-                return []
+                raise CensysAPIError(f"Validation error for IP {ip}: {resp.text}")
             elif resp.status_code == 429:
                 logger.warning(f"Censys Rate limit exceeded for host lookup: {ip}")
-                return []
+                raise CensysRateLimitError(f"Rate limit exceeded for IP {ip}")
             else:
                 logger.warning(f"Censys API returned HTTP {resp.status_code} for host {ip}")
-                return []
+                raise CensysAPIError(f"API error for IP {ip}: HTTP {resp.status_code}")
+        except (CensysRateLimitError, CensysAuthError, CensysAPIError):
+            # Re-raise our custom exceptions
+            raise
         except Exception as exc:
             logger.warning(f"Failed to fetch Censys host info for {ip}: {exc}")
-            return []
+            raise CensysAPIError(f"Network error for IP {ip}: {exc}")
 
         if not data or not isinstance(data, dict):
             return []
@@ -592,22 +612,26 @@ class CensysModule(BaseModule):
                         )
                     else:
                         logger.error(f"Censys Auth Error (403): {err_msg}")
+                        raise CensysAuthError(f"Authentication failed for query '{query}': {err_msg}")
                     break
                 elif resp.status_code == 401:
                     logger.error(f"Censys Auth Error (401): {resp.text}")
-                    break
+                    raise CensysAuthError(f"Authentication failed for query '{query}': HTTP 401")
                 elif resp.status_code == 422:
                     logger.error(f"Censys CenQL Validation Error (422): {resp.text}")
-                    break
+                    raise CensysAPIError(f"Query validation error for '{query}': {resp.text}")
                 elif resp.status_code == 429:
                     logger.warning("Censys Rate limit exceeded during search query.")
-                    break
+                    raise CensysRateLimitError(f"Rate limit exceeded for query '{query}'")
                 else:
                     logger.warning(f"Censys search query returned HTTP {resp.status_code}: {resp.text}")
-                    break
+                    raise CensysAPIError(f"API error for query '{query}': HTTP {resp.status_code}")
+            except (CensysRateLimitError, CensysAuthError, CensysAPIError):
+                # Re-raise our custom exceptions
+                raise
             except Exception as exc:
                 logger.warning(f"Error executing Censys search query '{query}': {exc}")
-                break
+                raise CensysAPIError(f"Network error for query '{query}': {exc}")
 
             if not data or not isinstance(data, dict):
                 break
