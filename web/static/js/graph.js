@@ -290,6 +290,16 @@ class EASMDashboard {
                 {
                     selector: 'node[risk_level="high"]',
                     style: {
+                        'background-color': '#ffa502',
+                        'border-color': '#ff9500',
+                        'border-width': '2px'
+                    }
+                },
+                
+                // Medium severity vulnerabilities
+                {
+                    selector: 'node[risk_level="medium"]',
+                    style: {
                         'background-color': '#ff8c00',
                         'border-color': '#ff7f00',
                         'border-width': '2px'
