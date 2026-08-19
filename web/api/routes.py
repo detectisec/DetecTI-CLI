@@ -116,11 +116,8 @@ async def get_leads(db: DatabaseManager = Depends(get_db_manager)) -> List[Dict]
                 LEFT JOIN ip_addresses ip ON sd.ip_id = ip.id OR d.ip_id = ip.id
                 LEFT JOIN services s ON ip.id = s.ip_id
                 LEFT JOIN vulnerabilities v ON ip.id = v.ip_id
-                WHERE d.name NOT LIKE '%.%' OR d.name IN (
-                    SELECT DISTINCT domain_name FROM subdomains WHERE domain_name = d.name
-                )
                 GROUP BY d.id, d.name
-                HAVING ip_count > 0
+                HAVING COUNT(DISTINCT ip.id) > 0
                 ORDER BY has_kev DESC, has_critical DESC, vuln_count DESC, service_count DESC
             """)
             
