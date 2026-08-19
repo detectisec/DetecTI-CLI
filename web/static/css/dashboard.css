@@ -423,7 +423,7 @@ body {
 
 .vulnerability-badge.low {
     background: #2ed573;
-    color: #000;
+    color: #fff;
 }
 
 .vulnerability-badge.kev {

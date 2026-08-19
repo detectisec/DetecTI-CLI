@@ -306,6 +306,16 @@ class EASMDashboard {
                     }
                 },
                 
+                // Low severity vulnerabilities
+                {
+                    selector: 'node[risk_level="low"]',
+                    style: {
+                        'background-color': '#2ed573',
+                        'border-color': '#20bf6b',
+                        'border-width': '2px'
+                    }
+                },
+                
                 // Critical vulnerabilities (darker red with pulsing animation)
                 {
                     selector: 'node[risk_level="critical"]',
