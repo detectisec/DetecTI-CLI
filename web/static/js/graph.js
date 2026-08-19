@@ -290,8 +290,8 @@ class EASMDashboard {
                 {
                     selector: 'node[risk_level="high"]',
                     style: {
-                        'background-color': '#ff8c00',
-                        'border-color': '#ff7f00',
+                        'background-color': '#ffa502',
+                        'border-color': '#ff9500',
                         'border-width': '2px'
                     }
                 },
