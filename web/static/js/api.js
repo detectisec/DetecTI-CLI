@@ -47,7 +47,14 @@ class APIClient {
     }
 
     async getLeads() {
-        return this.request('/leads');
+        try {
+            const result = await this.request('/leads');
+            console.log('API getLeads result:', result);
+            return result;
+        } catch (error) {
+            console.error('API getLeads error:', error);
+            throw error;
+        }
     }
 
     async getAssets() {
