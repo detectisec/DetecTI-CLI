@@ -64,8 +64,11 @@ def _banner_format_help(self, ctx, formatter):
 
 click.Command.format_help = _banner_format_help
 
+# Get the actual CLI name from sys.argv[0]
+cli_name = Path(sys.argv[0]).name if sys.argv else "detecti-cli"
+
 app = typer.Typer(
-    name="detecti",
+    name=cli_name,
     help="DetecTI-CLI: External Attack Surface Mapping & Threat Intelligence Engine",
     add_completion=False,
     no_args_is_help=True,
@@ -83,8 +86,8 @@ app.add_typer(serve_app, name="serve")
 
 @app.command(name="scan")
 def scan_command(
-    target: str = typer.Option(
-        ...,
+    target: Optional[str] = typer.Option(
+        None,
         "-t",
         "--target",
         help="Target IP, CIDR, domain, email, CVE, search query, or file:LIST.txt",
@@ -132,10 +135,22 @@ def scan_command(
     """Execute complete attack surface mapping and threat intelligence analysis.
     
     Examples:
-      detecti scan -t example.com --create-db mycompany
-      detecti scan -t 192.168.1.0/24 --create-db network_scan
-      detecti scan -t CVE-2021-44228 -o json
-    """
+      {cli_name} scan -t example.com --create-db mycompany
+      {cli_name} scan -t 192.168.1.0/24 --create-db network_scan
+      {cli_name} scan -t CVE-2021-44228 -o json
+    """.format(cli_name=cli_name)
+    
+    # Check if target is provided
+    if not target:
+        print_banner()
+        print_error("Target is required. Use -t/--target to specify a target.")
+        print_info(f"Examples:")
+        print_info(f"  {cli_name} scan -t example.com")
+        print_info(f"  {cli_name} scan -t 192.168.1.0/24")
+        print_info(f"  {cli_name} scan -t CVE-2021-44228")
+        print_info(f"Use '{cli_name} scan --help' for more options.")
+        raise typer.Exit(1)
+    
     print_banner()
 
     # Parse modules list
@@ -188,7 +203,7 @@ def scan_command(
                 db_manager.store_scan_result(result)
                 
                 print_success(f"Scan results stored in database: [bold underline]{final_db_path.resolve()}[/bold underline]")
-                print_info(f"Use 'detecti serve start --db {final_db_path.name}' to start web dashboard")
+                print_info(f"Use '{cli_name} serve start --db {final_db_path.name}' to start web dashboard")
             except Exception as e:
                 print_error(f"Failed to store results in database: {e}")
 
@@ -329,13 +344,13 @@ def start_server(
             print_success(f"✅ Web server started successfully!")
             print_info(f"🌐 Dashboard URL: http://{host}:{port}")
             print_info(f"📊 Database: {db}")
-            print_info("🔧 Use 'detecti serve status' to check server status")
-            print_info("🛑 Use 'detecti serve stop' to stop the server")
+            print_info(f"🔧 Use '{cli_name} serve status' to check server status")
+            print_info(f"🛑 Use '{cli_name} serve stop' to stop the server")
             print_info("📱 Open your browser and navigate to the dashboard URL to view the EASM graph")
         else:
             print_error("❌ Failed to start web server")
             print_info("Check that the database file exists and the port is available")
-            print_info("💡 Create a database first: 'detecti serve create-db --target <your_target>'")
+            print_info(f"💡 Create a database first: '{cli_name} serve create-db --target <your_target>'")
             
     except FileNotFoundError as e:
         print_error(f"Database file not found: {e}")
@@ -390,7 +405,7 @@ def server_status() -> None:
             print_success(f"🌐 Dashboard URL: http://{status['host']}:{status['port']}")
         else:
             print_warning("🔴 Web server is not running")
-            print_info("Use 'detecti serve start --db <database>' to start the server")
+            print_info(f"Use '{cli_name} serve start --db <database>' to start the server")
             
     except Exception as e:
         print_error(f"Failed to check server status: {e}")
@@ -479,7 +494,7 @@ def list_databases() -> None:
         )
     
     console.print(table)
-    print_info("Use 'detecti serve start --db <database_name>' to start the web dashboard")
+    print_info(f"Use '{cli_name} serve start --db <database_name>' to start the web dashboard")
 
 
 @serve_app.command("create-db")
@@ -564,7 +579,7 @@ def create_database(
 
     print_success(f"✅ Database created successfully: [bold underline]{db_path.resolve()}[/bold underline]")
     print_info(f"📊 Stored {len(result.hosts)} hosts and {len(result.findings)} findings")
-    print_info(f"🌐 Start web dashboard: [bold]detecti serve start --db {db_path.name}[/bold]")
+    print_info(f"🌐 Start web dashboard: [bold]{cli_name} serve start --db {db_path.name}[/bold]")
 
 
 @app.command(name="version")
