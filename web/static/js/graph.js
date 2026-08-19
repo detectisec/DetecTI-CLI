@@ -7,10 +7,10 @@ class EASMDashboard {
         this.cy = null;
         this.graphData = null;
         this.filters = {
-            kev: true,
-            highEpss: true,
-            critical: true,
-            https: true
+            kev: false,
+            highEpss: false,
+            critical: false,
+            https: false
         };
         
         this.init();
