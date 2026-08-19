@@ -11,8 +11,10 @@ from typing import Dict, Optional
 
 try:
     import psutil
+    PSUTIL_AVAILABLE = True
 except ImportError:
     psutil = None
+    PSUTIL_AVAILABLE = False
 
 
 class WebServerManager:
@@ -23,8 +25,23 @@ class WebServerManager:
     
     def is_running(self) -> bool:
         """Check if web server is currently running."""
-        if not psutil:
-            return False
+        if not PSUTIL_AVAILABLE:
+            # Fallback to basic PID check
+            if not self.state_file.exists():
+                return False
+            try:
+                state = self._read_state()
+                pid = state.get("pid")
+                if not pid:
+                    return False
+                # Basic check if PID exists (Unix/Linux only)
+                try:
+                    os.kill(pid, 0)
+                    return True
+                except (OSError, ProcessLookupError):
+                    return False
+            except (json.JSONDecodeError, ValueError):
+                return False
             
         if not self.state_file.exists():
             return False
@@ -42,9 +59,6 @@ class WebServerManager:
     
     def get_status(self) -> Optional[Dict]:
         """Get current server status information."""
-        if not psutil:
-            return None
-            
         if not self.state_file.exists():
             return None
         
@@ -52,9 +66,36 @@ class WebServerManager:
             state = self._read_state()
             pid = state.get("pid")
             
-            if pid and psutil.pid_exists(pid):
-                process = psutil.Process(pid)
-                if process.is_running():
+            if not pid:
+                return None
+            
+            # Check if process is running
+            is_running = False
+            if PSUTIL_AVAILABLE:
+                try:
+                    if psutil.pid_exists(pid):
+                        process = psutil.Process(pid)
+                        if process.is_running():
+                            is_running = True
+                            # Calculate uptime
+                            start_time = state.get("started_at")
+                            if start_time:
+                                from datetime import datetime
+                                started = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                                uptime = datetime.now().astimezone() - started
+                                state["uptime_seconds"] = uptime.total_seconds()
+                            
+                            state["status"] = "RUNNING"
+                            state["memory_mb"] = process.memory_info().rss / 1024 / 1024
+                            return state
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            else:
+                # Fallback check
+                try:
+                    os.kill(pid, 0)
+                    is_running = True
+                    state["status"] = "RUNNING"
                     # Calculate uptime
                     start_time = state.get("started_at")
                     if start_time:
@@ -62,18 +103,20 @@ class WebServerManager:
                         started = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
                         uptime = datetime.now().astimezone() - started
                         state["uptime_seconds"] = uptime.total_seconds()
-                    
-                    state["status"] = "RUNNING"
-                    state["memory_mb"] = process.memory_info().rss / 1024 / 1024
                     return state
+                except (OSError, ProcessLookupError):
+                    pass
             
-            # Process not running, clean up state file
+            if not is_running:
+                # Process not running, clean up state file
+                self._cleanup_state()
+                return None
+            
+        except (json.JSONDecodeError, ValueError):
             self._cleanup_state()
             return None
-            
-        except (json.JSONDecodeError, psutil.NoSuchProcess, psutil.AccessDenied):
-            self._cleanup_state()
-            return None
+        
+        return None
     
     def start_server(self, db_path: str, host: str = "127.0.0.1", port: int = 8000) -> bool:
         """Start web server in background process."""
@@ -149,9 +192,6 @@ class WebServerManager:
     
     def stop_server(self) -> bool:
         """Stop the background web server."""
-        if not psutil:
-            return False
-            
         if not self.is_running():
             return False
         
@@ -159,24 +199,50 @@ class WebServerManager:
             state = self._read_state()
             pid = state.get("pid")
             
-            if pid and psutil.pid_exists(pid):
-                process = psutil.Process(pid)
-                
-                # Send SIGTERM for graceful shutdown
-                process.terminate()
-                
-                # Wait up to 10 seconds for graceful shutdown
-                try:
-                    process.wait(timeout=10)
-                except psutil.TimeoutExpired:
-                    # Force kill if still running
-                    process.kill()
-                    process.wait(timeout=5)
-                
-                self._cleanup_state()
-                return True
+            if not pid:
+                return False
             
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            if PSUTIL_AVAILABLE:
+                try:
+                    if psutil.pid_exists(pid):
+                        process = psutil.Process(pid)
+                        
+                        # Send SIGTERM for graceful shutdown
+                        process.terminate()
+                        
+                        # Wait up to 10 seconds for graceful shutdown
+                        try:
+                            process.wait(timeout=10)
+                        except psutil.TimeoutExpired:
+                            # Force kill if still running
+                            process.kill()
+                            process.wait(timeout=5)
+                        
+                        self._cleanup_state()
+                        return True
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    self._cleanup_state()
+                    return True
+            else:
+                # Fallback: send SIGTERM signal
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    time.sleep(2)  # Give it time to shutdown
+                    # Check if still running
+                    try:
+                        os.kill(pid, 0)
+                        # Still running, force kill
+                        os.kill(pid, signal.SIGKILL)
+                    except (OSError, ProcessLookupError):
+                        pass  # Process already terminated
+                    
+                    self._cleanup_state()
+                    return True
+                except (OSError, ProcessLookupError):
+                    self._cleanup_state()
+                    return True
+            
+        except (json.JSONDecodeError, ValueError):
             self._cleanup_state()
             return True
         

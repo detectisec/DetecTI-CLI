@@ -5,11 +5,20 @@ import sys
 from pathlib import Path
 from typing import Dict
 
-import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
+try:
+    import uvicorn
+    from fastapi import FastAPI, HTTPException
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse
+    from fastapi.middleware.cors import CORSMiddleware
+    FASTAPI_AVAILABLE = True
+except ImportError:
+    FASTAPI_AVAILABLE = False
+    # Create dummy classes for type hints
+    class FastAPI:
+        pass
+    class HTTPException(Exception):
+        pass
 
 from core.database.storage import DatabaseManager
 from web.api.routes import router as api_router
@@ -17,6 +26,10 @@ from web.api.routes import router as api_router
 
 def create_app(db_path: str) -> FastAPI:
     """Create FastAPI application with database connection."""
+    if not FASTAPI_AVAILABLE:
+        raise ImportError("FastAPI and uvicorn are required for web server functionality. Install with: pip install fastapi uvicorn")
+    
+    from fastapi import FastAPI
     app = FastAPI(
         title="DetecTI-CLI EASM Dashboard",
         description="Interactive External Attack Surface Management Dashboard",
@@ -73,6 +86,11 @@ def create_app(db_path: str) -> FastAPI:
 
 def main():
     """Main entry point for web server."""
+    if not FASTAPI_AVAILABLE:
+        print("FastAPI and uvicorn are required for web server functionality.", file=sys.stderr)
+        print("Install with: pip install fastapi uvicorn", file=sys.stderr)
+        sys.exit(1)
+    
     parser = argparse.ArgumentParser(description="DetecTI-CLI Web Server")
     parser.add_argument("--db-path", required=True, help="Path to SQLite database")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
@@ -84,6 +102,7 @@ def main():
         app = create_app(args.db_path)
         
         # Run server
+        import uvicorn
         uvicorn.run(
             app,
             host=args.host,
