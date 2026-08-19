@@ -13,49 +13,82 @@ class EASMDashboard {
             https: false
         };
         
-        this.init();
+        // Don't auto-initialize, wait for DOM
     }
 
     async init() {
         try {
+            console.log('Initializing EASM Dashboard...');
+            
+            // Check if API client is available
+            if (!window.api) {
+                throw new Error('API client not available');
+            }
+            
             // Load summary data
+            console.log('Loading summary data...');
             await this.loadSummary();
             
             // Initialize Cytoscape
+            console.log('Initializing Cytoscape...');
             this.initCytoscape();
             
             // Load and render graph
+            console.log('Loading graph data...');
             await this.loadGraph();
             
             // Setup event listeners
+            console.log('Setting up event listeners...');
             this.setupEventListeners();
             
             // Hide loading indicator
-            document.getElementById('graph-loading').style.display = 'none';
+            const loadingEl = document.getElementById('graph-loading');
+            if (loadingEl) {
+                loadingEl.style.display = 'none';
+            }
+            
+            console.log('Dashboard initialization complete');
             
         } catch (error) {
             console.error('Failed to initialize dashboard:', error);
-            this.showError('Failed to load dashboard data');
+            this.showError(`Failed to load dashboard data: ${error.message}`);
         }
     }
 
     async loadSummary() {
         try {
+            console.log('Fetching summary data...');
             const summary = await window.api.getSummary();
+            console.log('Summary data received:', summary);
             
             // Update header
-            document.getElementById('target-name').textContent = summary.target;
+            const targetEl = document.getElementById('target-name');
+            if (targetEl) {
+                targetEl.textContent = summary.target || 'Unknown Target';
+            }
             
-            // Update metrics
-            document.getElementById('domains-count').textContent = summary.total_domains || 0;
-            document.getElementById('subdomains-count').textContent = summary.total_subdomains || 0;
-            document.getElementById('ips-count').textContent = summary.total_ips || 0;
-            document.getElementById('services-count').textContent = summary.open_services || 0;
-            document.getElementById('vulns-count').textContent = summary.total_vulnerabilities || 0;
-            document.getElementById('kev-count').textContent = summary.cisa_kev_count || 0;
+            // Update metrics with safe element access
+            const updateMetric = (id, value) => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.textContent = value || 0;
+                } else {
+                    console.warn(`Element not found: ${id}`);
+                }
+            };
+            
+            updateMetric('domains-count', summary.total_domains);
+            updateMetric('subdomains-count', summary.total_subdomains);
+            updateMetric('ips-count', summary.total_ips);
+            updateMetric('services-count', summary.open_services);
+            updateMetric('vulns-count', summary.total_vulnerabilities);
+            updateMetric('kev-count', summary.cisa_kev_count);
+            
+            console.log('Summary data loaded successfully');
             
         } catch (error) {
             console.error('Failed to load summary:', error);
+            throw error; // Re-throw to be caught by init()
         }
     }
 
@@ -246,18 +279,36 @@ class EASMDashboard {
 
     async loadGraph() {
         try {
+            console.log('Fetching graph data...');
             this.graphData = await window.api.getGraphData();
+            console.log('Graph data received:', this.graphData);
             
             if (this.graphData && this.graphData.elements) {
+                console.log(`Adding ${this.graphData.elements.nodes?.length || 0} nodes and ${this.graphData.elements.edges?.length || 0} edges`);
+                
                 this.cy.elements().remove();
                 this.cy.add(this.graphData.elements);
                 this.applyFilters();
-                this.cy.layout({ name: 'cose-bilkent', animate: true }).run();
+                
+                // Run layout
+                const layout = this.cy.layout({ 
+                    name: 'cose-bilkent', 
+                    animate: true,
+                    animationDuration: 1000,
+                    fit: true,
+                    padding: 50
+                });
+                layout.run();
+                
+                console.log('Graph rendered successfully');
+            } else {
+                console.warn('No graph elements received');
+                this.showError('No graph data available');
             }
             
         } catch (error) {
             console.error('Failed to load graph data:', error);
-            this.showError('Failed to load graph data');
+            throw error; // Re-throw to be caught by init()
         }
     }
 
@@ -494,17 +545,34 @@ class EASMDashboard {
     }
 
     showError(message) {
+        console.error('Dashboard error:', message);
         const loading = document.getElementById('graph-loading');
-        loading.innerHTML = `
-            <div style="color: #ff4757;">
-                <h3>⚠️ Error</h3>
-                <p>${message}</p>
-            </div>
-        `;
+        if (loading) {
+            loading.innerHTML = `
+                <div style="color: #ff4757; text-align: center;">
+                    <h3>⚠️ Error</h3>
+                    <p>${message}</p>
+                    <p style="font-size: 0.9em; color: #aaa;">Check browser console for details</p>
+                </div>
+            `;
+            loading.style.display = 'flex';
+        }
     }
 }
 
 // Initialize dashboard when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    window.dashboard = new EASMDashboard();
+    console.log('DOM loaded, initializing dashboard...');
+    
+    // Check if required libraries are loaded
+    if (typeof cytoscape === 'undefined') {
+        console.error('Cytoscape.js not loaded');
+        return;
+    }
+    
+    // Wait a bit for API client to be ready
+    setTimeout(() => {
+        window.dashboard = new EASMDashboard();
+        window.dashboard.init();
+    }, 100);
 });
