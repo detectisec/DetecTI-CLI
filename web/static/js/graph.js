@@ -629,6 +629,23 @@ class EASMDashboard {
             loading.style.display = 'flex';
         }
     }
+
+    updateLayoutSelector() {
+        const layoutSelect = document.getElementById('layout-select');
+        if (layoutSelect) {
+            const availableLayout = this.getAvailableLayout();
+            layoutSelect.value = availableLayout;
+            
+            // Disable cose-bilkent option if not available
+            if (typeof cytoscapeCoseBilkent === 'undefined') {
+                const coseBilkentOption = layoutSelect.querySelector('option[value="cose-bilkent"]');
+                if (coseBilkentOption) {
+                    coseBilkentOption.disabled = true;
+                    coseBilkentOption.textContent += ' (Not Available)';
+                }
+            }
+        }
+    }
 }
 
 // Initialize dashboard when DOM is loaded
