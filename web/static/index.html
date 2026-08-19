@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DetecTI-CLI EASM Dashboard</title>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/cytoscape-cose-bilkent@4.1.0/cytoscape-cose-bilkent.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-content">
+                <h1>🔍 DetecTI-CLI EASM Dashboard</h1>
+                <div class="target-info">
+                    <span id="target-name">Loading...</span>
+                    <span class="db-info" id="db-info"></span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="dashboard-main">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <!-- Metrics Panel -->
+                <div class="panel metrics-panel">
+                    <h3>📊 Attack Surface Metrics</h3>
+                    <div class="metric-grid">
+                        <div class="metric-item">
+                            <span class="metric-value" id="domains-count">-</span>
+                            <span class="metric-label">Domains</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-value" id="subdomains-count">-</span>
+                            <span class="metric-label">Subdomains</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-value" id="ips-count">-</span>
+                            <span class="metric-label">IP Addresses</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-value" id="services-count">-</span>
+                            <span class="metric-label">Open Services</span>
+                        </div>
+                        <div class="metric-item critical">
+                            <span class="metric-value" id="vulns-count">-</span>
+                            <span class="metric-label">Vulnerabilities</span>
+                        </div>
+                        <div class="metric-item critical">
+                            <span class="metric-value" id="kev-count">-</span>
+                            <span class="metric-label">CISA KEV</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Filters Panel -->
+                <div class="panel filters-panel">
+                    <h3>🔧 Graph Filters</h3>
+                    <div class="filter-group">
+                        <label class="filter-checkbox">
+                            <input type="checkbox" id="filter-kev" checked>
+                            <span class="checkmark"></span>
+                            Show CISA KEV Only
+                        </label>
+                        <label class="filter-checkbox">
+                            <input type="checkbox" id="filter-high-epss" checked>
+                            <span class="checkmark"></span>
+                            High EPSS (>50%)
+                        </label>
+                        <label class="filter-checkbox">
+                            <input type="checkbox" id="filter-critical" checked>
+                            <span class="checkmark"></span>
+                            Critical Vulnerabilities
+                        </label>
+                        <label class="filter-checkbox">
+                            <input type="checkbox" id="filter-https" checked>
+                            <span class="checkmark"></span>
+                            HTTPS Services
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Graph Controls -->
+                <div class="panel controls-panel">
+                    <h3>🎮 Graph Controls</h3>
+                    <div class="control-buttons">
+                        <button id="btn-fit" class="control-btn">📐 Fit to Screen</button>
+                        <button id="btn-reset-zoom" class="control-btn">🔍 Reset Zoom</button>
+                        <button id="btn-relayout" class="control-btn">🔄 Re-layout</button>
+                    </div>
+                    <div class="layout-selector">
+                        <label for="layout-select">Layout:</label>
+                        <select id="layout-select">
+                            <option value="cose-bilkent">Force-Directed</option>
+                            <option value="breadthfirst">Hierarchical</option>
+                            <option value="concentric">Concentric</option>
+                            <option value="grid">Grid</option>
+                        </select>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Graph Container -->
+            <main class="graph-container">
+                <div id="cy" class="cytoscape-graph"></div>
+                <div class="graph-loading" id="graph-loading">
+                    <div class="spinner"></div>
+                    <p>Loading EASM graph data...</p>
+                </div>
+            </main>
+        </div>
+
+        <!-- Inspector Drawer -->
+        <div class="inspector-drawer" id="inspector-drawer">
+            <div class="inspector-header">
+                <h3 id="inspector-title">Asset Inspector</h3>
+                <button class="close-btn" id="close-inspector">✕</button>
+            </div>
+            <div class="inspector-content" id="inspector-content">
+                <p>Click on any node in the graph to inspect its properties...</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/graph.js"></script>
+</body>
+</html>

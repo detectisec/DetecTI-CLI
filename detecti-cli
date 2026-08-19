@@ -298,25 +298,122 @@ def start_server(
 ) -> None:
     """Start the non-blocking EASM graph webserver in the background."""
     print_banner()
-    print_info("Starting DetecTI-CLI web server...")
-    print_warning("Web server functionality will be implemented in Phase 2")
-    print_info(f"Planned configuration: {host}:{port} with database: {db}")
+    
+    try:
+        from web.process_manager import WebServerManager
+        
+        manager = WebServerManager()
+        
+        # Check if server is already running
+        if manager.is_running():
+            status = manager.get_status()
+            if status:
+                print_warning(f"Web server is already running on {status['host']}:{status['port']}")
+                print_info(f"Database: {status['db_path']}")
+                print_info(f"PID: {status['pid']}")
+                return
+        
+        print_info(f"Starting DetecTI-CLI web server on {host}:{port}...")
+        print_info(f"Database: {db}")
+        
+        # Start the server
+        success = manager.start_server(db, host, port)
+        
+        if success:
+            print_success(f"✅ Web server started successfully!")
+            print_info(f"🌐 Dashboard URL: http://{host}:{port}")
+            print_info(f"📊 Database: {db}")
+            print_info("🔧 Use 'detecti serve status' to check server status")
+            print_info("🛑 Use 'detecti serve stop' to stop the server")
+        else:
+            print_error("❌ Failed to start web server")
+            print_info("Check that the database file exists and the port is available")
+            
+    except ImportError:
+        print_error("Web server dependencies not installed. Run: pip install fastapi uvicorn")
+    except FileNotFoundError as e:
+        print_error(f"Database file not found: {e}")
+    except Exception as e:
+        print_error(f"Failed to start server: {e}")
 
 
 @serve_app.command("status")
 def server_status() -> None:
     """Check the status of the background webserver."""
     print_banner()
-    print_info("Checking web server status...")
-    print_warning("Web server functionality will be implemented in Phase 2")
+    
+    try:
+        from web.process_manager import WebServerManager
+        from rich.table import Table
+        
+        manager = WebServerManager()
+        status = manager.get_status()
+        
+        if status:
+            print_section_header("Web Server Status")
+            
+            # Create status table
+            table = Table(show_header=True, header_style="bold cyan")
+            table.add_column("Property", style="bold white")
+            table.add_column("Value", style="green")
+            
+            table.add_row("Status", "🟢 RUNNING")
+            table.add_row("PID", str(status['pid']))
+            table.add_row("Host", status['host'])
+            table.add_row("Port", str(status['port']))
+            table.add_row("Database", status['db_path'])
+            table.add_row("Started At", status.get('started_at', 'Unknown'))
+            
+            if 'uptime_seconds' in status:
+                uptime = int(status['uptime_seconds'])
+                hours, remainder = divmod(uptime, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                uptime_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                table.add_row("Uptime", uptime_str)
+            
+            if 'memory_mb' in status:
+                table.add_row("Memory Usage", f"{status['memory_mb']:.1f} MB")
+            
+            console.print(table)
+            print_success(f"🌐 Dashboard URL: http://{status['host']}:{status['port']}")
+        else:
+            print_warning("🔴 Web server is not running")
+            print_info("Use 'detecti serve start --db <database>' to start the server")
+            
+    except ImportError:
+        print_error("Web server dependencies not installed. Run: pip install fastapi uvicorn psutil")
+    except Exception as e:
+        print_error(f"Failed to check server status: {e}")
 
 
 @serve_app.command("stop")
 def stop_server() -> None:
     """Stop the background webserver gracefully."""
     print_banner()
-    print_info("Stopping web server...")
-    print_warning("Web server functionality will be implemented in Phase 2")
+    
+    try:
+        from web.process_manager import WebServerManager
+        
+        manager = WebServerManager()
+        
+        if not manager.is_running():
+            print_warning("🔴 Web server is not running")
+            return
+        
+        print_info("🛑 Stopping web server...")
+        
+        success = manager.stop_server()
+        
+        if success:
+            print_success("✅ Web server stopped successfully")
+        else:
+            print_error("❌ Failed to stop web server")
+            print_info("The server process may have already terminated")
+            
+    except ImportError:
+        print_error("Web server dependencies not installed. Run: pip install psutil")
+    except Exception as e:
+        print_error(f"Failed to stop server: {e}")
 
 
 @serve_app.command("list-dbs")
