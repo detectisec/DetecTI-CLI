@@ -16,6 +16,76 @@ class EASMDashboard {
         // Don't auto-initialize, wait for DOM
     }
 
+    getAvailableLayout() {
+        // Check if cose-bilkent is available, fallback to other layouts
+        if (typeof cytoscapeCoseBilkent !== 'undefined') {
+            return 'cose-bilkent';
+        } else if (cytoscape('layout', 'cose')) {
+            return 'cose';
+        } else {
+            return 'breadthfirst';
+        }
+    }
+
+    getLayoutOptions(layoutName) {
+        const baseOptions = {
+            animate: true,
+            animationDuration: 1000,
+            fit: true,
+            padding: 50
+        };
+
+        switch (layoutName) {
+            case 'cose-bilkent':
+                return {
+                    ...baseOptions,
+                    nodeRepulsion: 8000,
+                    idealEdgeLength: 100,
+                    edgeElasticity: 0.1,
+                    nestingFactor: 0.1,
+                    gravity: 0.1,
+                    numIter: 2500,
+                    tile: true,
+                    tilingPaddingVertical: 10,
+                    tilingPaddingHorizontal: 10
+                };
+            case 'cose':
+                return {
+                    ...baseOptions,
+                    nodeRepulsion: 400000,
+                    idealEdgeLength: 100,
+                    edgeElasticity: 100,
+                    nestingFactor: 5,
+                    gravity: 80,
+                    numIter: 1000
+                };
+            case 'breadthfirst':
+                return {
+                    ...baseOptions,
+                    directed: true,
+                    spacingFactor: 1.75
+                };
+            case 'concentric':
+                return {
+                    ...baseOptions,
+                    concentric: function(node) {
+                        return node.degree();
+                    },
+                    levelWidth: function(nodes) {
+                        return 2;
+                    }
+                };
+            case 'grid':
+                return {
+                    ...baseOptions,
+                    rows: undefined,
+                    cols: undefined
+                };
+            default:
+                return baseOptions;
+        }
+    }
+
     async init() {
         try {
             console.log('Initializing EASM Dashboard...');
@@ -40,6 +110,9 @@ class EASMDashboard {
             // Setup event listeners
             console.log('Setting up event listeners...');
             this.setupEventListeners();
+            
+            // Set the correct default layout in the selector
+            this.updateLayoutSelector();
             
             // Hide loading indicator
             const loadingEl = document.getElementById('graph-loading');
@@ -93,6 +166,11 @@ class EASMDashboard {
     }
 
     initCytoscape() {
+        // Register the cose-bilkent layout extension if available
+        if (typeof cytoscapeCoseBilkent !== 'undefined') {
+            cytoscape.use(cytoscapeCoseBilkent);
+        }
+        
         this.cy = cytoscape({
             container: document.getElementById('cy'),
             
@@ -259,20 +337,11 @@ class EASMDashboard {
             ],
             
             layout: {
-                name: 'cose-bilkent',
+                name: this.getAvailableLayout(),
                 animate: true,
                 animationDuration: 1000,
                 fit: true,
-                padding: 50,
-                nodeRepulsion: 8000,
-                idealEdgeLength: 100,
-                edgeElasticity: 0.1,
-                nestingFactor: 0.1,
-                gravity: 0.1,
-                numIter: 2500,
-                tile: true,
-                tilingPaddingVertical: 10,
-                tilingPaddingHorizontal: 10
+                padding: 50
             }
         });
     }
@@ -291,12 +360,11 @@ class EASMDashboard {
                 this.applyFilters();
                 
                 // Run layout
+                const layoutName = this.getAvailableLayout();
+                const layoutOptions = this.getLayoutOptions(layoutName);
                 const layout = this.cy.layout({ 
-                    name: 'cose-bilkent', 
-                    animate: true,
-                    animationDuration: 1000,
-                    fit: true,
-                    padding: 50
+                    name: layoutName,
+                    ...layoutOptions
                 });
                 layout.run();
                 
@@ -359,12 +427,15 @@ class EASMDashboard {
 
         document.getElementById('btn-relayout').addEventListener('click', () => {
             const layoutName = document.getElementById('layout-select').value;
-            this.cy.layout({ name: layoutName, animate: true }).run();
+            const layoutOptions = this.getLayoutOptions(layoutName);
+            this.cy.layout({ name: layoutName, ...layoutOptions }).run();
         });
 
         // Layout selector
         document.getElementById('layout-select').addEventListener('change', (e) => {
-            this.cy.layout({ name: e.target.value, animate: true }).run();
+            const layoutName = e.target.value;
+            const layoutOptions = this.getLayoutOptions(layoutName);
+            this.cy.layout({ name: layoutName, ...layoutOptions }).run();
         });
 
         // Inspector close button
