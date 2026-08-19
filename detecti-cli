@@ -191,6 +191,7 @@ def scan_command(
                 db_manager.store_scan_result(result)
                 
                 print_success(f"Scan results stored in database: [bold underline]{final_db_path.resolve()}[/bold underline]")
+                print_info(f"Use 'detecti serve start --db {final_db_path.name}' to start web dashboard")
             except Exception as e:
                 print_error(f"Failed to store results in database: {e}")
 
@@ -333,9 +334,11 @@ def start_server(
             print_info(f"📊 Database: {db}")
             print_info("🔧 Use 'detecti serve status' to check server status")
             print_info("🛑 Use 'detecti serve stop' to stop the server")
+            print_info("📱 Open your browser and navigate to the dashboard URL to view the EASM graph")
         else:
             print_error("❌ Failed to start web server")
             print_info("Check that the database file exists and the port is available")
+            print_info("💡 Create a database first: 'detecti serve create-db --target <your_target>'")
             
     except FileNotFoundError as e:
         print_error(f"Database file not found: {e}")
@@ -450,6 +453,7 @@ def list_databases() -> None:
     from rich.table import Table
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("Database File", style="bold white")
+    table.add_column("Target", style="cyan")
     table.add_column("Size", style="dim")
     table.add_column("Modified", style="dim")
     
@@ -459,14 +463,111 @@ def list_databases() -> None:
         from datetime import datetime
         mod_time = datetime.fromtimestamp(modified).strftime("%Y-%m-%d %H:%M")
         
+        # Try to get target from database
+        target = "Unknown"
+        try:
+            from core.database.storage import DatabaseManager
+            db_manager = DatabaseManager(db_file)
+            stats = db_manager.get_summary_stats()
+            if 'target' in stats:
+                target = stats['target']
+        except Exception:
+            pass
+        
         table.add_row(
             db_file.name,
+            target,
             f"{size_mb:.2f} MB",
             mod_time
         )
     
     console.print(table)
     print_info("Use 'detecti serve start --db <database_name>' to start the web dashboard")
+
+
+@serve_app.command("create-db")
+def create_database(
+    target: str = typer.Option(
+        ...,
+        "--target",
+        "-t",
+        help="Target to scan and create database for",
+    ),
+    modules: str = typer.Option(
+        "all",
+        "--modules",
+        "-m",
+        help="Comma-separated list of modules to execute",
+    ),
+    db_name: Optional[str] = typer.Option(
+        None,
+        "--db-name",
+        "-n",
+        help="Custom database name (default: auto-generated from target)",
+    ),
+    cvss_filter: Optional[str] = typer.Option(
+        None,
+        "--cvss",
+        help="Filter vulnerabilities by CVSS severity: critical, high, medium, low",
+    ),
+) -> None:
+    """Create a new EASM database by scanning a target."""
+    print_banner()
+    
+    # Parse modules list
+    mod_list = [m.strip().lower() for m in modules.split(",") if m.strip()]
+    
+    print_section_header("Creating EASM Database")
+    console.print(f" [cyan]Target:[/cyan] [bold white]{target}[/bold white]")
+    console.print(f" [cyan]Modules:[/cyan] [bold white]{', '.join(mod_list)}[/bold white]")
+    
+    # Determine database path
+    from core.database.storage import DatabaseManager
+    if db_name:
+        if not db_name.endswith('.sqlite'):
+            db_name += '.sqlite'
+        db_path = Path.cwd() / "data" / "dbs" / db_name
+    else:
+        db_path = DatabaseManager.get_db_path_for_target(target)
+    
+    console.print(f" [cyan]Database:[/cyan] [bold white]{db_path.name}[/bold white]")
+    
+    if db_path.exists():
+        print_warning(f"Database already exists: {db_path.name}")
+        if not typer.confirm("Do you want to overwrite it?"):
+            print_info("Operation cancelled.")
+            return
+        db_path.unlink()
+    
+    # Run scan with persistence
+    with Progress(
+        SpinnerColumn(spinner_name="dots"),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        task_id = progress.add_task("[bold cyan]Scanning target and creating database...", total=None)
+
+        def progress_cb(module_name: str, message: str) -> None:
+            progress.update(task_id, description=f"[bold cyan][{module_name}][/bold cyan] {message}")
+
+        engine = ThreatTrackEngine(progress_callback=progress_cb)
+        result = asyncio.run(
+            engine.scan(
+                target=target,
+                enabled_modules=mod_list,
+                cvss_filter=cvss_filter,
+            )
+        )
+
+        # Store in database
+        progress.update(task_id, description="[bold cyan]Storing results in SQLite database...")
+        db_manager = DatabaseManager(db_path)
+        db_manager.store_scan_result(result)
+
+    print_success(f"✅ Database created successfully: [bold underline]{db_path.resolve()}[/bold underline]")
+    print_info(f"📊 Stored {len(result.hosts)} hosts and {len(result.findings)} findings")
+    print_info(f"🌐 Start web dashboard: [bold]detecti serve start --db {db_path.name}[/bold]")
 
 
 @app.command(name="version")
