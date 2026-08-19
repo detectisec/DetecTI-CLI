@@ -7,10 +7,10 @@ class EASMDashboard {
         this.cy = null;
         this.graphData = null;
         this.filters = {
-            kev: false,
-            highEpss: false,
-            critical: false,
-            https: false
+            kev: true,
+            highEpss: true,
+            critical: true,
+            https: true
         };
         
         this.init();
@@ -328,12 +328,14 @@ class EASMDashboard {
         // Show all nodes first
         this.cy.nodes().show();
 
-        // Apply filters
+        // Apply filters - when checked, show ONLY those types
         if (this.filters.kev) {
+            // Show only CISA KEV vulnerabilities
             this.cy.nodes('[type="vulnerability"][is_cisa_kev!="true"]').hide();
         }
 
         if (this.filters.highEpss) {
+            // Show only high EPSS vulnerabilities (>50%)
             this.cy.nodes('[type="vulnerability"]').forEach(node => {
                 const epssScore = node.data('epss_score') || 0;
                 if (epssScore <= 0.5) {
@@ -343,10 +345,12 @@ class EASMDashboard {
         }
 
         if (this.filters.critical) {
+            // Show only critical vulnerabilities
             this.cy.nodes('[type="vulnerability"][severity!="CRITICAL"]').hide();
         }
 
         if (this.filters.https) {
+            // Show only HTTPS services
             this.cy.nodes('[type="service"][ssl!="true"], [type="http"]').hide();
         }
 
