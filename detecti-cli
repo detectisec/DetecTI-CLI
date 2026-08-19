@@ -300,6 +300,14 @@ def start_server(
     print_banner()
     
     try:
+        import fastapi
+        import uvicorn
+        import psutil
+    except ImportError as e:
+        print_error("Web server dependencies not installed. Run: pip install fastapi uvicorn psutil")
+        return
+    
+    try:
         from web.process_manager import WebServerManager
         
         manager = WebServerManager()
@@ -329,8 +337,6 @@ def start_server(
             print_error("❌ Failed to start web server")
             print_info("Check that the database file exists and the port is available")
             
-    except ImportError:
-        print_error("Web server dependencies not installed. Run: pip install fastapi uvicorn")
     except FileNotFoundError as e:
         print_error(f"Database file not found: {e}")
     except Exception as e:
@@ -341,6 +347,12 @@ def start_server(
 def server_status() -> None:
     """Check the status of the background webserver."""
     print_banner()
+    
+    try:
+        import psutil
+    except ImportError:
+        print_error("Web server dependencies not installed. Run: pip install fastapi uvicorn psutil")
+        return
     
     try:
         from web.process_manager import WebServerManager
@@ -380,8 +392,6 @@ def server_status() -> None:
             print_warning("🔴 Web server is not running")
             print_info("Use 'detecti serve start --db <database>' to start the server")
             
-    except ImportError:
-        print_error("Web server dependencies not installed. Run: pip install fastapi uvicorn psutil")
     except Exception as e:
         print_error(f"Failed to check server status: {e}")
 
@@ -390,6 +400,12 @@ def server_status() -> None:
 def stop_server() -> None:
     """Stop the background webserver gracefully."""
     print_banner()
+    
+    try:
+        import psutil
+    except ImportError:
+        print_error("Web server dependencies not installed. Run: pip install psutil")
+        return
     
     try:
         from web.process_manager import WebServerManager
@@ -410,8 +426,6 @@ def stop_server() -> None:
             print_error("❌ Failed to stop web server")
             print_info("The server process may have already terminated")
             
-    except ImportError:
-        print_error("Web server dependencies not installed. Run: pip install psutil")
     except Exception as e:
         print_error(f"Failed to stop server: {e}")
 
