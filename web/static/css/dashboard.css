@@ -412,13 +412,13 @@ body {
 }
 
 .vulnerability-badge.high {
-    background: #ffa502;
-    color: #000;
+    background: #ff8c00;
+    color: #fff;
 }
 
 .vulnerability-badge.medium {
-    background: #ff8c00;
-    color: #fff;
+    background: #ffa502;
+    color: #000;
 }
 
 .vulnerability-badge.low {
