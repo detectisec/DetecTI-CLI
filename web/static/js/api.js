@@ -51,7 +51,26 @@ class APIClient {
     async getAssets() {
         return this.request('/assets');
     }
+
+    async getDatabases() {
+        return this.request('/databases');
+    }
+
+    async selectDatabase(dbName) {
+        return this.request('/databases/select', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name: dbName })
+        });
+    }
+
+    getExportUrl(format = 'json') {
+        return `${this.baseURL}/export?format=${format}`;
+    }
 }
 
 // Global API client instance
 window.api = new APIClient();
+

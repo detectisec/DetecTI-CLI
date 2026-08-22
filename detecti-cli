@@ -39,6 +39,7 @@ except (ImportError, ModuleNotFoundError):
 from config import settings
 from core.engine import ThreatTrackEngine, DetectIEngine
 from modules.exploitdb import ExploitDBModule
+from reporters.html_reporter import HTMLReporter
 from reporters.json_reporter import JSONReporter
 from reporters.markdown_reporter import MarkdownReporter
 from utils.logger import (
@@ -75,13 +76,13 @@ app = typer.Typer(
     rich_markup_mode=None,
 )
 
-# Create serve subcommand group
-serve_app = typer.Typer(
-    name="serve",
-    help="Web server and dashboard management commands",
+# Create hound subcommand group (Interactive EASM Attack Surface Graph Dashboard)
+hound_app = typer.Typer(
+    name="hound",
+    help="DetecTI Hound - Interactive EASM Attack Surface Graph Dashboard management",
     add_completion=False,
 )
-app.add_typer(serve_app, name="serve")
+app.add_typer(hound_app, name="hound")
 
 
 @app.command(name="scan")
@@ -102,19 +103,19 @@ def scan_command(
         "table",
         "-o",
         "--format",
-        help="Output report format: table, json, markdown, all",
+        help="Output report format: table, json, markdown, html, all",
     ),
     output_file: Optional[Path] = typer.Option(
         None,
         "-f",
         "--output-file",
-        help="Custom file path to export the report (e.g., report.json or report.md)",
+        help="Custom file path to export the report (e.g., report.json, report.md, or report.html)",
     ),
     output_dir: Optional[Path] = typer.Option(
         None,
         "-d",
         "--output-dir",
-        help="Directory to save generated JSON/Markdown reports",
+        help="Directory to save generated JSON/Markdown/HTML reports",
     ),
     cvss_filter: Optional[str] = typer.Option(
         None,
@@ -124,12 +125,7 @@ def scan_command(
     create_db: Optional[str] = typer.Option(
         None,
         "--create-db",
-        help="Create named database and store results (e.g. --create-db mycompany). Enables persistence automatically",
-    ),
-    db_path: Optional[Path] = typer.Option(
-        None,
-        "--db-path",
-        help="Custom SQLite database path (default: ./data/dbs/<target>.sqlite)",
+        help="Create named database in ./data/dbs/ and store results (e.g. --create-db mycompany)",
     ),
 ) -> None:
     """Execute complete attack surface mapping and threat intelligence analysis.
@@ -188,22 +184,16 @@ def scan_command(
             try:
                 from core.database.storage import DatabaseManager
                 
-                # Determine database path
-                if create_db:
-                    # Use custom database name
-                    db_name = create_db if create_db.endswith('.sqlite') else f"{create_db}.sqlite"
-                    final_db_path = Path.cwd() / "data" / "dbs" / db_name
-                elif db_path:
-                    final_db_path = db_path
-                else:
-                    final_db_path = DatabaseManager.get_db_path_for_target(target)
+                # Determine database path inside ./data/dbs/
+                db_name = create_db if create_db.endswith('.sqlite') else f"{create_db}.sqlite"
+                final_db_path = Path.cwd() / "data" / "dbs" / db_name
                 
                 progress.update(task_id, description="[bold cyan]Storing results in SQLite database...")
                 db_manager = DatabaseManager(final_db_path)
                 db_manager.store_scan_result(result)
                 
                 print_success(f"Scan results stored in database: [bold underline]{final_db_path.resolve()}[/bold underline]")
-                print_info(f"Use '{cli_name} serve start --db {final_db_path.name}' to start web dashboard")
+                print_info(f"Start the web dashboard with '{cli_name} hound start' and select '{final_db_path.name}' in the Web UI")
             except Exception as e:
                 print_error(f"Failed to store results in database: {e}")
 
@@ -226,6 +216,7 @@ def scan_command(
     fmt = output_format.lower()
     export_json = fmt in ("json", "all") or (output_file and output_file.suffix == ".json")
     export_md = fmt in ("markdown", "md", "all") or (output_file and output_file.suffix in (".md", ".markdown"))
+    export_html = fmt in ("html", "all") or (output_file and output_file.suffix in (".html", ".htm"))
 
     # JSON Export
     if export_json:
@@ -246,6 +237,16 @@ def scan_command(
         )
         MarkdownReporter.save(result, md_path)
         print_success(f"Markdown executive report saved to: [bold underline]{md_path.resolve()}[/bold underline]")
+
+    # HTML Export
+    if export_html:
+        html_path = (
+            output_file
+            if output_file and output_file.suffix in (".html", ".htm")
+            else save_dir / f"detecti_{safe_target}_{timestamp}.html"
+        )
+        HTMLReporter.save(result, html_path)
+        print_success(f"HTML executive report saved to: [bold underline]{html_path.resolve()}[/bold underline]")
 
 
 @app.command(name="update-xdb")
@@ -288,13 +289,13 @@ def config_check_command() -> None:
     console.print(f" • [cyan]HTTP Timeout:[/cyan] {settings.http_timeout}s")
 
 
-@serve_app.command("start")
+@hound_app.command("start")
 def start_server(
-    db: str = typer.Option(
-        ...,
+    db: Optional[str] = typer.Option(
+        None,
         "--db",
         "-d",
-        help="Target SQLite database file inside ./data/dbs/ or full path",
+        help="Target SQLite database file inside ./data/dbs/ or full path (optional, can be selected via UI)",
     ),
     port: int = typer.Option(
         8000,
@@ -335,7 +336,10 @@ def start_server(
                 return
         
         print_info(f"Starting DetecTI-CLI web server on {host}:{port}...")
-        print_info(f"Database: {db}")
+        if db:
+            print_info(f"Database: {db}")
+        else:
+            print_info("Database: [italic cyan]Dynamic (selectable via Web UI)[/italic cyan]")
         
         # Start the server
         success = manager.start_server(db, host, port)
@@ -343,14 +347,16 @@ def start_server(
         if success:
             print_success(f"✅ Web server started successfully!")
             print_info(f"🌐 Dashboard URL: http://{host}:{port}")
-            print_info(f"📊 Database: {db}")
-            print_info(f"🔧 Use '{cli_name} serve status' to check server status")
-            print_info(f"🛑 Use '{cli_name} serve stop' to stop the server")
+            if db:
+                print_info(f"📊 Initial Database: {db}")
+            else:
+                print_info(f"📊 Database: Dynamic selector active in Web UI")
+            print_info(f"🔧 Use '{cli_name} hound status' to check server status")
+            print_info(f"🛑 Use '{cli_name} hound stop' to stop the server")
             print_info("📱 Open your browser and navigate to the dashboard URL to view the EASM graph")
         else:
             print_error("❌ Failed to start web server")
-            print_info("Check that the database file exists and the port is available")
-            print_info(f"💡 Create a database first: '{cli_name} serve create-db --target <your_target>'")
+            print_info("Check that the port is available and dependencies are installed")
             
     except FileNotFoundError as e:
         print_error(f"Database file not found: {e}")
@@ -358,7 +364,7 @@ def start_server(
         print_error(f"Failed to start server: {e}")
 
 
-@serve_app.command("status")
+@hound_app.command("status")
 def server_status() -> None:
     """Check the status of the background webserver."""
     print_banner()
@@ -405,13 +411,13 @@ def server_status() -> None:
             print_success(f"🌐 Dashboard URL: http://{status['host']}:{status['port']}")
         else:
             print_warning("🔴 Web server is not running")
-            print_info(f"Use '{cli_name} serve start --db <database>' to start the server")
+            print_info(f"Use '{cli_name} hound start' to start the server")
             
     except Exception as e:
         print_error(f"Failed to check server status: {e}")
 
 
-@serve_app.command("stop")
+@hound_app.command("stop")
 def stop_server() -> None:
     """Stop the background webserver gracefully."""
     print_banner()
@@ -433,19 +439,16 @@ def stop_server() -> None:
         
         print_info("🛑 Stopping web server...")
         
-        success = manager.stop_server()
-        
-        if success:
+        if manager.stop_server():
             print_success("✅ Web server stopped successfully")
         else:
             print_error("❌ Failed to stop web server")
-            print_info("The server process may have already terminated")
             
     except Exception as e:
         print_error(f"Failed to stop server: {e}")
 
 
-@serve_app.command("list-dbs")
+@hound_app.command("list-dbs")
 def list_databases() -> None:
     """List all available EASM target SQLite databases in ./data/dbs/."""
     print_banner()
@@ -494,92 +497,7 @@ def list_databases() -> None:
         )
     
     console.print(table)
-    print_info(f"Use '{cli_name} serve start --db <database_name>' to start the web dashboard")
-
-
-@serve_app.command("create-db")
-def create_database(
-    target: str = typer.Option(
-        ...,
-        "--target",
-        "-t",
-        help="Target to scan and create database for",
-    ),
-    modules: str = typer.Option(
-        "all",
-        "--modules",
-        "-m",
-        help="Comma-separated list of modules to execute",
-    ),
-    db_name: Optional[str] = typer.Option(
-        None,
-        "--db-name",
-        "-n",
-        help="Custom database name (default: auto-generated from target)",
-    ),
-    cvss_filter: Optional[str] = typer.Option(
-        None,
-        "--cvss",
-        help="Filter vulnerabilities by CVSS severity: critical, high, medium, low",
-    ),
-) -> None:
-    """Create a new EASM database by scanning a target."""
-    print_banner()
-    
-    # Parse modules list
-    mod_list = [m.strip().lower() for m in modules.split(",") if m.strip()]
-    
-    print_section_header("Creating EASM Database")
-    console.print(f" [cyan]Target:[/cyan] [bold white]{target}[/bold white]")
-    console.print(f" [cyan]Modules:[/cyan] [bold white]{', '.join(mod_list)}[/bold white]")
-    
-    # Determine database path
-    from core.database.storage import DatabaseManager
-    if db_name:
-        if not db_name.endswith('.sqlite'):
-            db_name += '.sqlite'
-        db_path = Path.cwd() / "data" / "dbs" / db_name
-    else:
-        db_path = DatabaseManager.get_db_path_for_target(target)
-    
-    console.print(f" [cyan]Database:[/cyan] [bold white]{db_path.name}[/bold white]")
-    
-    if db_path.exists():
-        print_warning(f"Database already exists: {db_path.name}")
-        if not typer.confirm("Do you want to overwrite it?"):
-            print_info("Operation cancelled.")
-            return
-        db_path.unlink()
-    
-    # Run scan with persistence
-    with Progress(
-        SpinnerColumn(spinner_name="dots"),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-        transient=True,
-    ) as progress:
-        task_id = progress.add_task("[bold cyan]Scanning target and creating database...", total=None)
-
-        def progress_cb(module_name: str, message: str) -> None:
-            progress.update(task_id, description=f"[bold cyan][{module_name}][/bold cyan] {message}")
-
-        engine = ThreatTrackEngine(progress_callback=progress_cb)
-        result = asyncio.run(
-            engine.scan(
-                target=target,
-                enabled_modules=mod_list,
-                cvss_filter=cvss_filter,
-            )
-        )
-
-        # Store in database
-        progress.update(task_id, description="[bold cyan]Storing results in SQLite database...")
-        db_manager = DatabaseManager(db_path)
-        db_manager.store_scan_result(result)
-
-    print_success(f"✅ Database created successfully: [bold underline]{db_path.resolve()}[/bold underline]")
-    print_info(f"📊 Stored {len(result.hosts)} hosts and {len(result.findings)} findings")
-    print_info(f"🌐 Start web dashboard: [bold]{cli_name} serve start --db {db_path.name}[/bold]")
+    print_info(f"Use '{cli_name} hound start' to start the web dashboard (select database in UI)")
 
 
 @app.command(name="version")

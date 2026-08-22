@@ -1,6 +1,7 @@
 """Unit tests for ThreatTrack Pydantic models."""
 
 from datetime import datetime, timezone
+from pathlib import Path
 import pytest
 from core.models import (
     CISAKEVData,
@@ -144,3 +145,102 @@ def test_finding_and_scan_result_summary():
     assert summary.critical_vulns_count == 1
     assert summary.cisa_kev_count == 1
     assert summary.exploits_count == 1
+
+
+def test_graph_builder_target_root_hierarchy(tmp_path: Path):
+    """Test that GraphBuilder constructs hierarchy: Target Domain -> Subdomains -> IPs -> Services -> Vulnerabilities."""
+    from core.database.storage import DatabaseManager
+    from web.api.graph_builder import GraphBuilder
+
+    db_file = tmp_path / "test_target.sqlite"
+    db_manager = DatabaseManager(db_file)
+
+    # Build sample ScanResult with target="alvo.com"
+    scan_res = ScanResult(
+        target="alvo.com",
+        target_type="domain",
+    )
+
+    # Subdomains findings
+    scan_res.findings = [
+        Finding(
+            type=FindingType.SUBDOMAIN,
+            target="alvo.com",
+            value="api.alvo.com",
+            source="crt.sh",
+        ),
+        Finding(
+            type=FindingType.SUBDOMAIN,
+            target="alvo.com",
+            value="vpn.alvo.com",
+            source="crt.sh",
+        ),
+    ]
+
+    # Host resolved from subdomain
+    host = HostResult(
+        ip="10.20.30.40",
+        org="Alvo Corp",
+        country_name="Brazil",
+        hostnames=["api.alvo.com"],
+        ports=[
+            PortData(port=443, transport="tcp", product="nginx", version="1.21.0", ssl=True, url="https://api.alvo.com:443")
+        ],
+        vulnerabilities=[
+            VulnerabilityData(
+                cve_id="CVE-2023-1234",
+                cvss_score=8.5,
+                cvss_severity=SeverityLevel.HIGH,
+                description="High severity vulnerability on nginx",
+            )
+        ],
+    )
+    scan_res.hosts = [host]
+    scan_res.calculate_summary()
+
+    # Store in database
+    db_manager.store_scan_result(scan_res)
+
+    # Build Graph
+    builder = GraphBuilder(db_manager)
+    graph = builder.build_graph()
+
+    nodes = graph["elements"]["nodes"]
+    edges = graph["elements"]["edges"]
+
+    # 1. Target Domain node exists and is marked as is_root
+    domain_nodes = [n for n in nodes if n["data"]["type"] == "domain"]
+    assert len(domain_nodes) >= 1
+    root_domain = next((n for n in domain_nodes if n["data"]["name"] == "alvo.com"), None)
+    assert root_domain is not None
+    assert root_domain["data"]["is_root"] is True
+
+    # 2. Subdomains exist
+    sub_nodes = [n for n in nodes if n["data"]["type"] == "subdomain"]
+    assert len(sub_nodes) == 2
+    sub_names = {n["data"]["name"] for n in sub_nodes}
+    assert "api.alvo.com" in sub_names
+    assert "vpn.alvo.com" in sub_names
+
+    # 3. IP node exists
+    ip_nodes = [n for n in nodes if n["data"]["type"] == "ip"]
+    assert len(ip_nodes) == 1
+    assert ip_nodes[0]["data"]["ip"] == "10.20.30.40"
+
+    # 4. Check hierarchy edges:
+    # Domain -> Subdomain (HAS_SUBDOMAIN)
+    dom_sub_edges = [e for e in edges if e["data"]["label"] == "HAS_SUBDOMAIN"]
+    assert len(dom_sub_edges) == 2
+    assert all(e["data"]["source"] == root_domain["data"]["id"] for e in dom_sub_edges)
+
+    # Subdomain (api.alvo.com) -> IP (RESOLVES_TO)
+    sub_ip_edges = [e for e in edges if e["data"]["label"] == "RESOLVES_TO"]
+    assert len(sub_ip_edges) >= 1
+
+    # IP -> Service (EXPOSES)
+    ip_srv_edges = [e for e in edges if e["data"]["label"] == "EXPOSES"]
+    assert len(ip_srv_edges) >= 1
+
+    # Service -> Vulnerability (HAS_VULN)
+    srv_vuln_edges = [e for e in edges if e["data"]["label"] == "HAS_VULN"]
+    assert len(srv_vuln_edges) >= 1

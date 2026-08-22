@@ -2,32 +2,113 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DetecTI-CLI EASM Dashboard</title>
-    <link rel="stylesheet" href="/static/css/dashboard.css">
-    <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
-    <script src="https://unpkg.com/cytoscape-cose-bilkent@4.1.0/cytoscape-cose-bilkent.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>DetecTI-CLI — EASM & Threat Intelligence Dashboard</title>
+    <!-- Google Fonts - Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=12">
+    <script src="/static/js/cytoscape.min.js"></script>
+    <script src="/static/js/cytoscape-cose-bilkent.js"></script>
+    <script src="/static/js/lucide.min.js"></script>
 </head>
 <body>
     <div class="dashboard-container">
         <!-- Header -->
         <header class="dashboard-header">
+            <div class="header-accent-bar"></div>
             <div class="header-content">
-                <h1>🔍 DetecTI-CLI EASM Dashboard</h1>
-                <div class="target-info">
-                    <span id="target-name">Loading...</span>
-                    <span class="db-info" id="db-info"></span>
+                <!-- Left: Mobile Sidebar Toggle & Brand -->
+                <div class="header-left">
+                    <button id="toggle-sidebar" class="sidebar-toggle-btn" aria-label="Toggle Sidebar Menu" title="Toggle Filters & Controls">
+                        <i data-lucide="menu" class="ui-icon"></i>
+                    </button>
+                    <div class="header-brand">
+                        <img src="/static/img/detecti-ico.png" alt="DetecTI Icon" class="brand-logo">
+                        <div class="brand-text">
+                            <h1 class="brand-title">Detec<span class="ti-highlight">TI</span>-CLI</h1>
+                            <span class="brand-subtitle">Cyber Lead Intelligence</span>
+                        </div>
+                    </div>
+                    <a href="https://detecti.com.br" target="_blank" rel="noopener noreferrer" class="header-website-link" title="Visit DetecTI Security Official Website">
+                        <i data-lucide="globe" class="ui-icon link-icon"></i>
+                        <span class="link-text">detecti.com.br</span>
+                        <i data-lucide="external-link" class="ui-icon link-external-arrow"></i>
+                    </a>
+                    <a href="https://detecti.com.br/docs/detecti-cli/en.html" target="_blank" rel="noopener noreferrer" class="header-website-link header-docs-link" title="Official DetecTI-CLI Documentation (Opens in new tab)">
+                        <i data-lucide="book-open" class="ui-icon link-icon"></i>
+                        <span class="link-text">Official Documentation</span>
+                        <i data-lucide="external-link" class="ui-icon link-external-arrow"></i>
+                    </a>
+                </div>
+
+                <!-- Right: Database Selector, Export Actions & Target Info -->
+                <div class="header-right">
+                    <!-- Database Selector Control -->
+                    <div class="header-control-group">
+                        <label for="db-selector" class="control-label"><i data-lucide="database" class="ui-icon label-icon"></i> Database:</label>
+                        <select id="db-selector" class="db-select-input" title="Switch SQLite Database">
+                            <option value="">Loading databases...</option>
+                        </select>
+                    </div>
+
+                    <!-- Export Report Dropdown -->
+                    <div class="header-control-group export-dropdown-wrapper">
+                        <button id="btn-export-dropdown" class="action-btn export-btn export-trigger-btn" aria-haspopup="true" aria-expanded="false" title="Export Attack Surface & Intelligence Data">
+                            <i data-lucide="download" class="ui-icon"></i>
+                            <span>Export Data</span>
+                            <i data-lucide="chevron-down" class="ui-icon dropdown-chevron"></i>
+                        </button>
+                        <div class="export-dropdown-menu" id="export-dropdown-menu">
+                            <button class="export-dropdown-item" id="export-item-json">
+                                <i data-lucide="file-code-2" class="ui-icon export-item-icon"></i>
+                                <div class="export-item-text">
+                                    <span class="export-item-title">JSON</span>
+                                    <span class="export-item-desc">Structured scan results</span>
+                                </div>
+                            </button>
+                            <button class="export-dropdown-item" id="export-item-md">
+                                <i data-lucide="file-text" class="ui-icon export-item-icon"></i>
+                                <div class="export-item-text">
+                                    <span class="export-item-title">Markdown</span>
+                                    <span class="export-item-desc">Executive documentation</span>
+                                </div>
+                            </button>
+                            <button class="export-dropdown-item" id="export-item-html">
+                                <i data-lucide="globe" class="ui-icon export-item-icon"></i>
+                                <div class="export-item-text">
+                                    <span class="export-item-title">HTML</span>
+                                    <span class="export-item-desc">Interactive browser report</span>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="target-info">
+                        <span id="target-name" class="target-name" title="Target">Loading...</span>
+                        <span class="db-info" id="db-info"></span>
+                    </div>
                 </div>
             </div>
         </header>
 
         <!-- Main Content -->
         <div class="dashboard-main">
+            <!-- Sidebar Backdrop for Mobile/Tablet -->
+            <div id="sidebar-backdrop" class="drawer-backdrop"></div>
+
             <!-- Sidebar -->
-            <aside class="sidebar">
+            <aside class="sidebar" id="dashboard-sidebar">
+                <!-- Sidebar Mobile Header -->
+                <div class="sidebar-mobile-header">
+                    <span class="sidebar-mobile-title"><i data-lucide="activity" class="ui-icon"></i> Surface &amp; Controls</span>
+                    <button id="close-sidebar" class="sidebar-close-btn" aria-label="Close Sidebar"><i data-lucide="x" class="ui-icon"></i></button>
+                </div>
+
                 <!-- Metrics Panel -->
                 <div class="panel metrics-panel">
-                    <h3>📊 Attack Surface Metrics</h3>
+                    <h3><i data-lucide="bar-chart-3" class="ui-icon panel-title-icon"></i> Attack Surface Metrics</h3>
                     <div class="metric-grid">
                         <div class="metric-item">
                             <span class="metric-value" id="domains-count">-</span>
@@ -56,80 +137,109 @@
                     </div>
                 </div>
 
-                <!-- Lead Selector Panel -->
-                <div class="panel lead-selector-panel">
-                    <h3>🎯 Lead Selector</h3>
-                    <div id="lead-selector-container">
-                        <div class="lead-controls">
-                            <button id="btn-select-all" onclick="selectAllLeads(true)" class="lead-control-btn">Select All</button>
-                            <button id="btn-deselect-all" onclick="selectAllLeads(false)" class="lead-control-btn">Deselect All</button>
-                        </div>
-                        <div id="lead-list" class="lead-list">
-                            <div class="lead-loading">Loading leads...</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Search Panel -->
+                <!-- Search Box (Above Lead Selector) -->
                 <div class="panel search-panel">
-                    <h3>Search & Filters</h3>
                     <div class="search-group">
+                        <i data-lucide="search" class="ui-icon search-lead-icon"></i>
                         <input type="text" id="search-input" placeholder="Search nodes (IP, domain, CVE, port...)" class="search-input">
-                        <button id="clear-search" class="clear-btn">×</button>
-                    </div>
-                    <div class="filter-group">
-                        <label class="filter-checkbox">
-                            <input type="checkbox" id="filter-kev">
-                            <span class="checkmark"></span>
-                            Show Only CISA KEV
-                        </label>
-                        <label class="filter-checkbox">
-                            <input type="checkbox" id="filter-high-epss">
-                            <span class="checkmark"></span>
-                            Show Only High EPSS (&gt;0.5)
-                        </label>
-                        <label class="filter-checkbox">
-                            <input type="checkbox" id="filter-critical">
-                            <span class="checkmark"></span>
-                            Show Only Critical Vulns
-                        </label>
-                        <label class="filter-checkbox">
-                            <input type="checkbox" id="filter-with-pocs">
-                            <span class="checkmark"></span>
-                            Show Only Vulns with PoCs
-                        </label>
-                        <label class="filter-checkbox">
-                            <input type="checkbox" id="filter-subdomains-only">
-                            <span class="checkmark"></span>
-                            Show Only Subdomains
-                        </label>
+                        <button id="clear-search" class="clear-btn" aria-label="Clear Search"><i data-lucide="x" class="ui-icon"></i></button>
                     </div>
                 </div>
 
-                <!-- Graph Controls -->
-                <div class="panel controls-panel">
-                    <h3>🎮 Graph Controls</h3>
-                    <div class="control-buttons">
-                        <button id="btn-fit" class="control-btn">📐 Fit to Screen</button>
-                        <button id="btn-reset-zoom" class="control-btn">🔍 Reset Zoom</button>
-                        <button id="btn-relayout" class="control-btn">🔄 Re-layout</button>
-                    </div>
-                    <div class="layout-selector">
-                        <label for="layout-select">Layout:</label>
-                        <select id="layout-select">
-                            <option value="cose-bilkent">Force-Directed (Advanced)</option>
-                            <option value="cose">Force-Directed (Basic)</option>
-                            <option value="breadthfirst">Hierarchical</option>
-                            <option value="concentric">Concentric</option>
-                            <option value="grid">Grid</option>
-                        </select>
-                    </div>
+                <!-- Lead Selector Accordion Panel -->
+                <div class="panel lead-selector-panel lead-accordion-panel">
+                    <details class="sidebar-accordion" id="lead-selector-accordion">
+                        <summary class="accordion-header">
+                            <span class="accordion-title"><i data-lucide="crosshair" class="ui-icon panel-title-icon"></i> Lead Selector</span>
+                            <i data-lucide="chevron-down" class="ui-icon accordion-icon"></i>
+                        </summary>
+                        <div class="accordion-body">
+                            <div id="lead-selector-container">
+                                <div class="lead-controls">
+                                    <button id="btn-select-all" onclick="selectAllLeads(true)" class="lead-control-btn">Select All</button>
+                                    <button id="btn-deselect-all" onclick="selectAllLeads(false)" class="lead-control-btn">Deselect All</button>
+                                </div>
+                                <div id="lead-list" class="lead-list">
+                                    <div class="lead-loading">Fetching leads...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+
+                <!-- Filters Accordion Panel -->
+                <div class="panel filters-accordion-panel lead-accordion-panel">
+                    <details class="sidebar-accordion" id="filters-accordion">
+                        <summary class="accordion-header">
+                            <span class="accordion-title"><i data-lucide="sliders-horizontal" class="ui-icon panel-title-icon"></i> Filters</span>
+                            <i data-lucide="chevron-down" class="ui-icon accordion-icon"></i>
+                        </summary>
+                        <div class="accordion-body">
+                            <div class="filter-group">
+                                <label class="filter-checkbox">
+                                    <input type="checkbox" id="filter-kev">
+                                    <span class="checkmark"></span>
+                                    CISA KEV (Known Exploited)
+                                </label>
+                                <label class="filter-checkbox">
+                                    <input type="checkbox" id="filter-high-epss">
+                                    <span class="checkmark"></span>
+                                    High EPSS (&gt;50% Exploit Probability)
+                                </label>
+                                <label class="filter-checkbox">
+                                    <input type="checkbox" id="filter-critical">
+                                    <span class="checkmark"></span>
+                                    Critical Vulnerabilities (CVSS 9.0+)
+                                </label>
+                                <label class="filter-checkbox">
+                                    <input type="checkbox" id="filter-with-pocs">
+                                    <span class="checkmark"></span>
+                                    Verified Public PoCs / Exploits
+                                </label>
+                                <label class="filter-checkbox">
+                                    <input type="checkbox" id="filter-services-only">
+                                    <span class="checkmark"></span>
+                                    Exposed Services Branches
+                                </label>
+                                <label class="filter-checkbox">
+                                    <input type="checkbox" id="filter-vuln-services">
+                                    <span class="checkmark"></span>
+                                    Vulnerable Services Only
+                                </label>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+
+                <!-- Sidebar Footer -->
+                <div class="sidebar-footer">
+                    <div><a href="https://detecti.com.br/docs/detecti-cli/en.html" target="_blank" rel="noopener noreferrer" class="sidebar-docs-link"><i data-lucide="book-marked" class="ui-icon sidebar-docs-icon"></i> Official Documentation ↗</a></div>
+                    <div class="sidebar-powered">Powered by <a href="https://detecti.com.br" target="_blank" rel="noopener noreferrer">Detec<span class="ti-highlight">TI</span> Security</a></div>
                 </div>
             </aside>
 
             <!-- Graph Container -->
             <main class="graph-container">
+                <div id="spacebar-pan-hint" class="spacebar-pan-hint"><i data-lucide="hand" class="ui-icon" style="width: 14px; height: 14px; vertical-align: middle;"></i> Pan Mode (Spacebar or Right-Click held) - Drag to move view</div>
                 <div id="cy" class="cytoscape-graph"></div>
+                
+                <!-- Floating Graph Actions & Layout (Left side) -->
+                <div class="floating-controls" id="floating-controls">
+                    <div class="floating-actions-group">
+                        <button id="btn-float-fit" class="floating-btn" title="Fit to Screen" aria-label="Fit Graph"><i data-lucide="maximize-2" class="ui-icon"></i></button>
+                        <button id="btn-float-reset" class="floating-btn" title="Reset Zoom" aria-label="Reset Zoom"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+                        <button id="btn-float-relayout" class="floating-btn" title="Re-layout Graph" aria-label="Re-layout Graph"><i data-lucide="refresh-cw" class="ui-icon"></i></button>
+                    </div>
+                    <div class="floating-layout-wrapper">
+                        <select id="layout-select" class="floating-layout-select" aria-label="Select Graph Layout" title="Select Layout">
+                            <option value="breadthfirst" selected>Hierarchical (Top-Down)</option>
+                            <option value="cose">Force-Directed</option>
+                            <option value="concentric">Concentric</option>
+                            <option value="grid">Grid</option>
+                        </select>
+                    </div>
+                </div>
+
                 <div class="graph-loading" id="graph-loading">
                     <div class="spinner"></div>
                     <p>Loading EASM graph data...</p>
@@ -137,29 +247,37 @@
             </main>
         </div>
 
+        <!-- Inspector Backdrop for Mobile/Tablet -->
+        <div id="inspector-backdrop" class="drawer-backdrop"></div>
+
         <!-- Inspector Drawer -->
         <div class="inspector-drawer" id="inspector-drawer">
             <div class="inspector-header">
                 <h3 id="inspector-title">Asset Inspector</h3>
-                <button class="close-btn" id="close-inspector">✕</button>
+                <button class="close-btn" id="close-inspector" aria-label="Close Inspector"><i data-lucide="x" class="ui-icon"></i></button>
             </div>
             <div class="inspector-content" id="inspector-content">
                 <p>Click on any node in the graph to inspect its properties...</p>
-            </div>
         </div>
+
+        <!-- Custom Node Right-Click Context Menu -->
+        <div id="cy-context-menu" class="cy-context-menu"></div>
     </div>
 
-    <script src="/static/js/api.js"></script>
-    <script src="/static/js/graph.js"></script>
+    <script src="/static/js/api.js?v=6"></script>
+    <script src="/static/js/graph.js?v=31"></script>
     
     <script>
-        // Debug logging
+        // Debug logging & icon initialization
         console.log('DetecTI-CLI Dashboard loaded');
         console.log('Cytoscape available:', typeof cytoscape !== 'undefined');
         console.log('Current URL:', window.location.href);
         
-        // Check if all required elements exist
         document.addEventListener('DOMContentLoaded', () => {
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+
             const requiredElements = [
                 'target-name', 'domains-count', 'subdomains-count', 
                 'ips-count', 'services-count', 'vulns-count', 'kev-count',

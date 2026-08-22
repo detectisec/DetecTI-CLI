@@ -13,81 +13,106 @@ class EASMDashboard {
             highEpss: false,
             critical: false,
             withPocs: false,
-            subdomainsOnly: false
+            servicesOnly: false,
+            vulnServicesOnly: false
         };
         this.searchTerm = '';
+        this.expandedClusters = new Set();
+        this.manualCollapsedClusters = new Set();
+        this._hasRunInitialLayout = false;
         
         // Don't auto-initialize, wait for DOM
     }
 
     getAvailableLayout() {
-        // Check if cose-bilkent is available, fallback to other layouts
-        if (typeof cytoscapeCoseBilkent !== 'undefined') {
-            return 'cose-bilkent';
-        } else if (cytoscape('layout', 'cose')) {
-            return 'cose';
-        } else {
-            return 'breadthfirst';
-        }
+        return 'breadthfirst';
     }
 
-    getLayoutOptions(layoutName) {
+    getLayoutOptions(layoutName, targetElements = null) {
         const baseOptions = {
             animate: true,
-            animationDuration: 1000,
+            animationDuration: 550,
+            animationEasing: 'ease-out',
             fit: true,
-            padding: 50
+            padding: 30
         };
+
+        const visibleCount = targetElements && typeof targetElements.nodes === 'function' 
+            ? targetElements.nodes().length 
+            : (this.cy ? this.cy.nodes(':visible').length : 50);
 
         switch (layoutName) {
             case 'cose-bilkent':
                 return {
                     ...baseOptions,
-                    nodeRepulsion: 8000,
-                    idealEdgeLength: 100,
-                    edgeElasticity: 0.1,
+                    name: 'cose-bilkent',
+                    animate: 'end',
+                    animationDuration: 550,
+                    animationEasing: 'ease-out',
+                    nodeRepulsion: visibleCount < 25 ? 1200 : (visibleCount < 60 ? 1800 : 2500),
+                    idealEdgeLength: visibleCount < 25 ? 40 : 50,
+                    edgeElasticity: 0.35,
                     nestingFactor: 0.1,
-                    gravity: 0.1,
-                    numIter: 2500,
+                    gravity: 0.5,
+                    numIter: 1000,
+                    coolingFactor: 0.95,
                     tile: true,
-                    tilingPaddingVertical: 10,
-                    tilingPaddingHorizontal: 10
+                    tilingPaddingVertical: 6,
+                    tilingPaddingHorizontal: 6
                 };
             case 'cose':
                 return {
                     ...baseOptions,
-                    nodeRepulsion: 400000,
-                    idealEdgeLength: 100,
-                    edgeElasticity: 100,
-                    nestingFactor: 5,
-                    gravity: 80,
-                    numIter: 1000
+                    name: 'cose',
+                    animate: 'end',
+                    animationDuration: 550,
+                    animationEasing: 'ease-out',
+                    nodeRepulsion: visibleCount < 25 ? 15000 : (visibleCount < 60 ? 25000 : 45000),
+                    idealEdgeLength: visibleCount < 25 ? 35 : 45,
+                    edgeElasticity: 80,
+                    nestingFactor: 1.2,
+                    gravity: 120,
+                    numIter: 500
                 };
             case 'breadthfirst':
                 return {
                     ...baseOptions,
+                    name: 'breadthfirst',
                     directed: true,
-                    spacingFactor: 1.75,
+                    spacingFactor: 0.6,
+                    nodeDimensionsIncludeLabels: true,
+                    padding: 25,
                     roots: function(nodes) {
-                        // Use IP nodes as roots for hierarchical layout (IP -> Domain/Sub -> Services -> Vulns)
-                        return nodes.filter(function(node) {
-                            return node.data('type') === 'ip';
-                        });
+                        const visiblePool = nodes.filter(':visible');
+                        const pool = visiblePool.length > 0 ? visiblePool : nodes;
+                        let roots = pool.filter('[type="target"], [is_root="true"]');
+                        if (roots.length === 0) roots = pool.filter('[type="domain"]');
+                        if (roots.length === 0) roots = pool.filter('[type="ip"]');
+                        if (roots.length === 0) roots = pool.filter(n => n.incomers('node:visible').length === 0);
+                        return roots.length > 0 ? roots : pool.first();
                     }
                 };
             case 'concentric':
                 return {
                     ...baseOptions,
+                    name: 'concentric',
                     concentric: function(node) {
                         return node.degree();
                     },
                     levelWidth: function(nodes) {
                         return 2;
-                    }
+                    },
+                    spacingFactor: 0.55,
+                    minNodeSpacing: 20,
+                    padding: 25
                 };
             case 'grid':
                 return {
                     ...baseOptions,
+                    name: 'grid',
+                    padding: 25,
+                    avoidOverlap: true,
+                    avoidOverlapPadding: 10,
                     rows: undefined,
                     cols: undefined
                 };
@@ -111,6 +136,10 @@ class EASMDashboard {
                 throw new Error('API client not available');
             }
             
+            // Load databases list
+            console.log('Loading databases list...');
+            await this.loadDatabases();
+
             // Load summary data
             console.log('Loading summary data...');
             await this.loadSummary();
@@ -139,6 +168,11 @@ class EASMDashboard {
                 loadingEl.style.display = 'none';
             }
             
+            // Initialize / re-render Lucide icons
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+
             console.log('Dashboard initialization complete');
             
         } catch (error) {
@@ -200,7 +234,7 @@ class EASMDashboard {
             }
             
             // Clear loading message immediately
-            leadList.innerHTML = '<div class="lead-loading">Processing leads...</div>';
+            leadList.innerHTML = '<div class="lead-loading">Processing targets...</div>';
             
             // Try to get elements from Cytoscape if not provided
             if (!elements && this.cy) {
@@ -230,42 +264,18 @@ class EASMDashboard {
             let leadNodes = elements.nodes.filter(node => {
                 const nodeData = node.data || node;
                 const nodeType = nodeData.type;
-                console.log(`Checking node: ${nodeData.id} (type: ${nodeType})`);
-                console.log('Full node data:', nodeData);
-                const isLead = ['ip', 'domain', 'subdomain'].includes(nodeType);
-                if (isLead) {
-                    console.log(`✓ FOUND LEAD: ${nodeData.id} (${nodeType})`);
-                }
-                return isLead;
+                return ['ip', 'domain', 'subdomain'].includes(nodeType);
             });
             
             // IMMEDIATE FALLBACK: If no standard leads, create from ALL nodes
             if (leadNodes.length === 0) {
-                console.warn('No standard leads found, using ALL nodes as leads...');
-                leadNodes = elements.nodes.slice(); // Use all nodes
-                console.log(`Using all ${leadNodes.length} nodes as leads`);
+                leadNodes = elements.nodes.slice();
             }
             
-            console.log(`Found ${leadNodes.length} potential lead nodes out of ${elements.nodes.length} total nodes`);
-            console.log('All node types:', elements.nodes.map(n => (n.data || n).type).filter((v, i, a) => a.indexOf(v) === i));
-            console.log('Lead nodes found:', leadNodes.map(n => ({id: (n.data || n).id, type: (n.data || n).type})));
-            
             if (leadNodes.length === 0) {
-                console.error('NO LEAD NODES FOUND!');
-                console.error('Available node types:', elements.nodes.map(n => (n.data || n).type));
-                console.error('Sample nodes:', elements.nodes.slice(0, 5).map(n => ({
-                    id: (n.data || n).id,
-                    type: (n.data || n).type,
-                    label: (n.data || n).label,
-                    name: (n.data || n).name,
-                    ip: (n.data || n).ip
-                })));
-                
-                // Show a more helpful error message
                 leadList.innerHTML = `
                     <div class="lead-loading" style="color: #ff4757;">
-                        No lead nodes found!<br>
-                        <small>Available types: ${elements.nodes.map(n => (n.data || n).type).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</small><br>
+                        No lead nodes found in database.<br>
                         <button onclick="location.reload()" style="margin-top: 10px; padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer;">Reload Page</button>
                     </div>
                 `;
@@ -276,12 +286,9 @@ class EASMDashboard {
             leadNodes.forEach((node, index) => {
                 try {
                     const nodeData = node.data || node;
-                    console.log(`Processing lead ${index + 1}/${leadNodes.length}: ${nodeData.id} (${nodeData.type})`);
-                    console.log('Node data:', nodeData);
                     
                     // Find connected vulnerabilities to determine threat level
                     const connectedVulns = this.findConnectedVulnerabilities(nodeData.id, elements);
-                    console.log(`  Found ${connectedVulns.length} vulnerabilities`);
                     
                     // Calculate threat indicators
                     const vulnCount = connectedVulns.length;
@@ -292,12 +299,11 @@ class EASMDashboard {
                     // Find connected services
                     const connectedServices = this.findConnectedServices(nodeData.id, elements);
                     const serviceCount = connectedServices.length;
-                    console.log(`  Found ${serviceCount} services`);
                     
-                    // Create lead object with better display name handling
+                    // Create lead object with clean display name handling
                     let displayName = nodeData.label || nodeData.name || nodeData.ip || nodeData.id;
                     
-                    // Clean up display name for IPs (remove org/country from label for display)
+                    // Clean up display name for IPs
                     if (nodeData.type === 'ip' && nodeData.ip) {
                         displayName = nodeData.ip;
                     }
@@ -317,7 +323,6 @@ class EASMDashboard {
                         ip_count: nodeData.type === 'domain' ? this.countConnectedIPs(nodeData.id, elements) : 0
                     };
                     
-                    console.log(`  ✓ Lead created successfully:`, lead);
                     this.leads.push(lead);
                 } catch (error) {
                     console.error(`Error processing lead node ${index}:`, error);
@@ -386,58 +391,189 @@ class EASMDashboard {
         }
     }
     
-    findConnectedVulnerabilities(nodeId, elements) {
-        const vulnerabilities = [];
-        
-        if (!elements || !elements.edges || !Array.isArray(elements.edges)) {
-            console.warn('No edges available for vulnerability lookup');
-            return vulnerabilities;
+    buildGraphIndex(elements) {
+        this.nodeIndex = new Map();
+        this.outEdges = new Map();
+        this.inEdges = new Map();
+
+        if (!elements || !elements.nodes) return;
+
+        elements.nodes.forEach(node => {
+            const data = node.data || node;
+            if (data && data.id) {
+                this.nodeIndex.set(data.id, data);
+            }
+        });
+
+        if (elements.edges) {
+            elements.edges.forEach(edge => {
+                const data = edge.data || edge;
+                if (!data) return;
+                
+                if (data.source) {
+                    if (!this.outEdges.has(data.source)) this.outEdges.set(data.source, []);
+                    this.outEdges.get(data.source).push(data);
+                }
+                if (data.target) {
+                    if (!this.inEdges.has(data.target)) this.inEdges.set(data.target, []);
+                    this.inEdges.get(data.target).push(data);
+                }
+            });
         }
-        
+    }
+
+    findConnectedIPs(nodeId, elements) {
+        if (!elements || !elements.edges) return [];
+        if (!this.nodeIndex) this.buildGraphIndex(elements);
+
+        const targetData = this.nodeIndex.get(nodeId);
+        if (!targetData) return [];
+        if (targetData.type === 'ip') return [targetData];
+
+        const connectedIpIds = new Set();
+        const visitedSubIds = new Set();
+        const visitedDomIds = new Set();
+
+        const outEdges = this.outEdges.get(nodeId) || [];
+        const inEdges = this.inEdges.get(nodeId) || [];
+
+        if (targetData.type === 'target' || targetData.type === 'network') {
+            outEdges.forEach(edgeData => {
+                if (edgeData.label === 'MATCHES_DOMAIN') {
+                    visitedDomIds.add(edgeData.target);
+                }
+                if (edgeData.label === 'CONTAINS_IP' || edgeData.label === 'HOSTS_IP' || edgeData.label === 'RESOLVES_TO') {
+                    connectedIpIds.add(edgeData.target);
+                }
+            });
+            inEdges.forEach(edgeData => {
+                if (edgeData.label === 'BELONGS_TO' || edgeData.label === 'ORGANIZATION_OF') {
+                    connectedIpIds.add(edgeData.source);
+                }
+            });
+        }
+
+        if (targetData.type === 'domain') {
+            visitedDomIds.add(nodeId);
+        }
+
+        visitedDomIds.forEach(domId => {
+            const domOut = this.outEdges.get(domId) || [];
+            const domIn = this.inEdges.get(domId) || [];
+
+            domOut.forEach(edgeData => {
+                if (edgeData.label === 'HAS_SUBDOMAIN' || edgeData.label === 'CONTAINS_SUBDOMAIN') {
+                    visitedSubIds.add(edgeData.target);
+                }
+                if (edgeData.label === 'HOSTS_IP' || edgeData.label === 'CONTAINS_IP') {
+                    connectedIpIds.add(edgeData.target);
+                }
+            });
+            domIn.forEach(edgeData => {
+                if (edgeData.label === 'BELONGS_TO') {
+                    visitedSubIds.add(edgeData.source);
+                }
+            });
+        });
+
+        // Recursively traverse downstream subdomains and find their resolved IPs
+        const processSubdomainTree = (subId, visitedSubs = new Set()) => {
+            if (visitedSubs.has(subId)) return;
+            visitedSubs.add(subId);
+
+            const subOut = this.outEdges.get(subId) || [];
+            subOut.forEach(edgeData => {
+                if (edgeData.label === 'RESOLVES_TO') {
+                    connectedIpIds.add(edgeData.target);
+                }
+                if (edgeData.label === 'HAS_SUBDOMAIN' || edgeData.label === 'CONTAINS_SUBDOMAIN') {
+                    processSubdomainTree(edgeData.target, visitedSubs);
+                }
+            });
+        };
+
+        if (targetData.type === 'subdomain') {
+            processSubdomainTree(nodeId);
+        }
+
+        visitedSubIds.forEach(subId => {
+            processSubdomainTree(subId);
+        });
+
+        const ipNodes = [];
+        connectedIpIds.forEach(ipId => {
+            const ipData = this.nodeIndex.get(ipId);
+            if (ipData && ipData.type === 'ip') {
+                ipNodes.push(ipData);
+            }
+        });
+        return ipNodes;
+    }
+
+    findDirectVulnerabilities(nodeId, elements) {
+        if (!elements || !elements.edges) return [];
+        if (!this.nodeIndex) this.buildGraphIndex(elements);
+
+        const vulnerabilities = [];
+        const nodeOut = this.outEdges.get(nodeId) || [];
+        nodeOut.forEach(edgeData => {
+            if (edgeData.label === 'HAS_VULN') {
+                const vulnData = this.nodeIndex.get(edgeData.target);
+                if (vulnData && vulnData.type === 'vulnerability') {
+                    vulnerabilities.push(vulnData);
+                }
+            }
+        });
+        return vulnerabilities;
+    }
+
+    findConnectedVulnerabilities(nodeId, elements) {
+        if (!elements || !elements.edges) return [];
+        if (!this.nodeIndex) this.buildGraphIndex(elements);
+
+        const vulnerabilities = [];
+        const selfData = this.nodeIndex.get(nodeId);
+        if (selfData && selfData.type === 'vulnerability') {
+            return [selfData];
+        }
+
         try {
-            // Find all paths: node -> service -> vulnerability
+            // 1. Find all vulnerabilities via connected services (Service -> Vulnerability)
             const connectedServices = this.findConnectedServices(nodeId, elements);
-            
             connectedServices.forEach(service => {
-                elements.edges.forEach(edge => {
-                    try {
-                        const edgeData = edge.data || edge;
-                        if (edgeData.source === service.id && edgeData.label === 'HAS_VULN') {
-                            const vulnNode = elements.nodes.find(n => {
-                                const nodeData = n.data || n;
-                                return nodeData.id === edgeData.target;
-                            });
-                            if (vulnNode) {
-                                const vulnData = vulnNode.data || vulnNode;
-                                if (vulnData.type === 'vulnerability') {
-                                    vulnerabilities.push(vulnData);
-                                }
-                            }
+                const srvOut = this.outEdges.get(service.id) || [];
+                srvOut.forEach(edgeData => {
+                    if (edgeData.label === 'HAS_VULN') {
+                        const vulnData = this.nodeIndex.get(edgeData.target);
+                        if (vulnData && vulnData.type === 'vulnerability') {
+                            vulnerabilities.push(vulnData);
                         }
-                    } catch (e) {
-                        console.warn('Error processing edge for vulnerability:', e);
                     }
                 });
             });
             
-            // Also check for direct vulnerability connections (if any)
-            elements.edges.forEach(edge => {
-                try {
-                    const edgeData = edge.data || edge;
-                    if (edgeData.source === nodeId && edgeData.label === 'HAS_VULN') {
-                        const vulnNode = elements.nodes.find(n => {
-                            const nodeData = n.data || n;
-                            return nodeData.id === edgeData.target;
-                        });
-                        if (vulnNode) {
-                            const vulnData = vulnNode.data || vulnNode;
-                            if (vulnData.type === 'vulnerability') {
-                                vulnerabilities.push(vulnData);
-                            }
+            // 2. Find all vulnerabilities directly connected to IPs (IP -> Vulnerability)
+            const connectedIPs = this.findConnectedIPs(nodeId, elements);
+            connectedIPs.forEach(ipData => {
+                const ipOut = this.outEdges.get(ipData.id) || [];
+                ipOut.forEach(edgeData => {
+                    if (edgeData.label === 'HAS_VULN') {
+                        const vulnData = this.nodeIndex.get(edgeData.target);
+                        if (vulnData && vulnData.type === 'vulnerability') {
+                            vulnerabilities.push(vulnData);
                         }
                     }
-                } catch (e) {
-                    console.warn('Error processing direct vulnerability edge:', e);
+                });
+            });
+
+            // 3. Check direct vulnerability connections from nodeId itself
+            const nodeOut = this.outEdges.get(nodeId) || [];
+            nodeOut.forEach(edgeData => {
+                if (edgeData.label === 'HAS_VULN') {
+                    const vulnData = this.nodeIndex.get(edgeData.target);
+                    if (vulnData && vulnData.type === 'vulnerability') {
+                        vulnerabilities.push(vulnData);
+                    }
                 }
             });
             
@@ -454,54 +590,50 @@ class EASMDashboard {
     }
     
     findConnectedServices(nodeId, elements) {
+        if (!elements || !elements.edges) return [];
+        if (!this.nodeIndex) this.buildGraphIndex(elements);
+
         const services = [];
-        
-        if (!elements || !elements.edges || !Array.isArray(elements.edges)) {
-            console.warn('No edges available for service lookup');
-            return services;
+        const selfData = this.nodeIndex.get(nodeId);
+        if (selfData && ['service', 'http', 'https'].includes(selfData.type)) {
+            return [selfData];
         }
-        
+
         try {
             // Find services connected FROM this node (IP/domain exposes services)
-            elements.edges.forEach(edge => {
-                try {
-                    const edgeData = edge.data || edge;
-                    if (edgeData.source === nodeId && edgeData.label === 'EXPOSES') {
-                        const serviceNode = elements.nodes.find(n => {
-                            const nodeData = n.data || n;
-                            return nodeData.id === edgeData.target;
-                        });
-                        if (serviceNode) {
-                            const serviceData = serviceNode.data || serviceNode;
-                            if (['service', 'http', 'https'].includes(serviceData.type)) {
-                                services.push(serviceData);
-                            }
-                        }
+            const nodeOut = this.outEdges.get(nodeId) || [];
+            nodeOut.forEach(edgeData => {
+                if (edgeData.label === 'EXPOSES') {
+                    const srvData = this.nodeIndex.get(edgeData.target);
+                    if (srvData && ['service', 'http', 'https'].includes(srvData.type)) {
+                        services.push(srvData);
                     }
-                } catch (e) {
-                    console.warn('Error processing service edge:', e);
                 }
             });
             
             // Also find services that belong to this node (reverse direction)
-            elements.edges.forEach(edge => {
-                try {
-                    const edgeData = edge.data || edge;
-                    if (edgeData.target === nodeId && edgeData.label === 'BELONGS_TO') {
-                        const serviceNode = elements.nodes.find(n => {
-                            const nodeData = n.data || n;
-                            return nodeData.id === edgeData.source;
-                        });
-                        if (serviceNode) {
-                            const serviceData = serviceNode.data || serviceNode;
-                            if (['service', 'http', 'https'].includes(serviceData.type)) {
-                                services.push(serviceData);
-                            }
+            const nodeIn = this.inEdges.get(nodeId) || [];
+            nodeIn.forEach(edgeData => {
+                if (edgeData.label === 'BELONGS_TO') {
+                    const srvData = this.nodeIndex.get(edgeData.source);
+                    if (srvData && ['service', 'http', 'https'].includes(srvData.type)) {
+                        services.push(srvData);
+                    }
+                }
+            });
+
+            // If node is a target, organization, domain or subdomain, find all connected IPs and their exposed services
+            const connectedIPs = this.findConnectedIPs(nodeId, elements);
+            connectedIPs.forEach(ipData => {
+                const ipOut = this.outEdges.get(ipData.id) || [];
+                ipOut.forEach(edgeData => {
+                    if (edgeData.label === 'EXPOSES') {
+                        const srvData = this.nodeIndex.get(edgeData.target);
+                        if (srvData && ['service', 'http', 'https'].includes(srvData.type)) {
+                            services.push(srvData);
                         }
                     }
-                } catch (e) {
-                    console.warn('Error processing reverse service edge:', e);
-                }
+                });
             });
             
             // Remove duplicates
@@ -516,12 +648,73 @@ class EASMDashboard {
         }
     }
     
+    findConnectedSubdomains(nodeId, elements) {
+        if (!elements || !elements.edges) return [];
+        if (!this.nodeIndex) this.buildGraphIndex(elements);
+
+        const targetData = this.nodeIndex.get(nodeId);
+        if (!targetData) return [];
+
+        const subdomainsMap = new Map();
+        const visitedSubIds = new Set();
+        const visitedDomIds = new Set();
+
+        if (targetData.type === 'target') {
+            const nodeOut = this.outEdges.get(nodeId) || [];
+            nodeOut.forEach(edgeData => {
+                if (edgeData.label === 'MATCHES_DOMAIN') {
+                    visitedDomIds.add(edgeData.target);
+                }
+            });
+        }
+
+        if (targetData.type === 'domain') {
+            visitedDomIds.add(nodeId);
+        }
+
+        visitedDomIds.forEach(domId => {
+            const domOut = this.outEdges.get(domId) || [];
+            domOut.forEach(edgeData => {
+                if (edgeData.label === 'HAS_SUBDOMAIN' || edgeData.label === 'CONTAINS_SUBDOMAIN') {
+                    visitedSubIds.add(edgeData.target);
+                }
+            });
+        });
+
+        // Recursively traverse downstream subdomains
+        const visitedNodes = new Set();
+        const processSubTree = (subId, isRootNode = false) => {
+            if (visitedNodes.has(subId)) return;
+            visitedNodes.add(subId);
+
+            if (!isRootNode) {
+                const sData = this.nodeIndex.get(subId);
+                if (sData && sData.type === 'subdomain') {
+                    subdomainsMap.set(sData.id, sData);
+                }
+            }
+
+            const subOut = this.outEdges.get(subId) || [];
+            subOut.forEach(edgeData => {
+                if (edgeData.label === 'HAS_SUBDOMAIN' || edgeData.label === 'CONTAINS_SUBDOMAIN') {
+                    processSubTree(edgeData.target, false);
+                }
+            });
+        };
+
+        if (targetData.type === 'subdomain') {
+            processSubTree(nodeId, true);
+        }
+
+        visitedSubIds.forEach(subId => {
+            processSubTree(subId, false);
+        });
+
+        return Array.from(subdomainsMap.values());
+    }
+
     countConnectedIPs(domainId, elements) {
-        return elements.edges
-            .filter(edge => edge.data.source === domainId)
-            .map(edge => elements.nodes.find(n => n.data.id === edge.data.target))
-            .filter(n => n && n.data.type === 'ip')
-            .length;
+        return this.findConnectedIPs(domainId, elements).length;
     }
 
     renderLeadSelector() {
@@ -555,6 +748,7 @@ class EASMDashboard {
 
         console.log('✓ Clearing lead list and rendering leads...');
         leadList.innerHTML = '';
+        const fragment = document.createDocumentFragment();
 
         // Sort leads by priority: KEV > Critical > PoC count > Vuln count > Service count
         const sortedLeads = [...this.leads].sort((a, b) => {
@@ -586,22 +780,22 @@ class EASMDashboard {
             
             // CISA KEV badge (highest priority - red with pulse)
             if (lead.has_kev) {
-                badges.push('<span class="lead-badge kev" title="CISA Known Exploited Vulnerability">🚨 KEV</span>');
+                badges.push('<span class="lead-badge kev" title="CISA Known Exploited Vulnerability"><i data-lucide="shield-alert" class="badge-icon"></i> KEV</span>');
             }
             
             // Critical vulnerabilities badge
             if (lead.has_critical) {
-                badges.push('<span class="lead-badge critical" title="Critical Severity Vulnerabilities">⚠️ CRIT</span>');
+                badges.push('<span class="lead-badge critical" title="Critical Severity Vulnerabilities"><i data-lucide="alert-triangle" class="badge-icon"></i> CRIT</span>');
             }
             
             // PoC/Exploit availability badge
             if (lead.poc_count > 0) {
-                badges.push(`<span class="lead-badge poc" title="${lead.poc_count} Proof-of-Concept(s) Available">💥 ${lead.poc_count} PoC</span>`);
+                badges.push(`<span class="lead-badge poc" title="${lead.poc_count} Proof-of-Concept(s) Available"><i data-lucide="file-code" class="badge-icon"></i> ${lead.poc_count} PoC</span>`);
             }
             
             // CVE count badge
             if (lead.vuln_count > 0) {
-                badges.push(`<span class="lead-badge cve" title="${lead.vuln_count} CVE(s) Found">🔍 ${lead.vuln_count} CVE</span>`);
+                badges.push(`<span class="lead-badge cve" title="${lead.vuln_count} CVE(s) Found"><i data-lucide="bug" class="badge-icon"></i> ${lead.vuln_count} CVE</span>`);
             }
 
             // Build detailed stats
@@ -627,10 +821,10 @@ class EASMDashboard {
             }
 
             leadItem.innerHTML = `
-                <div class="lead-checkbox"></div>
+                <input type="checkbox" id="chk_${lead.id}" class="lead-checkbox-input" style="margin-top: 0.25rem; cursor: pointer;">
                 <div class="lead-info">
                     <div class="lead-header">
-                        <div class="lead-name">${lead.display_name}</div>
+                        <label for="chk_${lead.id}" class="lead-name" style="cursor: pointer;">${lead.display_name}</label>
                         <div class="lead-type ${lead.type}">${lead.type.toUpperCase()}</div>
                     </div>
                     <div class="lead-badges">${badges.join('')}</div>
@@ -639,14 +833,35 @@ class EASMDashboard {
                 <div class="lead-risk-indicator ${riskClass}"></div>
             `;
 
-            leadItem.addEventListener('click', () => {
-                const isCurrentlySelected = this.selectedLeads.has(lead.id);
-                window.toggleLeadVisibility(lead.id, !isCurrentlySelected);
+            // Prevent event bubbling when clicking the checkbox directly
+            const checkbox = leadItem.querySelector('.lead-checkbox-input');
+            checkbox.addEventListener('click', (e) => {
+                e.stopPropagation();
+                window.toggleLeadVisibility(lead.id, checkbox.checked);
             });
 
-            leadList.appendChild(leadItem);
-            console.log(`✓ Added lead item for: ${lead.display_name}`);
+            leadItem.addEventListener('click', (e) => {
+                if (e.target !== checkbox && e.target.tagName !== 'LABEL') {
+                    checkbox.checked = !checkbox.checked;
+                    window.toggleLeadVisibility(lead.id, checkbox.checked);
+                }
+            });
+
+            // Set initial state
+            if (this.selectedLeads.has(lead.id)) {
+                checkbox.checked = true;
+                leadItem.classList.add('selected');
+            }
+
+            fragment.appendChild(leadItem);
         });
+
+        leadList.appendChild(fragment);
+
+        // Initialize Lucide icons inside dynamically rendered leads
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
         
         console.log(`✓ Rendered ${this.leads.length} lead items successfully`);
         console.log('=== RENDER LEAD SELECTOR END ===');
@@ -664,7 +879,7 @@ class EASMDashboard {
             leadItem.classList.add('selected');
         }
 
-        this.applyLeadFilter();
+        this.applyLeadFilter({ relayout: false });
     }
 
     selectAllLeads() {
@@ -673,20 +888,24 @@ class EASMDashboard {
             const leadItem = document.querySelector(`[data-lead-id="${lead.id}"]`);
             if (leadItem) {
                 leadItem.classList.add('selected');
+                const checkbox = leadItem.querySelector('.lead-checkbox-input');
+                if (checkbox) checkbox.checked = true;
             }
         });
-        this.applyLeadFilter();
+        this.applyLeadFilter({ relayout: false });
     }
 
     deselectAllLeads() {
         this.selectedLeads.clear();
         document.querySelectorAll('.lead-item').forEach(item => {
             item.classList.remove('selected');
+            const checkbox = item.querySelector('.lead-checkbox-input');
+            if (checkbox) checkbox.checked = false;
         });
-        this.applyLeadFilter();
+        this.applyLeadFilter({ relayout: false });
     }
 
-    applyLeadFilter() {
+    applyLeadFilter(options = {}) {
         if (!this.cy) return;
 
         // Default behavior: If no leads are selected, hide all nodes and edges
@@ -712,99 +931,418 @@ class EASMDashboard {
             }
         });
 
-        // Second pass: Recursively add all connected nodes (services, vulnerabilities, exploits)
-        const addConnectedSubtree = (nodeId, visited = new Set()) => {
+        // Second pass: For each selected lead, add:
+        // 1. Its ancestry lineage to the root (so the lead connects cleanly to root domain/target)
+        // 2. Its downstream descendants (Services -> Vulnerabilities -> Exploits / IP resolutions)
+        // This prevents pulling in unrelated sibling domains, subdomains, or other IPs!
+        
+        // Add ancestors towards root (incomers)
+        const addAncestors = (nodeId, visited = new Set()) => {
             if (visited.has(nodeId)) return;
             visited.add(nodeId);
             
             const node = this.cy.getElementById(nodeId);
             if (!node.length) return;
             
-            // Add all connected nodes (both incoming and outgoing edges)
-            const connectedNodes = node.neighborhood().nodes();
-            connectedNodes.forEach(connectedNode => {
-                const connectedId = connectedNode.id();
-                if (!visibleNodes.has(connectedId)) {
-                    visibleNodes.add(connectedId);
-                    // Recursively add their connections
-                    addConnectedSubtree(connectedId, visited);
-                }
+            node.incomers('node').forEach(parentNode => {
+                const parentId = parentNode.id();
+                visibleNodes.add(parentId);
+                addAncestors(parentId, visited);
             });
         };
 
-        // Add all connected subtrees for each selected lead
-        Array.from(visibleNodes).forEach(nodeId => {
-            addConnectedSubtree(nodeId);
+        // Add downstream descendants (outgoers: services, vulns, etc.)
+        const addDescendants = (nodeId, visited = new Set()) => {
+            if (visited.has(nodeId)) return;
+            visited.add(nodeId);
+            
+            const node = this.cy.getElementById(nodeId);
+            if (!node.length) return;
+            
+            node.outgoers('node').forEach(childNode => {
+                const childId = childNode.id();
+                visibleNodes.add(childId);
+                addDescendants(childId, visited);
+            });
+        };
+
+        // For each selected lead, trace ancestors up to root and descendants down to vulns/services
+        selectedLeadIds.forEach(leadId => {
+            addAncestors(leadId);
+            addDescendants(leadId);
         });
 
-        // Third pass: Hide all nodes that are not in the visible set
-        this.cy.nodes().forEach(node => {
-            if (!visibleNodes.has(node.id())) {
-                node.hide();
+        // Third pass: Smart Clustering / Collapsing for high fan-out nodes (>15 services or vulns)
+        // Group overwhelming numbers of services or vulnerabilities into clean cluster nodes
+        const clusterNodesToAdd = [];
+        const clusterEdgesToAdd = [];
+        const CLUSTER_THRESHOLD = 15;
+
+        // 3a. Cluster services under IP nodes with high fan-out or manual collapse
+        this.cy.nodes('[type="ip"]').forEach(ipNode => {
+            const clusterId = `cluster_srv_${ipNode.id()}`;
+            const existingCluster = this.cy.getElementById(clusterId);
+
+            if (!visibleNodes.has(ipNode.id())) {
+                if (existingCluster.length > 0) existingCluster.remove();
+                return;
+            }
+
+            const serviceOutgoers = ipNode.outgoers('node[type="service"], node[type="http"], node[type="https"]').filter(s => visibleNodes.has(s.id()) || s.id().startsWith('srv_'));
+            const isManuallyCollapsed = this.manualCollapsedClusters.has(clusterId);
+            const isExpanded = this.expandedClusters.has(clusterId);
+            const shouldCollapse = (isManuallyCollapsed || serviceOutgoers.length > CLUSTER_THRESHOLD) && !isExpanded;
+
+            if (serviceOutgoers.length >= 1 && shouldCollapse) {
+                // Collapse services into a cluster node
+                const clusterLabel = `+ ${serviceOutgoers.length} ${serviceOutgoers.length === 1 ? 'Service' : 'Services'}`;
+
+                if (existingCluster.length === 0) {
+                    const ipPos = ipNode.position();
+                    // Offset services cluster to bottom-left of IP
+                    clusterNodesToAdd.push({
+                        group: 'nodes',
+                        data: {
+                            id: clusterId,
+                            label: clusterLabel,
+                            name: clusterLabel,
+                            type: 'cluster_services',
+                            parent_ip: ipNode.id(),
+                            count: serviceOutgoers.length,
+                            is_cluster: true
+                        },
+                        position: { x: ipPos.x - 42, y: ipPos.y + 45 }
+                    });
+
+                    clusterEdgesToAdd.push({
+                        group: 'edges',
+                        data: {
+                            id: `edge_${clusterId}`,
+                            source: ipNode.id(),
+                            target: clusterId,
+                            label: 'EXPOSES'
+                        }
+                    });
+                } else {
+                    existingCluster.data('label', clusterLabel);
+                    existingCluster.data('count', serviceOutgoers.length);
+                    const existingEdge = this.cy.getElementById(`edge_${clusterId}`);
+                    if (existingEdge.length === 0) {
+                        clusterEdgesToAdd.push({
+                            group: 'edges',
+                            data: {
+                                id: `edge_${clusterId}`,
+                                source: ipNode.id(),
+                                target: clusterId,
+                                label: 'EXPOSES'
+                            }
+                        });
+                    }
+                }
+
+                visibleNodes.add(clusterId);
+
+                // Hide individual service nodes and their downstream vulnerabilities
+                serviceOutgoers.forEach(srvNode => {
+                    visibleNodes.delete(srvNode.id());
+                    srvNode.outgoers('node[type="vulnerability"]').forEach(vulnNode => {
+                        visibleNodes.delete(vulnNode.id());
+                    });
+                });
+            } else if (existingCluster.length > 0) {
+                // Remove cluster if condition no longer met or expanded
+                existingCluster.remove();
             }
         });
 
-        // Hide edges connected to hidden nodes
+        // 3b. Cluster direct vulnerabilities under IP nodes (IP -> Vulnerability without service)
+        this.cy.nodes('[type="ip"]').forEach(ipNode => {
+            const clusterId = `cluster_ip_vuln_${ipNode.id()}`;
+            const existingCluster = this.cy.getElementById(clusterId);
+
+            if (!visibleNodes.has(ipNode.id())) {
+                if (existingCluster.length > 0) existingCluster.remove();
+                return;
+            }
+
+            const directVulnOutgoers = ipNode.outgoers('node[type="vulnerability"]').filter(v => visibleNodes.has(v.id()) || v.id().startsWith('vuln_'));
+            const isManuallyCollapsed = this.manualCollapsedClusters.has(clusterId);
+            const isExpanded = this.expandedClusters.has(clusterId);
+            const shouldCollapse = (isManuallyCollapsed || directVulnOutgoers.length > CLUSTER_THRESHOLD) && !isExpanded;
+
+            if (directVulnOutgoers.length >= 1 && shouldCollapse) {
+                const clusterLabel = `+ ${directVulnOutgoers.length} ${directVulnOutgoers.length === 1 ? 'Vuln' : 'Vulns'}`;
+
+                if (existingCluster.length === 0) {
+                    const ipPos = ipNode.position();
+                    // Offset direct vulns cluster to bottom-right of IP
+                    clusterNodesToAdd.push({
+                        group: 'nodes',
+                        data: {
+                            id: clusterId,
+                            label: clusterLabel,
+                            name: clusterLabel,
+                            type: 'cluster_vulns',
+                            parent_ip: ipNode.id(),
+                            count: directVulnOutgoers.length,
+                            is_cluster: true
+                        },
+                        position: { x: ipPos.x + 42, y: ipPos.y + 45 }
+                    });
+
+                    clusterEdgesToAdd.push({
+                        group: 'edges',
+                        data: {
+                            id: `edge_${clusterId}`,
+                            source: ipNode.id(),
+                            target: clusterId,
+                            label: 'HAS_VULN'
+                        }
+                    });
+                } else {
+                    existingCluster.data('label', clusterLabel);
+                    existingCluster.data('count', directVulnOutgoers.length);
+                    const existingEdge = this.cy.getElementById(`edge_${clusterId}`);
+                    if (existingEdge.length === 0) {
+                        clusterEdgesToAdd.push({
+                            group: 'edges',
+                            data: {
+                                id: `edge_${clusterId}`,
+                                source: ipNode.id(),
+                                target: clusterId,
+                                label: 'HAS_VULN'
+                            }
+                        });
+                    }
+                }
+
+                visibleNodes.add(clusterId);
+
+                // Hide individual direct vulnerability nodes
+                directVulnOutgoers.forEach(vulnNode => {
+                    visibleNodes.delete(vulnNode.id());
+                });
+            } else if (existingCluster.length > 0) {
+                existingCluster.remove();
+            }
+        });
+
+        // 3c. Cluster vulnerabilities under Services with high fan-out or manual collapse
+        this.cy.nodes('[type="service"], node[type="http"], node[type="https"]').forEach(srvNode => {
+            const clusterId = `cluster_vuln_${srvNode.id()}`;
+            const existingCluster = this.cy.getElementById(clusterId);
+
+            // If the service is not visible, remove any orphaned vulnerability cluster
+            if (!visibleNodes.has(srvNode.id())) {
+                if (existingCluster.length > 0) existingCluster.remove();
+                return;
+            }
+
+            const vulnOutgoers = srvNode.outgoers('node[type="vulnerability"]').filter(v => visibleNodes.has(v.id()) || v.id().startsWith('vuln_'));
+            const isManuallyCollapsed = this.manualCollapsedClusters.has(clusterId);
+            const isExpanded = this.expandedClusters.has(clusterId);
+            const shouldCollapse = (isManuallyCollapsed || vulnOutgoers.length > CLUSTER_THRESHOLD) && !isExpanded;
+
+            if (vulnOutgoers.length >= 1 && shouldCollapse) {
+                const clusterLabel = `+ ${vulnOutgoers.length} ${vulnOutgoers.length === 1 ? 'Vuln' : 'Vulns'}`;
+
+                if (existingCluster.length === 0) {
+                    const srvPos = srvNode.position();
+                    clusterNodesToAdd.push({
+                        group: 'nodes',
+                        data: {
+                            id: clusterId,
+                            label: clusterLabel,
+                            name: clusterLabel,
+                            type: 'cluster_vulns',
+                            parent_srv: srvNode.id(),
+                            count: vulnOutgoers.length,
+                            is_cluster: true
+                        },
+                        position: { x: srvPos.x, y: srvPos.y + 45 }
+                    });
+
+                    clusterEdgesToAdd.push({
+                        group: 'edges',
+                        data: {
+                            id: `edge_${clusterId}`,
+                            source: srvNode.id(),
+                            target: clusterId,
+                            label: 'HAS_VULN'
+                        }
+                    });
+                } else {
+                    existingCluster.data('label', clusterLabel);
+                    existingCluster.data('count', vulnOutgoers.length);
+                    const existingEdge = this.cy.getElementById(`edge_${clusterId}`);
+                    if (existingEdge.length === 0) {
+                        clusterEdgesToAdd.push({
+                            group: 'edges',
+                            data: {
+                                id: `edge_${clusterId}`,
+                                source: srvNode.id(),
+                                target: clusterId,
+                                label: 'HAS_VULN'
+                            }
+                        });
+                    }
+                }
+
+                visibleNodes.add(clusterId);
+
+                // Hide individual vulnerability nodes
+                vulnOutgoers.forEach(vulnNode => {
+                    visibleNodes.delete(vulnNode.id());
+                });
+            } else if (existingCluster.length > 0) {
+                existingCluster.remove();
+            }
+        });
+
+        // Add dynamically created cluster elements to Cytoscape
+        if (clusterNodesToAdd.length > 0) {
+            this.cy.add(clusterNodesToAdd);
+            this.cy.add(clusterEdgesToAdd);
+            clusterNodesToAdd.forEach(c => visibleNodes.add(c.data.id));
+        }
+
+        // Fourth pass: Hide all nodes that are not in the visible set
+        this.cy.nodes().forEach(node => {
+            if (!visibleNodes.has(node.id())) {
+                node.hide();
+            } else {
+                node.show();
+            }
+        });
+
+        // Hide edges unless BOTH endpoints are visible
         this.cy.edges().forEach(edge => {
             const source = edge.source();
             const target = edge.target();
-            if (source.hidden() || target.hidden()) {
+            if (source.hidden() || target.hidden() || !visibleNodes.has(source.id()) || !visibleNodes.has(target.id())) {
                 edge.hide();
+            } else {
+                edge.show();
             }
         });
 
         // Apply other filters on top of lead filter
         this.applyFilters();
+
+        // Check if this update was triggered by an Uncollapse / Expand action on a specific cluster
+        if (options && options.expandedClusterId && options.parentId) {
+            const parentNode = this.cy.getElementById(options.parentId);
+            if (parentNode.length > 0) {
+                const parentPos = parentNode.position();
+                
+                // Get the newly uncollapsed child nodes
+                const isServiceCluster = options.expandedClusterId.startsWith('cluster_srv_');
+                const childSelector = isServiceCluster ? 'node[type="service"], node[type="http"], node[type="https"]' : 'node[type="vulnerability"]';
+                const children = parentNode.outgoers(childSelector);
+                
+                if (children.length > 0) {
+                    const total = children.length;
+                    const radius = Math.max(120, Math.min(260, 40 + total * 6));
+                    
+                    // Position parent's newly opened children in a neat organic fan-out without moving the rest of the graph
+                    children.forEach((child, idx) => {
+                        const angle = (idx / total) * 2 * Math.PI - (Math.PI / 2);
+                        const targetX = parentPos.x + radius * Math.cos(angle);
+                        const targetY = parentPos.y + radius * Math.sin(angle);
+                        
+                        child.show();
+                        child.position({ x: parentPos.x, y: parentPos.y });
+                        child.animate({
+                            position: { x: targetX, y: targetY },
+                            duration: 500,
+                            easing: 'ease-out'
+                        });
+                    });
+
+                    // Ensure connected edges to newly uncollapsed children are visible
+                    this.cy.edges().forEach(edge => {
+                        if (!edge.source().hidden() && !edge.target().hidden()) {
+                            edge.show();
+                        }
+                    });
+                    
+                    // Smoothly adjust viewport to keep the expanded group nicely framed
+                    setTimeout(() => {
+                        if (this.cy) {
+                            this.cy.animate({
+                                fit: {
+                                    eles: this.cy.elements(':visible'),
+                                    padding: 50
+                                },
+                                duration: 400,
+                                easing: 'ease-out'
+                            });
+                        }
+                    }, 520);
+                    return; // Done with localized expansion!
+                }
+            }
+        }
+
+        // Frame visible elements smoothly without recalculating layout positions (unless relayout was explicitly requested)
+        if (visibleNodes.size > 0) {
+            if (this._layoutDebounceTimer) {
+                clearTimeout(this._layoutDebounceTimer);
+            }
+            this._layoutDebounceTimer = setTimeout(() => {
+                if (!this.cy) return;
+                this.cy.resize();
+                const visibleElements = this.cy.elements(':visible');
+                if (visibleElements.length === 0) return;
+                
+                const shouldRelayout = options.relayout === true || !this._hasRunInitialLayout;
+                if (shouldRelayout) {
+                    this._hasRunInitialLayout = true;
+                    const layoutSelect = document.getElementById('layout-select');
+                    let layoutName = layoutSelect ? layoutSelect.value : this.getAvailableLayout();
+                    if (layoutName === 'cose-bilkent' && typeof cytoscapeCoseBilkent === 'undefined') {
+                        layoutName = 'cose';
+                    }
+                    const layoutOptions = this.getLayoutOptions(layoutName, visibleElements);
+                    const layout = visibleElements.layout({
+                        name: layoutName,
+                        ...layoutOptions,
+                        animate: true,
+                        animationDuration: 700,
+                        animationEasing: 'ease-in-out'
+                    });
+                    
+                    layout.on('layoutstop', () => {
+                        if (this.cy) {
+                            this.cy.animate({
+                                fit: {
+                                    eles: visibleElements,
+                                    padding: 50
+                                },
+                                duration: 350,
+                                easing: 'ease-out'
+                            });
+                        }
+                    });
+
+                    layout.run();
+                } else if (options.fitView !== false) {
+                    // Frame the visible elements smoothly without moving any nodes
+                    this.cy.animate({
+                        fit: {
+                            eles: visibleElements,
+                            padding: 50
+                        },
+                        duration: 350,
+                        easing: 'ease-out'
+                    });
+                }
+            }, 50);
+        }
     }
     
     applyLeadVisibilityFilter(nodeId, isVisible) {
-        if (!this.cy) return;
-        
-        const node = this.cy.getElementById(nodeId);
-        if (!node.length) return;
-        
-        if (isVisible) {
-            // Show the node and its entire subtree
-            const nodesToShow = new Set([nodeId]);
-            
-            const addConnectedSubtree = (currentNodeId, visited = new Set()) => {
-                if (visited.has(currentNodeId)) return;
-                visited.add(currentNodeId);
-                
-                const currentNode = this.cy.getElementById(currentNodeId);
-                if (!currentNode.length) return;
-                
-                const connectedNodes = currentNode.neighborhood().nodes();
-                connectedNodes.forEach(connectedNode => {
-                    const connectedId = connectedNode.id();
-                    if (!nodesToShow.has(connectedId)) {
-                        nodesToShow.add(connectedId);
-                        addConnectedSubtree(connectedId, visited);
-                    }
-                });
-            };
-            
-            addConnectedSubtree(nodeId);
-            
-            // Show all nodes in the subtree
-            nodesToShow.forEach(id => {
-                const nodeToShow = this.cy.getElementById(id);
-                if (nodeToShow.length) {
-                    nodeToShow.show();
-                }
-            });
-            
-            // Show edges between visible nodes
-            this.cy.edges().forEach(edge => {
-                const source = edge.source();
-                const target = edge.target();
-                if (nodesToShow.has(source.id()) && nodesToShow.has(target.id())) {
-                    edge.show();
-                }
-            });
-        }
-        
-        // Re-apply the main lead filter to ensure consistency
+        // Delegate directly to applyLeadFilter which ensures exact consistency
         this.applyLeadFilter();
     }
 
@@ -818,22 +1356,62 @@ class EASMDashboard {
             container: document.getElementById('cy'),
             
             style: [
+                // Root / Primary Query Target nodes (Distinct Round-Rectangle query anchor)
+                {
+                    selector: 'node[type="target"], node[is_root="true"]',
+                    style: {
+                        'background-color': '#8C52FF',
+                        'label': 'data(label)',
+                        'color': '#ffffff',
+                        'text-valign': 'center',
+                        'text-halign': 'center',
+                        'font-size': '13px',
+                        'font-weight': 'bold',
+                        'font-family': 'Inter, sans-serif',
+                        'width': '95px',
+                        'height': '60px',
+                        'shape': 'round-rectangle',
+                        'border-width': '2.5px',
+                        'border-color': '#ffffff',
+                        'box-shadow': '0 0 20px rgba(140, 82, 255, 0.7)'
+                    }
+                },
+                
+                // Organization / Network Cluster nodes (Intermediate grouping for IP lists/queries)
+                {
+                    selector: 'node[type="network"]',
+                    style: {
+                        'background-color': '#3b82f6',
+                        'label': 'data(label)',
+                        'color': '#ffffff',
+                        'text-valign': 'center',
+                        'text-halign': 'center',
+                        'font-size': '11px',
+                        'font-weight': 'bold',
+                        'width': '70px',
+                        'height': '70px',
+                        'shape': 'octagon',
+                        'border-width': '2px',
+                        'border-color': '#60a5fa'
+                    }
+                },
+
                 // Domain nodes
                 {
-                    selector: 'node[type="domain"]',
+                    selector: 'node[type="domain"]:not([is_root="true"])',
                     style: {
-                        'background-color': '#00d4ff',
+                        'background-color': '#00b4d8',
                         'label': 'data(label)',
                         'color': '#ffffff',
                         'text-valign': 'center',
                         'text-halign': 'center',
                         'font-size': '12px',
                         'font-weight': 'bold',
-                        'width': '60px',
-                        'height': '60px',
+                        'width': '65px',
+                        'height': '65px',
                         'shape': 'ellipse',
                         'border-width': '2px',
-                        'border-color': '#0099cc'
+                        'border-color': '#0096c7'
                     }
                 },
                 
@@ -976,13 +1554,13 @@ class EASMDashboard {
                 {
                     selector: 'edge',
                     style: {
-                        'width': '2px',
+                        'width': '1.5px',
                         'line-color': '#555555',
                         'target-arrow-color': '#555555',
                         'target-arrow-shape': 'triangle',
-                        'curve-style': 'bezier',
+                        'curve-style': 'straight', // Straight edges render 5x faster than bezier
                         'label': 'data(label)',
-                        'font-size': '8px',
+                        'font-size': '7px',
                         'color': '#888888',
                         'text-rotation': 'autorotate'
                     }
@@ -994,7 +1572,7 @@ class EASMDashboard {
                     style: {
                         'line-color': '#e74c3c',
                         'target-arrow-color': '#e74c3c',
-                        'width': '4px',
+                        'width': '3px',
                         'line-style': 'solid'
                     }
                 },
@@ -1005,7 +1583,7 @@ class EASMDashboard {
                     style: {
                         'line-color': '#f39c12',
                         'target-arrow-color': '#f39c12',
-                        'width': '3px'
+                        'width': '2px'
                     }
                 },
                 
@@ -1013,9 +1591,27 @@ class EASMDashboard {
                 {
                     selector: 'edge[label="HAS_SUBDOMAIN"]',
                     style: {
+                        'line-color': '#00d4ff',
+                        'target-arrow-color': '#00d4ff',
+                        'width': '2px'
+                    }
+                },
+                
+                {
+                    selector: 'edge[label="RESOLVES_TO"]',
+                    style: {
                         'line-color': '#4ecdc4',
                         'target-arrow-color': '#4ecdc4',
-                        'width': '2px'
+                        'width': '1.5px'
+                    }
+                },
+                
+                {
+                    selector: 'edge[label="HOSTS_IP"], edge[label="CONTAINS_IP"]',
+                    style: {
+                        'line-color': '#70a1ff',
+                        'target-arrow-color': '#70a1ff',
+                        'width': '1.5px'
                     }
                 },
                 
@@ -1024,27 +1620,84 @@ class EASMDashboard {
                     style: {
                         'line-color': '#9b59b6',
                         'target-arrow-color': '#9b59b6',
+                        'width': '1.5px'
+                    }
+                },
+                
+                {
+                    selector: 'edge[label="MATCHES_DOMAIN"]',
+                    style: {
+                        'line-color': '#8c52ff',
+                        'target-arrow-color': '#8c52ff',
                         'width': '2px'
+                    }
+                },
+                
+                // Cluster Nodes (Collapsible group for high fan-out services and vulnerabilities)
+                {
+                    selector: 'node[type="cluster_services"]',
+                    style: {
+                        'background-color': '#d35400',
+                        'label': 'data(label)',
+                        'color': '#ffffff',
+                        'text-valign': 'center',
+                        'text-halign': 'center',
+                        'font-size': '10px',
+                        'font-weight': 'bold',
+                        'width': '60px',
+                        'height': '60px',
+                        'shape': 'round-hexagon',
+                        'border-width': '2.5px',
+                        'border-color': '#ffffff',
+                        'border-style': 'dashed',
+                        'cursor': 'pointer'
+                    }
+                },
+                {
+                    selector: 'node[type="cluster_vulns"]',
+                    style: {
+                        'background-color': '#c0392b',
+                        'label': 'data(label)',
+                        'color': '#ffffff',
+                        'text-valign': 'center',
+                        'text-halign': 'center',
+                        'font-size': '10px',
+                        'font-weight': 'bold',
+                        'width': '60px',
+                        'height': '60px',
+                        'shape': 'round-diamond',
+                        'border-width': '2.5px',
+                        'border-color': '#ffffff',
+                        'border-style': 'dashed',
+                        'cursor': 'pointer'
                     }
                 },
                 
                 // Selected nodes
                 {
-                    selector: 'node:selected',
+                    selector: 'node:selected, node.cy-selected',
                     style: {
-                        'border-width': '4px',
+                        'border-width': '3.5px',
                         'border-color': '#ffffff',
-                        'box-shadow': '0 0 20px #00d4ff'
+                        'box-shadow': '0 0 20px rgba(140, 82, 255, 0.9)'
                     }
                 }
             ],
             
+            boxSelectionEnabled: false,
+            selectionType: 'additive',
+            panningEnabled: true,
+            userPanningEnabled: true,
+            zoomingEnabled: true,
+            userZoomingEnabled: true,
+            minZoom: 0.05,
+            maxZoom: 5.0,
+            wheelSensitivity: 0.25,
+            autoungrabify: false,
+            autounselectify: false,
+            
             layout: {
-                name: this.getAvailableLayout(),
-                animate: true,
-                animationDuration: 1000,
-                fit: true,
-                padding: 50
+                name: 'preset'
             }
         });
     }
@@ -1072,55 +1725,15 @@ class EASMDashboard {
                 
                 this.cy.elements().remove();
                 this.cy.add(this.graphData.elements);
+                this._hasRunInitialLayout = false;
                 
+                // Build fast adjacency index in memory for O(1) lookups
+                this.buildGraphIndex(this.graphData.elements);
+
                 // Populate lead selector from graph data after elements are added
                 console.log('Populating lead selector...');
-                try {
-                    this.populateLeadSelector(this.graphData.elements);
-                
-                    // Apply lead filter first (default: no leads selected = empty graph)
-                    this.applyLeadFilter();
-                
-                    // Multiple fallback attempts
-                    if (this.leads.length === 0) {
-                        console.warn('No leads found, trying multiple fallback attempts...');
-                    
-                        // Attempt 1: Retry after 500ms
-                        setTimeout(() => {
-                            console.log('Fallback attempt 1: Retrying lead selector...');
-                            this.populateLeadSelector(this.graphData.elements);
-                        
-                            // Attempt 2: Force populate if still empty
-                            if (this.leads.length === 0) {
-                                setTimeout(() => {
-                                    console.log('Fallback attempt 2: Force populating from Cytoscape...');
-                                    this.forcePopulateFromCytoscape();
-                                }, 500);
-                            }
-                        }, 500);
-                    }
-                } catch (error) {
-                    console.error('Error in lead selector population:', error);
-                    console.error('Error stack:', error.stack);
-                    const leadList = document.getElementById('lead-list');
-                    if (leadList) {
-                        leadList.innerHTML = `<div class="lead-loading" style="color: #ff4757;">Failed to load leads: ${error.message}<br><small>Check console for details</small></div>`;
-                    }
-                
-                    // Even on error, try to force populate
-                    setTimeout(() => {
-                        this.forcePopulateFromCytoscape();
-                    }, 1000);
-                }
-                
-                // Run layout
-                const layoutName = this.getAvailableLayout();
-                const layoutOptions = this.getLayoutOptions(layoutName);
-                const layout = this.cy.layout({ 
-                    name: layoutName,
-                    ...layoutOptions
-                });
-                layout.run();
+                this.populateLeadSelector(this.graphData.elements);
+                this.applyLeadFilter({ relayout: true });
                 
                 console.log('Graph rendered successfully');
             } else {
@@ -1151,30 +1764,436 @@ class EASMDashboard {
     }
 
     setupEventListeners() {
-        // Node click handler
-        this.cy.on('tap', 'node', (event) => {
-            const node = event.target;
-            this.showNodeInspector(node);
+        // Track Ctrl/Cmd/Shift key state globally
+        let isModifierHeld = false;
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Control' || e.key === 'Meta' || e.key === 'Shift' || e.ctrlKey || e.metaKey || e.shiftKey) {
+                isModifierHeld = true;
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+                isModifierHeld = false;
+            }
         });
 
-        // Background click handler (close inspector)
+        // Node Left-Click Handler:
+        // Single click: select ONLY this node and show inspector
+        // Ctrl/Cmd + Left-Click: toggle selection on this node while keeping previously selected nodes
+        this.cy.on('tap', 'node', (event) => {
+            const node = event.target;
+            const originalEvent = event.originalEvent;
+            const isMultiSelect = isModifierHeld || (originalEvent && (originalEvent.ctrlKey || originalEvent.metaKey || originalEvent.shiftKey));
+
+            this.hideContextMenu();
+
+            if (isMultiSelect) {
+                // Multi-select toggle
+                if (node.hasClass('cy-selected') || node.selected()) {
+                    node.removeClass('cy-selected').unselect();
+                } else {
+                    node.addClass('cy-selected').select();
+                }
+                // Ensure all selected nodes remain highlighted
+                this.cy.nodes('.cy-selected').select();
+            } else {
+                // Single left click: select ONLY this node and show inspector
+                this.cy.nodes().removeClass('cy-selected').unselect();
+                node.addClass('cy-selected').select();
+                this.showNodeInspector(node);
+            }
+        });
+
+        // Node Right-Click Handler: Custom Context Menu
+        this.cy.on('cxttap', 'node', (event) => {
+            const node = event.target;
+            const originalEvent = event.originalEvent;
+            if (originalEvent) {
+                originalEvent.preventDefault();
+                originalEvent.stopPropagation();
+            }
+
+            // Select this node if not currently selected
+            if (!node.selected() && !node.hasClass('cy-selected')) {
+                this.cy.nodes().removeClass('cy-selected').unselect();
+                node.addClass('cy-selected').select();
+            }
+
+            const cyContainer = document.getElementById('cy');
+            const containerRect = cyContainer ? cyContainer.getBoundingClientRect() : { left: 0, top: 0 };
+            const renderedPos = event.renderedPosition;
+            const clientX = containerRect.left + (renderedPos ? renderedPos.x : (originalEvent ? originalEvent.clientX : 100));
+            const clientY = containerRect.top + (renderedPos ? renderedPos.y : (originalEvent ? originalEvent.clientY : 100));
+
+            this.showContextMenu(node, clientX, clientY);
+        });
+
+        // Background click handler (close inspector, context menu & unselect nodes)
         this.cy.on('tap', (event) => {
+            this.hideContextMenu();
             if (event.target === this.cy) {
+                this.cy.nodes().removeClass('cy-selected').unselect();
                 this.closeInspector();
             }
         });
 
-        // Search functionality
-        document.getElementById('search-input').addEventListener('input', (e) => {
-            this.searchTerm = e.target.value.toLowerCase();
-            this.applyFilters();
+        // Dismiss context menu on window click or Escape
+        window.addEventListener('click', (e) => {
+            const menu = document.getElementById('cy-context-menu');
+            if (menu && !menu.contains(e.target)) {
+                this.hideContextMenu();
+            }
         });
 
-        document.getElementById('clear-search').addEventListener('click', () => {
-            document.getElementById('search-input').value = '';
-            this.searchTerm = '';
-            this.applyFilters();
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                this.hideContextMenu();
+                this.closeInspector();
+            }
         });
+
+        // Window resize listener to keep Cytoscape graph perfectly sized
+        let resizeTimer = null;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                if (this.cy) {
+                    this.cy.resize();
+                }
+            }, 100);
+        });
+
+        // Responsive & Desktop Retractable Sidebar Toggle & Backdrop
+        const sidebar = document.getElementById('dashboard-sidebar');
+        const sidebarBackdrop = document.getElementById('sidebar-backdrop');
+        const toggleSidebarBtn = document.getElementById('toggle-sidebar');
+        const closeSidebarBtn = document.getElementById('close-sidebar');
+
+        const isMobileScreen = () => window.innerWidth <= 992;
+
+        const openSidebar = () => {
+            if (!sidebar) return;
+            if (isMobileScreen()) {
+                sidebar.classList.add('open');
+                if (sidebarBackdrop) sidebarBackdrop.classList.add('active');
+            } else {
+                sidebar.classList.remove('collapsed');
+            }
+            setTimeout(() => {
+                if (this.cy) this.cy.resize();
+            }, 320);
+        };
+
+        const closeSidebar = () => {
+            if (!sidebar) return;
+            if (isMobileScreen()) {
+                sidebar.classList.remove('open');
+                if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
+            } else {
+                sidebar.classList.add('collapsed');
+            }
+            setTimeout(() => {
+                if (this.cy) this.cy.resize();
+            }, 320);
+        };
+
+        const toggleSidebar = () => {
+            if (!sidebar) return;
+            if (isMobileScreen()) {
+                if (sidebar.classList.contains('open')) {
+                    closeSidebar();
+                } else {
+                    openSidebar();
+                }
+            } else {
+                if (sidebar.classList.contains('collapsed')) {
+                    openSidebar();
+                } else {
+                    closeSidebar();
+                }
+            }
+        };
+
+        if (toggleSidebarBtn) {
+            toggleSidebarBtn.addEventListener('click', toggleSidebar);
+        }
+
+        if (closeSidebarBtn) {
+            closeSidebarBtn.addEventListener('click', closeSidebar);
+        }
+
+        if (sidebarBackdrop) {
+            sidebarBackdrop.addEventListener('click', closeSidebar);
+        }
+
+        // Inspector Backdrop
+        const inspectorBackdrop = document.getElementById('inspector-backdrop');
+        if (inspectorBackdrop) {
+            inspectorBackdrop.addEventListener('click', () => {
+                this.closeInspector();
+            });
+        }
+
+        // Inverted Mouse Controls:
+        // Left-Click: Pan the graph / click nodes
+        // Right-Click Drag or Shift+Drag: Box-Selection of multiple nodes
+        const cyContainer = document.getElementById('cy');
+        const selectionHint = document.getElementById('spacebar-pan-hint');
+
+        let isRightSelecting = false;
+        let selectStartX = 0;
+        let selectStartY = 0;
+        let selectionBoxEl = null;
+
+        // Helper to create visual selection rectangle for right-click drag
+        const createSelectionBox = () => {
+            let el = document.getElementById('custom-selection-box');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'custom-selection-box';
+                el.className = 'custom-selection-box';
+                if (cyContainer) {
+                    cyContainer.appendChild(el);
+                }
+            }
+            return el;
+        };
+
+        if (cyContainer) {
+            // Disable default browser context menu on graph canvas
+            cyContainer.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+            });
+
+            // Native wheel zoom listener
+            cyContainer.addEventListener('wheel', (e) => {
+                if (!this.cy) return;
+                e.preventDefault();
+                
+                const factor = e.deltaY < 0 ? 1.15 : 0.85;
+                const rect = cyContainer.getBoundingClientRect();
+                const pos = {
+                    x: e.clientX - rect.left,
+                    y: e.clientY - rect.top
+                };
+                
+                const curZoom = this.cy.zoom();
+                const newZoom = Math.min(Math.max(curZoom * factor, 0.1), 5.0);
+                
+                this.cy.zoom({
+                    level: newZoom,
+                    renderedPosition: pos
+                });
+            }, { passive: false });
+
+            // Capture-phase mousedown: when Ctrl/Cmd is held, ensure shiftKey flag is set so Cytoscape's internal core doesn't clear selection
+            cyContainer.addEventListener('mousedown', (e) => {
+                if (e.button === 0 && (e.ctrlKey || e.metaKey || isModifierHeld)) {
+                    try {
+                        Object.defineProperty(e, 'shiftKey', { get: () => true, configurable: true });
+                    } catch (_) {}
+                }
+            }, true);
+
+            // Right-click mousedown to start box-selection
+            cyContainer.addEventListener('mousedown', (e) => {
+                if (e.button === 2) { // Right Click
+                    e.preventDefault();
+                    isRightSelecting = true;
+                    const rect = cyContainer.getBoundingClientRect();
+                    selectStartX = e.clientX - rect.left;
+                    selectStartY = e.clientY - rect.top;
+
+                    selectionBoxEl = createSelectionBox();
+                    selectionBoxEl.style.left = `${selectStartX}px`;
+                    selectionBoxEl.style.top = `${selectStartY}px`;
+                    selectionBoxEl.style.width = '0px';
+                    selectionBoxEl.style.height = '0px';
+                    selectionBoxEl.style.display = 'block';
+
+                    if (selectionHint) {
+                        selectionHint.textContent = '⬚ Box Selection (Right-Click Drag) - Release to select nodes';
+                        selectionHint.classList.add('visible');
+                    }
+                }
+            });
+
+            // Window mousemove to update right-click selection box
+            window.addEventListener('mousemove', (e) => {
+                if (isRightSelecting && selectionBoxEl && cyContainer) {
+                    const rect = cyContainer.getBoundingClientRect();
+                    const currentX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+                    const currentY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+
+                    const minX = Math.min(selectStartX, currentX);
+                    const minY = Math.min(selectStartY, currentY);
+                    const width = Math.abs(currentX - selectStartX);
+                    const height = Math.abs(currentY - selectStartY);
+
+                    selectionBoxEl.style.left = `${minX}px`;
+                    selectionBoxEl.style.top = `${minY}px`;
+                    selectionBoxEl.style.width = `${width}px`;
+                    selectionBoxEl.style.height = `${height}px`;
+                }
+            });
+
+            // Window mouseup to complete right-click box selection
+            window.addEventListener('mouseup', (e) => {
+                if (e.button === 2 && isRightSelecting) {
+                    isRightSelecting = false;
+                    
+                    if (selectionBoxEl) {
+                        selectionBoxEl.style.display = 'none';
+                    }
+
+                    if (selectionHint) {
+                        selectionHint.classList.remove('visible');
+                    }
+
+                    if (this.cy && cyContainer) {
+                        const rect = cyContainer.getBoundingClientRect();
+                        const endX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+                        const endY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+
+                        const minX = Math.min(selectStartX, endX);
+                        const maxX = Math.max(selectStartX, endX);
+                        const minY = Math.min(selectStartY, endY);
+                        const maxY = Math.max(selectStartY, endY);
+
+                        // If user dragged more than threshold (5px), perform box selection
+                        if (maxX - minX > 5 || maxY - minY > 5) {
+                            // If Shift / Ctrl key not held, unselect previous nodes
+                            if (!e.shiftKey && !e.ctrlKey && !e.metaKey && !isModifierHeld) {
+                                this.cy.nodes().removeClass('cy-selected').unselect();
+                            }
+
+                            // Find and select all nodes within bounding box in rendered coordinates
+                            this.cy.nodes().forEach(node => {
+                                if (node.hidden()) return;
+                                const renderedPos = node.renderedPosition();
+                                if (
+                                    renderedPos.x >= minX &&
+                                    renderedPos.x <= maxX &&
+                                    renderedPos.y >= minY &&
+                                    renderedPos.y <= maxY
+                                ) {
+                                    node.addClass('cy-selected').select();
+                                }
+                            });
+                        }
+                    }
+                }
+            });
+        }
+
+        // Global Keydown listener for Escape and unselect
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeSidebar();
+                this.closeInspector();
+                if (this.cy) {
+                    this.cy.nodes().removeClass('cy-selected').unselect();
+                }
+            }
+        });
+
+        // Floating quick action buttons
+        const floatFitBtn = document.getElementById('btn-float-fit');
+        if (floatFitBtn) {
+            floatFitBtn.addEventListener('click', () => {
+                if (this.cy) {
+                    this.cy.resize();
+                    this.cy.fit();
+                }
+            });
+        }
+
+        const floatResetBtn = document.getElementById('btn-float-reset');
+        if (floatResetBtn) {
+            floatResetBtn.addEventListener('click', () => {
+                if (this.cy) {
+                    this.cy.resize();
+                    this.cy.zoom(1);
+                    this.cy.center();
+                }
+            });
+        }
+
+        const floatRelayoutBtn = document.getElementById('btn-float-relayout');
+        const layoutSelect = document.getElementById('layout-select');
+
+        const runSmoothLayout = (layoutName) => {
+            if (!this.cy) return;
+            this.cy.resize();
+            if (layoutName === 'cose-bilkent' && typeof cytoscapeCoseBilkent === 'undefined') {
+                layoutName = 'cose';
+            }
+            const visibleNodes = this.cy.nodes(':visible');
+            if (visibleNodes.length === 0) return;
+
+            const target = this.cy.elements(':visible');
+            const layoutOptions = this.getLayoutOptions(layoutName, target);
+
+            // Run layout with animated transition
+            const layout = target.layout({
+                ...layoutOptions,
+                name: layoutName,
+                fit: true,
+                padding: 40,
+                animate: true,
+                animationDuration: 650,
+                animationEasing: 'ease-in-out'
+            });
+
+            layout.on('layoutstop', () => {
+                if (this.cy) {
+                    this.cy.animate({
+                        fit: {
+                            eles: visibleNodes,
+                            padding: 45
+                        },
+                        duration: 350,
+                        easing: 'ease-out'
+                    });
+                }
+            });
+
+            layout.run();
+        };
+
+        if (floatRelayoutBtn) {
+            floatRelayoutBtn.addEventListener('click', () => {
+                let layoutName = layoutSelect ? layoutSelect.value : this.getAvailableLayout();
+                runSmoothLayout(layoutName);
+            });
+        }
+
+        if (layoutSelect) {
+            layoutSelect.addEventListener('change', (e) => {
+                // Collapse all expanded clusters back to their default compact grouped state
+                this.expandedClusters.clear();
+                let layoutName = e.target.value || this.getAvailableLayout();
+                runSmoothLayout(layoutName);
+            });
+        }
+
+        // Search functionality
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                this.searchTerm = e.target.value.toLowerCase();
+                this.applyLeadFilter({ relayout: false });
+            });
+        }
+
+        const clearSearchBtn = document.getElementById('clear-search');
+        if (clearSearchBtn) {
+            clearSearchBtn.addEventListener('click', () => {
+                if (searchInput) searchInput.value = '';
+                this.searchTerm = '';
+                this.applyLeadFilter({ relayout: false });
+            });
+        }
 
         // Lead selector controls (using global functions as specified in HTML)
         window.selectAllLeads = (selectAll) => {
@@ -1200,82 +2219,266 @@ class EASMDashboard {
                 } else {
                     leadItem.classList.remove('selected');
                 }
+                const checkbox = leadItem.querySelector('.lead-checkbox-input');
+                if (checkbox && checkbox.checked !== isChecked) {
+                    checkbox.checked = isChecked;
+                }
             }
             
-            // Apply lead filter to show/hide entire subtrees
-            this.applyLeadFilter();
+            // Apply lead filter to show/hide entire subtrees (preserves layout positions)
+            this.applyLeadFilter({ relayout: false });
         };
 
         // Filter checkboxes
-        document.getElementById('filter-kev').addEventListener('change', (e) => {
-            this.filters.kev = e.target.checked;
-            this.applyFilters();
-        });
+        const filterKev = document.getElementById('filter-kev');
+        if (filterKev) {
+            filterKev.addEventListener('change', (e) => {
+                this.filters.kev = e.target.checked;
+                this.applyLeadFilter({ relayout: false });
+            });
+        }
 
-        document.getElementById('filter-high-epss').addEventListener('change', (e) => {
-            this.filters.highEpss = e.target.checked;
-            this.applyFilters();
-        });
+        const filterHighEpss = document.getElementById('filter-high-epss');
+        if (filterHighEpss) {
+            filterHighEpss.addEventListener('change', (e) => {
+                this.filters.highEpss = e.target.checked;
+                this.applyLeadFilter({ relayout: false });
+            });
+        }
 
-        document.getElementById('filter-critical').addEventListener('change', (e) => {
-            this.filters.critical = e.target.checked;
-            this.applyFilters();
-        });
+        const filterCritical = document.getElementById('filter-critical');
+        if (filterCritical) {
+            filterCritical.addEventListener('change', (e) => {
+                this.filters.critical = e.target.checked;
+                this.applyLeadFilter({ relayout: false });
+            });
+        }
 
-        document.getElementById('filter-with-pocs').addEventListener('change', (e) => {
-            this.filters.withPocs = e.target.checked;
-            this.applyFilters();
-        });
+        const filterWithPocs = document.getElementById('filter-with-pocs');
+        if (filterWithPocs) {
+            filterWithPocs.addEventListener('change', (e) => {
+                this.filters.withPocs = e.target.checked;
+                this.applyLeadFilter({ relayout: false });
+            });
+        }
 
-        document.getElementById('filter-subdomains-only').addEventListener('change', (e) => {
-            this.filters.subdomainsOnly = e.target.checked;
-            this.applyFilters();
-        });
+        const filterServicesOnly = document.getElementById('filter-services-only');
+        if (filterServicesOnly) {
+            filterServicesOnly.addEventListener('change', (e) => {
+                this.filters.servicesOnly = e.target.checked;
+                this.applyLeadFilter({ relayout: false });
+            });
+        }
 
-        // Control buttons
-        document.getElementById('btn-fit').addEventListener('click', () => {
-            this.cy.fit();
-        });
-
-        document.getElementById('btn-reset-zoom').addEventListener('click', () => {
-            this.cy.zoom(1);
-            this.cy.center();
-        });
-
-        document.getElementById('btn-relayout').addEventListener('click', () => {
-            const layoutName = document.getElementById('layout-select').value;
-            const layoutOptions = this.getLayoutOptions(layoutName);
-            this.cy.layout({ name: layoutName, ...layoutOptions }).run();
-        });
-
-        // Layout selector
-        document.getElementById('layout-select').addEventListener('change', (e) => {
-            const layoutName = e.target.value;
-            const layoutOptions = this.getLayoutOptions(layoutName);
-            this.cy.layout({ name: layoutName, ...layoutOptions }).run();
-        });
+        const filterVulnServices = document.getElementById('filter-vuln-services');
+        if (filterVulnServices) {
+            filterVulnServices.addEventListener('change', (e) => {
+                this.filters.vulnServicesOnly = e.target.checked;
+                this.applyLeadFilter({ relayout: false });
+            });
+        }
 
         // Inspector close button
-        document.getElementById('close-inspector').addEventListener('click', () => {
+        const closeInspectorBtn = document.getElementById('close-inspector');
+        if (closeInspectorBtn) {
+            closeInspectorBtn.addEventListener('click', () => {
+                this.closeInspector();
+            });
+        }
+
+        // Database Selector Listener
+        const dbSelector = document.getElementById('db-selector');
+        if (dbSelector) {
+            dbSelector.addEventListener('change', async (e) => {
+                const selectedDb = e.target.value;
+                if (!selectedDb) return;
+                await this.switchDatabase(selectedDb);
+            });
+        }
+
+        // Export Dropdown Controls
+        const exportDropdownWrapper = document.querySelector('.export-dropdown-wrapper');
+        const btnExportDropdown = document.getElementById('btn-export-dropdown');
+        const exportItemJson = document.getElementById('export-item-json');
+        const exportItemMd = document.getElementById('export-item-md');
+        const exportItemHtml = document.getElementById('export-item-html');
+
+        if (btnExportDropdown && exportDropdownWrapper) {
+            btnExportDropdown.addEventListener('click', (e) => {
+                e.stopPropagation();
+                exportDropdownWrapper.classList.toggle('active');
+                const isExpanded = exportDropdownWrapper.classList.contains('active');
+                btnExportDropdown.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+            });
+
+            // Close dropdown when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!exportDropdownWrapper.contains(e.target)) {
+                    exportDropdownWrapper.classList.remove('active');
+                    btnExportDropdown.setAttribute('aria-expanded', 'false');
+                }
+            });
+        }
+
+        if (exportItemJson) {
+            exportItemJson.addEventListener('click', () => {
+                if (exportDropdownWrapper) exportDropdownWrapper.classList.remove('active');
+                this.triggerExport('json');
+            });
+        }
+
+        if (exportItemMd) {
+            exportItemMd.addEventListener('click', () => {
+                if (exportDropdownWrapper) exportDropdownWrapper.classList.remove('active');
+                this.triggerExport('markdown');
+            });
+        }
+
+        if (exportItemHtml) {
+            exportItemHtml.addEventListener('click', () => {
+                if (exportDropdownWrapper) exportDropdownWrapper.classList.remove('active');
+                this.triggerExport('html');
+            });
+        }
+    }
+
+    async loadDatabases() {
+        try {
+            console.log('Loading available databases list...');
+            const dbSelector = document.getElementById('db-selector');
+            if (!dbSelector) return;
+
+            const data = await window.api.getDatabases();
+            dbSelector.innerHTML = '';
+
+            if (!data.databases || data.databases.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'No databases found';
+                dbSelector.appendChild(opt);
+                return;
+            }
+
+            data.databases.forEach(db => {
+                const opt = document.createElement('option');
+                opt.value = db.name;
+                const targetText = db.target && db.target !== 'Unknown' ? ` (${db.target})` : '';
+                opt.textContent = `${db.name}${targetText}`;
+                if (db.is_current) {
+                    opt.selected = true;
+                }
+                dbSelector.appendChild(opt);
+            });
+
+            // Update db-info badge in header
+            const dbInfoEl = document.getElementById('db-info');
+            if (dbInfoEl && data.current_db) {
+                dbInfoEl.textContent = `DB: ${data.current_db}`;
+            }
+        } catch (error) {
+            console.error('Failed to load databases list:', error);
+        }
+    }
+
+    async switchDatabase(dbName) {
+        try {
+            const loadingEl = document.getElementById('graph-loading');
+            if (loadingEl) {
+                loadingEl.style.display = 'flex';
+                const p = loadingEl.querySelector('p');
+                if (p) p.textContent = `Switching database to ${dbName}...`;
+            }
+
+            // Reset current graph UI state
+            this.selectedLeads.clear();
+            this.expandedClusters.clear();
+            this._hasRunInitialLayout = false;
             this.closeInspector();
-        });
+            if (this.cy) {
+                this.cy.elements().remove();
+            }
+
+            await window.api.selectDatabase(dbName);
+            
+            // Reload database info, metrics and graph
+            await Promise.all([
+                this.loadDatabases(),
+                this.loadSummary()
+            ]);
+            await this.loadGraph();
+
+            if (loadingEl) {
+                loadingEl.style.display = 'none';
+            }
+        } catch (error) {
+            console.error('Failed to switch database:', error);
+            alert(`Error switching database: ${error.message}`);
+            const loadingEl = document.getElementById('graph-loading');
+            if (loadingEl) loadingEl.style.display = 'none';
+        }
+    }
+
+    triggerExport(format = 'json') {
+        const url = window.api.getExportUrl(format);
+        // Create invisible anchor and trigger download
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     }
 
     applyFilters() {
         if (!this.cy) return;
 
-        // First apply lead filter (this handles showing/hiding based on selected leads)
-        // Only apply other filters if we have visible nodes from lead selection
         if (this.selectedLeads.size === 0) {
             return; // Lead filter already hid everything
         }
 
-        // Apply search filter
+        // Helper to trace full ancestor lineage up to target_root
+        const addAllAncestors = (startNode, targetSet, visited = new Set()) => {
+            if (!startNode || startNode.length === 0) return;
+            const nodeId = startNode.id();
+            if (visited.has(nodeId)) return;
+            visited.add(nodeId);
+            
+            targetSet.add(nodeId);
+            startNode.incomers('node').forEach(parent => {
+                addAllAncestors(parent, targetSet, visited);
+            });
+        };
+
+        // Helper to trace full descendant subtree downwards (children services, vulns, clusters)
+        const addAllDescendants = (startNode, targetSet, visited = new Set()) => {
+            if (!startNode || startNode.length === 0) return;
+            const nodeId = startNode.id();
+            if (visited.has(nodeId)) return;
+            visited.add(nodeId);
+
+            startNode.outgoers('node').forEach(child => {
+                if (nodesToKeep.has(child.id())) {
+                    targetSet.add(child.id());
+                    addAllDescendants(child, targetSet, visited);
+                }
+            });
+        };
+
+        // 1. Search filter matching IDs
+        const searchMatchingNodeIds = new Set();
         if (this.searchTerm) {
             this.cy.nodes().forEach(node => {
-                if (node.hidden()) return; // Skip already hidden nodes
-                
                 const data = node.data();
+                let parentData = {};
+                const parentNode = node.incomers('node').first();
+                if (parentNode.length > 0) {
+                    parentData = parentNode.data();
+                } else if (data.is_cluster || data.type === 'cluster_services' || data.type === 'cluster_vulns') {
+                    const parentId = data.parent_ip || data.parent_srv;
+                    const pNode = this.cy.getElementById(parentId);
+                    if (pNode.length > 0) parentData = pNode.data();
+                }
+
                 const searchableText = [
                     data.label,
                     data.name,
@@ -1285,64 +2488,216 @@ class EASMDashboard {
                     data.product,
                     data.org,
                     data.country,
-                    data.port ? data.port.toString() : ''
+                    data.port ? data.port.toString() : '',
+                    parentData.label,
+                    parentData.name,
+                    parentData.ip,
+                    parentData.org
                 ].filter(Boolean).join(' ').toLowerCase();
                 
-                if (!searchableText.includes(this.searchTerm)) {
-                    node.hide();
+                if (searchableText.includes(this.searchTerm)) {
+                    searchMatchingNodeIds.add(node.id());
                 }
             });
         }
 
-        // Apply subdomain-only filter
-        if (this.filters.subdomainsOnly) {
-            this.cy.nodes().forEach(node => {
-                if (node.hidden()) return; // Skip already hidden nodes
-                
-                const nodeType = node.data('type');
-                if (!['subdomain', 'domain'].includes(nodeType)) {
-                    node.hide();
-                }
-            });
-        }
-
-        // Apply vulnerability filters
+        // 2. Vulnerability filter evaluator
         const hasVulnFilters = this.filters.kev || this.filters.highEpss || this.filters.critical || this.filters.withPocs;
-        
+        const vulnMatchesFilter = (vulnNode) => {
+            if (!vulnNode) return false;
+            const data = typeof vulnNode.data === 'function' ? vulnNode.data() : vulnNode;
+            if (this.filters.kev) {
+                if (data.is_cisa_kev !== true && data.is_cisa_kev !== 1) return false;
+            }
+            if (this.filters.highEpss) {
+                const epssScore = parseFloat(data.epss_score || 0);
+                if (epssScore <= 0.5) return false;
+            }
+            if (this.filters.critical) {
+                const severity = String(data.severity || '').toUpperCase();
+                if (severity !== 'CRITICAL') return false;
+            }
+            if (this.filters.withPocs) {
+                const hasPocs = data.has_pocs === true || (Array.isArray(data.exploits) && data.exploits.length > 0);
+                if (!hasPocs) return false;
+            }
+            return true;
+        };
+
+        // Determine which nodes and clusters should be kept
+        const nodesToKeep = new Set();
+
         if (hasVulnFilters) {
+            // Find all matching vulnerabilities
             this.cy.nodes('[type="vulnerability"]').forEach(node => {
-                if (node.hidden()) return; // Skip already hidden nodes
-                
-                let shouldShow = false;
-                
-                // Check CISA KEV filter
-                if (this.filters.kev && node.data('is_cisa_kev') === true) {
-                    shouldShow = true;
+                if (vulnMatchesFilter(node)) {
+                    nodesToKeep.add(node.id());
+                    addAllAncestors(node, nodesToKeep);
                 }
-                
-                // Check high EPSS filter
-                if (this.filters.highEpss) {
-                    const epssScore = node.data('epss_score') || 0;
-                    if (epssScore > 0.5) {
-                        shouldShow = true;
+            });
+
+            // Evaluate cluster_vulns nodes
+            this.cy.nodes('[type="cluster_vulns"]').forEach(cNode => {
+                const parentId = cNode.data('parent_srv') || cNode.data('parent_ip');
+                const parentNode = this.cy.getElementById(parentId);
+                if (parentNode.length > 0) {
+                    const childVulns = parentNode.outgoers('node[type="vulnerability"]');
+                    const matching = childVulns.filter(vulnMatchesFilter);
+                    if (matching.length > 0) {
+                        nodesToKeep.add(cNode.id());
+                        nodesToKeep.add(parentId);
+                        addAllAncestors(parentNode, nodesToKeep);
+                        cNode.data('label', `+ ${matching.length} ${matching.length === 1 ? 'Vuln' : 'Vulns'}`);
                     }
                 }
-                
-                // Check critical severity filter
-                if (this.filters.critical && node.data('severity') === 'CRITICAL') {
-                    shouldShow = true;
-                }
-                
-                // Check PoCs filter
-                if (this.filters.withPocs && node.data('has_pocs') === true) {
-                    shouldShow = true;
-                }
-                
-                if (!shouldShow) {
-                    node.hide();
+            });
+
+            // Evaluate cluster_services nodes
+            this.cy.nodes('[type="cluster_services"]').forEach(cNode => {
+                const parentId = cNode.data('parent_ip');
+                const parentNode = this.cy.getElementById(parentId);
+                if (parentNode.length > 0) {
+                    const srvNodes = parentNode.outgoers('node[type="service"], node[type="http"], node[type="https"]');
+                    const directVulns = parentNode.outgoers('node[type="vulnerability"]');
+                    let hasMatch = directVulns.some(vulnMatchesFilter);
+                    if (!hasMatch) {
+                        srvNodes.forEach(srv => {
+                            if (srv.outgoers('node[type="vulnerability"]').some(vulnMatchesFilter)) {
+                                hasMatch = true;
+                            }
+                        });
+                    }
+                    if (hasMatch || nodesToKeep.has(parentId)) {
+                        nodesToKeep.add(cNode.id());
+                        nodesToKeep.add(parentId);
+                        addAllAncestors(parentNode, nodesToKeep);
+                    }
                 }
             });
+        } else if (this.filters.vulnServicesOnly) {
+            this.cy.nodes('[type="vulnerability"]').forEach(node => {
+                nodesToKeep.add(node.id());
+                addAllAncestors(node, nodesToKeep);
+            });
+            this.cy.nodes('[type="cluster_vulns"]').forEach(cNode => {
+                nodesToKeep.add(cNode.id());
+                const parentId = cNode.data('parent_srv') || cNode.data('parent_ip');
+                nodesToKeep.add(parentId);
+                addAllAncestors(this.cy.getElementById(parentId), nodesToKeep);
+            });
+            this.cy.nodes('[type="cluster_services"]').forEach(cNode => {
+                const parentId = cNode.data('parent_ip');
+                const parentNode = this.cy.getElementById(parentId);
+                if (parentNode.length > 0) {
+                    const srvNodes = parentNode.outgoers('node[type="service"], node[type="http"], node[type="https"]');
+                    const hasVuln = srvNodes.some(srv => srv.outgoers('node[type="vulnerability"]').length > 0) ||
+                                    parentNode.outgoers('node[type="vulnerability"]').length > 0;
+                    if (hasVuln) {
+                        nodesToKeep.add(cNode.id());
+                        nodesToKeep.add(parentId);
+                        addAllAncestors(parentNode, nodesToKeep);
+                    }
+                }
+            });
+        } else if (this.filters.servicesOnly) {
+            this.cy.nodes('[type="service"], node[type="http"], node[type="https"]').forEach(node => {
+                nodesToKeep.add(node.id());
+                addAllAncestors(node, nodesToKeep);
+                node.outgoers('node').forEach(v => nodesToKeep.add(v.id()));
+            });
+            this.cy.nodes('[type="cluster_services"]').forEach(cNode => {
+                nodesToKeep.add(cNode.id());
+                const parentId = cNode.data('parent_ip');
+                nodesToKeep.add(parentId);
+                addAllAncestors(this.cy.getElementById(parentId), nodesToKeep);
+            });
+        } else {
+            // No restrictive category filter active: keep all
+            this.cy.nodes().forEach(node => {
+                nodesToKeep.add(node.id());
+            });
         }
+
+        // Invariant: Whenever a parent asset is kept on screen, all its active collapsed
+        // cluster indicator nodes (cluster_services, cluster_vulns) MUST ALWAYS be present on the UI
+        this.cy.nodes('[type="cluster_services"], [type="cluster_vulns"]').forEach(cNode => {
+            const parentId = cNode.data('parent_ip') || cNode.data('parent_srv');
+            if (nodesToKeep.has(parentId)) {
+                nodesToKeep.add(cNode.id());
+            }
+        });
+
+        // Apply search filter intersection if search is active
+        if (this.searchTerm) {
+            const finalSearchKept = new Set();
+            searchMatchingNodeIds.forEach(id => {
+                const node = this.cy.getElementById(id);
+                if (node.length > 0 && nodesToKeep.has(id)) {
+                    finalSearchKept.add(id);
+                    // Walk up to target_root
+                    addAllAncestors(node, finalSearchKept);
+                    // Walk down to child services, vulns, and clusters
+                    addAllDescendants(node, finalSearchKept);
+                }
+            });
+            this.cy.nodes('[type="cluster_services"], [type="cluster_vulns"]').forEach(cNode => {
+                const parentId = cNode.data('parent_ip') || cNode.data('parent_srv');
+                if (finalSearchKept.has(parentId)) {
+                    finalSearchKept.add(cNode.id());
+                }
+            });
+            nodesToKeep.clear();
+            finalSearchKept.forEach(id => nodesToKeep.add(id));
+        }
+
+        // Apply final visibility to all nodes
+        this.cy.nodes().forEach(node => {
+            const data = node.data();
+            const nodeType = data.type;
+
+            if (data.is_cluster || nodeType === 'cluster_services' || nodeType === 'cluster_vulns') {
+                if (nodesToKeep.has(node.id())) {
+                    node.show();
+                } else {
+                    node.hide();
+                }
+                return;
+            }
+
+            // Check if this node is collapsed into an active cluster
+            if (['service', 'http', 'https'].includes(nodeType)) {
+                const parentIp = node.incomers('node[type="ip"]').first();
+                if (parentIp.length > 0) {
+                    const srvCluster = this.cy.getElementById(`cluster_srv_${parentIp.id()}`);
+                    if (srvCluster.length > 0 && nodesToKeep.has(srvCluster.id())) {
+                        node.hide();
+                        return;
+                    }
+                }
+            }
+
+            if (nodeType === 'vulnerability') {
+                const parentNode = node.incomers('node').first();
+                if (parentNode.length > 0) {
+                    const vulnCluster = this.cy.getElementById(`cluster_vuln_${parentNode.id()}`);
+                    const ipVulnCluster = this.cy.getElementById(`cluster_ip_vuln_${parentNode.id()}`);
+                    const srvCluster = this.cy.getElementById(`cluster_srv_${parentNode.id()}`);
+                    if ((vulnCluster.length > 0 && nodesToKeep.has(vulnCluster.id())) || 
+                        (ipVulnCluster.length > 0 && nodesToKeep.has(ipVulnCluster.id())) || 
+                        (srvCluster.length > 0 && nodesToKeep.has(srvCluster.id()))) {
+                        node.hide();
+                        return;
+                    }
+                }
+            }
+
+            // Standard node visibility
+            if (nodesToKeep.has(node.id())) {
+                node.show();
+            } else {
+                node.hide();
+            }
+        });
 
         // Hide edges connected to hidden nodes
         this.cy.edges().forEach(edge => {
@@ -1350,8 +2705,398 @@ class EASMDashboard {
             const target = edge.target();
             if (source.hidden() || target.hidden()) {
                 edge.hide();
+            } else {
+                edge.show();
             }
         });
+
+        // Anti-Orphan Integrity Pass:
+        // Ensure no floating disconnected non-root node remains visible without its relationship edge
+        this.cy.nodes().forEach(node => {
+            if (node.hidden()) return;
+            const data = node.data();
+            if (data.is_root || data.type === 'target') return; // Root queries are the anchors
+
+            const visibleInEdges = node.incomers('edge').filter(e => !e.hidden());
+            const visibleOutEdges = node.outgoers('edge').filter(e => !e.hidden());
+
+            // If a node is isolated without any visible edge connection, hide it
+            if (visibleInEdges.length === 0 && visibleOutEdges.length === 0) {
+                node.hide();
+            }
+        });
+    }
+
+    renderRiskMetricsAccordion(nodeData, elements) {
+        const connectedVulns = this.findConnectedVulnerabilities(nodeData.id, elements);
+        const connectedServices = (nodeData.type === 'ip' || nodeData.type === 'domain' || nodeData.type === 'subdomain' || nodeData.type === 'target' || nodeData.type === 'network') 
+            ? this.findConnectedServices(nodeData.id, elements) 
+            : [];
+        
+        const vulnsCount = connectedVulns.length;
+        const criticalVulns = connectedVulns.filter(v => String(v.severity || '').toUpperCase() === 'CRITICAL');
+        const criticalCount = criticalVulns.length;
+        
+        // Extract all exploits from connected vulnerabilities
+        const allExploits = [];
+        connectedVulns.forEach(vuln => {
+            if (vuln.exploits && Array.isArray(vuln.exploits) && vuln.exploits.length > 0) {
+                vuln.exploits.forEach(exp => {
+                    allExploits.push({
+                        cve_id: vuln.cve_id || vuln.label || vuln.name || 'Unknown CVE',
+                        vuln_id: vuln.id,
+                        title: exp.title || `Exploit for ${vuln.cve_id || vuln.label}`,
+                        source: exp.source || 'Exploit',
+                        url: exp.url || '#',
+                        verified: Boolean(exp.verified),
+                        author: exp.author || '',
+                        date: exp.date || '',
+                        exploit_type: exp.exploit_type || ''
+                    });
+                });
+            } else if ((vuln.exploit_count || 0) > 0) {
+                allExploits.push({
+                    cve_id: vuln.cve_id || vuln.label || vuln.name || 'Unknown CVE',
+                    vuln_id: vuln.id,
+                    title: `Exploit for ${vuln.cve_id || vuln.label}`,
+                    source: 'Public PoC',
+                    url: '#',
+                    verified: false,
+                    author: '',
+                    date: '',
+                    exploit_type: 'PoC'
+                });
+            }
+        });
+        const pocCount = allExploits.length || connectedVulns.filter(v => (v.exploit_count || 0) > 0).length;
+
+        // Render Vulnerabilities list HTML
+        let vulnsListHtml = '';
+        if (vulnsCount > 0) {
+            vulnsListHtml = connectedVulns.map(v => {
+                const sev = (v.severity || 'UNKNOWN').toUpperCase();
+                const sevClass = (v.severity || 'unknown').toLowerCase();
+                const isKev = v.is_cisa_kev === true || v.is_cisa_kev === 'true' || v.is_cisa_kev === 1;
+                const cvss = v.cvss_score ? `CVSS ${v.cvss_score}` : '';
+                const epss = v.epss_score ? `EPSS ${(v.epss_score * 100).toFixed(1)}%` : '';
+                const expCount = (v.exploits && v.exploits.length) || v.exploit_count || 0;
+                const cveName = v.cve_id || v.name || v.label;
+                
+                return `
+                <div class="risk-item-card vuln-item severity-${sevClass}">
+                    <div class="risk-card-top">
+                        <div class="risk-card-title">
+                            <span class="cve-code">${cveName}</span>
+                            ${isKev ? '<span class="mini-badge kev"><i data-lucide="shield-alert" class="badge-icon"></i> CISA KEV</span>' : ''}
+                            ${expCount > 0 ? `<span class="mini-badge poc"><i data-lucide="file-code" class="badge-icon"></i> ${expCount} PoC</span>` : ''}
+                        </div>
+                        <span class="mini-badge severity ${sevClass}">${sev}</span>
+                    </div>
+                    <div class="risk-card-metrics">
+                        ${cvss ? `<span class="metric-pill"><strong>Score:</strong> ${cvss}</span>` : ''}
+                        ${epss ? `<span class="metric-pill"><strong>Prob:</strong> ${epss}</span>` : ''}
+                    </div>
+                    ${v.description ? `<div class="risk-card-desc" title="${v.description.replace(/"/g, '&quot;')}">${v.description}</div>` : ''}
+                    <div class="risk-card-links">
+                        <a href="https://nvd.nist.gov/vuln/detail/${cveName}" target="_blank" rel="noopener" class="risk-link-btn"><i data-lucide="external-link" class="badge-icon"></i> NVD Details</a>
+                        ${v.id ? `<button type="button" class="risk-focus-btn" onclick="window.dashboard.focusNode('${v.id}')"><i data-lucide="crosshair" class="badge-icon"></i> Focus</button>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        } else {
+            vulnsListHtml = '<div class="risk-item-empty">No vulnerabilities detected for this asset.</div>';
+        }
+
+        // Render Critical Vulns list HTML
+        let criticalListHtml = '';
+        if (criticalCount > 0) {
+            criticalListHtml = criticalVulns.map(v => {
+                const isKev = v.is_cisa_kev === true || v.is_cisa_kev === 'true' || v.is_cisa_kev === 1;
+                const cvss = v.cvss_score ? `CVSS ${v.cvss_score}` : '';
+                const epss = v.epss_score ? `EPSS ${(v.epss_score * 100).toFixed(1)}%` : '';
+                const expCount = (v.exploits && v.exploits.length) || v.exploit_count || 0;
+                const cveName = v.cve_id || v.name || v.label;
+                
+                return `
+                <div class="risk-item-card vuln-item severity-critical">
+                    <div class="risk-card-top">
+                        <div class="risk-card-title">
+                            <span class="cve-code" style="color: #ff4757;">${cveName}</span>
+                            ${isKev ? '<span class="mini-badge kev"><i data-lucide="shield-alert" class="badge-icon"></i> CISA KEV</span>' : ''}
+                            ${expCount > 0 ? `<span class="mini-badge poc"><i data-lucide="file-code" class="badge-icon"></i> ${expCount} PoC</span>` : ''}
+                        </div>
+                        <span class="mini-badge severity critical">CRITICAL</span>
+                    </div>
+                    <div class="risk-card-metrics">
+                        ${cvss ? `<span class="metric-pill"><strong>Score:</strong> ${cvss}</span>` : ''}
+                        ${epss ? `<span class="metric-pill"><strong>Prob:</strong> ${epss}</span>` : ''}
+                    </div>
+                    ${v.description ? `<div class="risk-card-desc" title="${v.description.replace(/"/g, '&quot;')}">${v.description}</div>` : ''}
+                    <div class="risk-card-links">
+                        <a href="https://nvd.nist.gov/vuln/detail/${cveName}" target="_blank" rel="noopener" class="risk-link-btn"><i data-lucide="external-link" class="badge-icon"></i> NVD Details</a>
+                        ${v.id ? `<button type="button" class="risk-focus-btn" onclick="window.dashboard.focusNode('${v.id}')"><i data-lucide="crosshair" class="badge-icon"></i> Focus</button>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        } else {
+            criticalListHtml = '<div class="risk-item-empty">No critical vulnerabilities detected.</div>';
+        }
+
+        // Render Exploits/PoCs list HTML
+        let pocListHtml = '';
+        if (allExploits.length > 0) {
+            pocListHtml = allExploits.map(exp => {
+                const isGithub = String(exp.source || '').toLowerCase().includes('github');
+                const sourceClass = isGithub ? 'github' : 'exploitdb';
+                const sourceLabel = isGithub ? 'GitHub' : 'ExploitDB';
+                
+                return `
+                <div class="risk-item-card exploit-item-box">
+                    <div class="risk-card-top">
+                        <div class="risk-card-title">
+                            <span class="cve-code" style="color: #ffa502;">${exp.cve_id}</span>
+                            <span class="mini-badge ${sourceClass}">${sourceLabel}</span>
+                            ${exp.verified ? '<span class="mini-badge verified">Verified</span>' : ''}
+                        </div>
+                    </div>
+                    <div class="exploit-title-text">${exp.title}</div>
+                    ${(exp.author || exp.date || exp.exploit_type) ? `
+                    <div class="risk-card-meta-tags">
+                        ${exp.author ? `<span class="meta-tag">Author: ${exp.author}</span>` : ''}
+                        ${exp.date ? `<span class="meta-tag">Date: ${exp.date}</span>` : ''}
+                        ${exp.exploit_type ? `<span class="meta-tag">Type: ${exp.exploit_type}</span>` : ''}
+                    </div>` : ''}
+                    <div class="risk-card-links">
+                        <a href="${exp.url}" target="_blank" rel="noopener" class="risk-link-btn primary"><i data-lucide="external-link" class="badge-icon"></i> View PoC</a>
+                        ${exp.vuln_id ? `<button type="button" class="risk-focus-btn" onclick="window.dashboard.focusNode('${exp.vuln_id}')"><i data-lucide="crosshair" class="badge-icon"></i> Focus Vuln</button>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        } else {
+            pocListHtml = '<div class="risk-item-empty">No public exploits/PoCs identified.</div>';
+        }
+
+        // Render Exposed Services list HTML (if applicable)
+        let servicesAccordionHtml = '';
+        if (connectedServices.length > 0) {
+            const servicesListHtml = connectedServices.map(srv => {
+                const portProto = `${srv.port}/${(srv.protocol || 'tcp').toUpperCase()}`;
+                const name = srv.service || srv.product || 'Unknown';
+                const version = srv.version ? `v${srv.version}` : '';
+
+                // Find service host IP if inspecting a cluster/network/target node
+                let srvHost = nodeData.type === 'ip' ? nodeData.ip : '';
+                if (!srvHost && elements && Array.isArray(elements.edges) && Array.isArray(elements.nodes)) {
+                    const edge = elements.edges.find(e => e && e.data && e.data.target === srv.id && e.data.label === 'EXPOSES');
+                    if (edge) {
+                        const parentIpNode = elements.nodes.find(n => n && n.data && n.data.id === edge.data.source);
+                        if (parentIpNode && parentIpNode.data) {
+                            srvHost = parentIpNode.data.ip || parentIpNode.data.name || '';
+                        }
+                    }
+                }
+                if (!srvHost && nodeData.name && nodeData.name.match(/^\d+\.\d+\.\d+\.\d+$/)) {
+                    srvHost = nodeData.name;
+                }
+
+                // Check wildcard *http* strictly against banner, service name or type
+                const bannerStr = String(srv.banner || '').toLowerCase();
+                const serviceStr = String(srv.service || '').toLowerCase();
+                const productStr = String(srv.product || '').toLowerCase();
+                const isHttpBanner = bannerStr.includes('http') || serviceStr.includes('http') || productStr.includes('http') || srv.type === 'http' || srv.type === 'https';
+
+                // Determine web URL if service is confirmed HTTP
+                let serviceLinkUrl = '';
+                if (isHttpBanner) {
+                    if (srv.url) {
+                        serviceLinkUrl = srv.url;
+                    } else if (srvHost) {
+                        const isHttps = srv.ssl || srv.type === 'https' || serviceStr.includes('https') || bannerStr.includes('https') || [443, 8443].includes(parseInt(srv.port));
+                        const scheme = isHttps ? 'https' : 'http';
+                        const portSuffix = ((scheme === 'http' && srv.port == 80) || (scheme === 'https' && srv.port == 443)) ? '' : `:${srv.port}`;
+                        serviceLinkUrl = `${scheme}://${srvHost}${portSuffix}`;
+                    }
+                }
+
+                return `
+                <div class="risk-item-card service-item-box">
+                    <div class="risk-card-top">
+                        <span class="cve-code" style="color: #00d4ff;">${portProto}${srvHost && nodeData.type !== 'ip' ? ` <small style="color: #94a3b8; font-weight: normal;">(${srvHost})</small>` : ''}</span>
+                        <span class="mini-badge" style="background: rgba(0,212,255,0.15); color: #00d4ff;">${name}</span>
+                    </div>
+                    ${(srv.product || version) ? `<div style="font-size: 0.78rem; color: #aaa; margin: 3px 0;">${srv.product || ''} ${version}</div>` : ''}
+                    ${serviceLinkUrl ? `<div class="risk-card-links"><a href="${serviceLinkUrl}" target="_blank" rel="noopener" class="risk-link-btn"><i data-lucide="link" class="badge-icon"></i> ${serviceLinkUrl}</a></div>` : ''}
+                    ${srv.id ? `<div class="risk-card-links" style="margin-top: 2px; border-top: none;"><button type="button" class="risk-focus-btn" onclick="window.dashboard.focusNode('${srv.id}')"><i data-lucide="crosshair" class="badge-icon"></i> Focus Service</button></div>` : ''}
+                </div>`;
+            }).join('');
+
+            servicesAccordionHtml = `
+            <div class="risk-accordion-group">
+                <div class="risk-accordion-header" onclick="window.dashboard.toggleRiskAccordion(this)">
+                    <div class="risk-accordion-title">
+                        <i data-lucide="server" class="accordion-icon ui-icon"></i>
+                        <span>Exposed Services</span>
+                    </div>
+                    <div class="risk-accordion-status">
+                        <span class="risk-pill-counter services-count" style="${connectedServices.length > 0 ? 'color: #00d4ff; background: rgba(0,212,255,0.15); border-color: rgba(0,212,255,0.4);' : ''}">${connectedServices.length}</span>
+                        <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
+                    </div>
+                </div>
+                <div class="risk-accordion-body" style="display: none;">
+                    ${servicesListHtml}
+                </div>
+            </div>`;
+        }
+
+        return `
+        <div class="risk-metrics-panel">
+            <h4 class="risk-metrics-heading">Risk Metrics</h4>
+            
+            ${servicesAccordionHtml}
+
+            <!-- Vulnerabilities Accordion -->
+            <div class="risk-accordion-group">
+                <div class="risk-accordion-header" onclick="window.dashboard.toggleRiskAccordion(this)">
+                    <div class="risk-accordion-title">
+                        <i data-lucide="shield" class="accordion-icon ui-icon"></i>
+                        <span>Vulnerabilities</span>
+                    </div>
+                    <div class="risk-accordion-status">
+                        <span class="risk-pill-counter vulns-count" style="${vulnsCount > 0 ? 'color: #ff6b6b; background: rgba(255,107,107,0.15); border-color: rgba(255,107,107,0.4);' : ''}">${vulnsCount}</span>
+                        <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
+                    </div>
+                </div>
+                <div class="risk-accordion-body" style="display: none;">
+                    ${vulnsListHtml}
+                </div>
+            </div>
+
+            <!-- Critical Vulns Accordion -->
+            <div class="risk-accordion-group">
+                <div class="risk-accordion-header" onclick="window.dashboard.toggleRiskAccordion(this)">
+                    <div class="risk-accordion-title">
+                        <i data-lucide="alert-triangle" class="accordion-icon ui-icon"></i>
+                        <span>Critical Vulns</span>
+                    </div>
+                    <div class="risk-accordion-status">
+                        <span class="risk-pill-counter critical-count" style="${criticalCount > 0 ? 'color: #ff4757; background: rgba(220,20,60,0.2); border-color: rgba(220,20,60,0.5);' : ''}">${criticalCount}</span>
+                        <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
+                    </div>
+                </div>
+                <div class="risk-accordion-body" style="display: none;">
+                    ${criticalListHtml}
+                </div>
+            </div>
+
+            <!-- Exploits/PoCs Accordion -->
+            <div class="risk-accordion-group">
+                <div class="risk-accordion-header" onclick="window.dashboard.toggleRiskAccordion(this)">
+                    <div class="risk-accordion-title">
+                        <i data-lucide="file-code" class="accordion-icon ui-icon"></i>
+                        <span>Exploits/PoCs</span>
+                    </div>
+                    <div class="risk-accordion-status">
+                        <span class="risk-pill-counter pocs-count" style="${pocCount > 0 ? 'color: #ffa502; background: rgba(243,156,18,0.15); border-color: rgba(243,156,18,0.4);' : ''}">${pocCount}</span>
+                        <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
+                    </div>
+                </div>
+                <div class="risk-accordion-body" style="display: none;">
+                    ${pocListHtml}
+                </div>
+            </div>
+        </div>`;
+    }
+
+    toggleRiskAccordion(headerEl) {
+        if (!headerEl) return;
+        const body = headerEl.nextElementSibling;
+        const chevron = headerEl.querySelector('.accordion-chevron');
+        if (!body) return;
+        
+        const isHidden = body.style.display === 'none' || !body.style.display;
+        if (isHidden) {
+            body.style.display = 'block';
+            headerEl.classList.add('open');
+            if (chevron) {
+                chevron.textContent = '▲';
+            }
+        } else {
+            body.style.display = 'none';
+            headerEl.classList.remove('open');
+            if (chevron) {
+                chevron.textContent = '▼';
+            }
+        }
+    }
+
+    copyTextList(items, buttonEl) {
+        if (!items) return;
+        const textToCopy = Array.isArray(items) ? items.join('\n') : String(items).trim();
+        if (!textToCopy) return;
+        
+        const showSuccess = () => {
+            if (buttonEl) {
+                const originalText = buttonEl.innerHTML;
+                buttonEl.innerHTML = '<i data-lucide="check" class="badge-icon"></i> Copied!';
+                buttonEl.style.background = 'rgba(39, 174, 96, 0.3)';
+                buttonEl.style.borderColor = 'rgba(39, 174, 96, 0.7)';
+                buttonEl.style.color = '#2ecc71';
+                if (typeof lucide !== 'undefined') lucide.createIcons();
+                setTimeout(() => {
+                    buttonEl.innerHTML = originalText;
+                    buttonEl.style.background = '';
+                    buttonEl.style.borderColor = '';
+                    buttonEl.style.color = '';
+                    if (typeof lucide !== 'undefined') lucide.createIcons();
+                }, 1800);
+            }
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(textToCopy).then(showSuccess).catch(err => {
+                console.warn('Clipboard write failed, using textarea fallback', err);
+                this._fallbackCopyText(textToCopy, showSuccess);
+            });
+        } else {
+            this._fallbackCopyText(textToCopy, showSuccess);
+        }
+    }
+
+    _fallbackCopyText(text, callback) {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            if (callback) callback();
+        } catch (err) {
+            console.error('Fallback copy failed', err);
+        }
+        document.body.removeChild(textArea);
+    }
+
+    focusNode(nodeId) {
+        if (!this.cy || !nodeId) return;
+        const targetNode = this.cy.getElementById(nodeId);
+        if (targetNode && targetNode.length > 0) {
+            targetNode.show();
+            targetNode.connectedEdges().show();
+            
+            this.cy.nodes().unselect();
+            targetNode.select();
+            
+            this.cy.animate({
+                center: { eles: targetNode },
+                zoom: 1.4
+            }, { duration: 350 });
+            
+            this.showNodeInspector(targetNode);
+        }
     }
 
     showNodeInspector(node) {
@@ -1365,20 +3110,121 @@ class EASMDashboard {
 
         // Build content based on node type
         let html = '';
+        const elements = this.graphData?.elements || (window.dashboard && window.dashboard.graphData?.elements);
 
-        if (data.type === 'domain' || data.type === 'subdomain') {
+        if (data.is_cluster || data.type === 'cluster_services' || data.type === 'cluster_vulns') {
+            const isServiceCluster = data.type === 'cluster_services';
+            title.textContent = isServiceCluster ? `SERVICES CLUSTER: ${data.count} Ports` : `VULNERABILITY CLUSTER: ${data.count} CVEs`;
+
+            // Identify parent node
+            let parentNodeId = data.parent_ip || data.parent_srv;
+            let parentNode = this.cy.getElementById(parentNodeId);
+            let parentData = parentNode.length ? parentNode.data() : (elements?.nodes?.find(n => (n.data || n).id === parentNodeId)?.data || {});
+            
+            // Gather risk metrics from parent (e.g. host IP or service)
+            const riskMetricsHtml = this.renderRiskMetricsAccordion(parentData, elements);
+
             html = `
-                <h4>Domain Information</h4>
+                <h4>Collapsed Cluster Details</h4>
                 <div class="property">
-                    <span class="key">Name:</span>
+                    <span class="key">Cluster Type:</span>
+                    <span class="value" style="color: #00d4ff; font-weight: bold;">${isServiceCluster ? 'Exposed Services Group' : 'Vulnerabilities Group'}</span>
+                </div>
+                <div class="property">
+                    <span class="key">Hidden Items Count:</span>
+                    <span class="value" style="color: ${isServiceCluster ? '#f39c12' : '#e74c3c'}; font-weight: bold; font-size: 1.05rem;">${data.count} ${isServiceCluster ? 'Services' : 'Vulnerabilities'}</span>
+                </div>
+                <div class="property">
+                    <span class="key">Parent Asset:</span>
+                    <span class="value">${parentData.label || parentData.name || parentData.ip || parentNodeId || 'N/A'}</span>
+                </div>
+                ${riskMetricsHtml}
+            `;
+        } else if (data.type === 'domain' || data.type === 'subdomain' || data.type === 'target' || data.type === 'network') {
+            const riskMetricsHtml = this.renderRiskMetricsAccordion(data, elements);
+            let sectionTitle = 'Domain Information';
+            if (data.type === 'target') sectionTitle = 'Primary Query Target';
+            if (data.type === 'network') sectionTitle = 'Organization / Network Cluster';
+
+            let fileTargetsHtml = '';
+            if (data.type === 'target' && Array.isArray(data.targets_list) && data.targets_list.length > 0) {
+                const targetsBadgeList = data.targets_list.map((t, idx) => `
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; margin-bottom: 3px; background: rgba(0, 212, 255, 0.06); border: 1px solid rgba(0, 212, 255, 0.18); border-radius: 4px; font-family: monospace; font-size: 0.82rem;">
+                        <span style="color: #00d4ff; font-weight: 500;">${t}</span>
+                        <span style="color: #64748b; font-size: 0.72rem;">#${idx + 1}</span>
+                    </div>
+                `).join('');
+
+                fileTargetsHtml = `
+                    <div class="risk-accordion-group" style="margin-top: 0.75rem; margin-bottom: 0.5rem;">
+                        <div class="risk-accordion-header" onclick="window.dashboard.toggleRiskAccordion(this)">
+                            <div class="risk-accordion-title">
+                                <i data-lucide="list" class="accordion-icon ui-icon"></i>
+                                <span>Input Targets List</span>
+                            </div>
+                            <div class="risk-accordion-status" style="display: flex; align-items: center; gap: 6px;">
+                                <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 212, 255, 0.2); color: #00d4ff; border-color: rgba(0, 212, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(data.targets_list).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i> Copy</button>
+                                <span class="risk-pill-counter" style="color: #00d4ff; background: rgba(0,212,255,0.15); border-color: rgba(0,212,255,0.4);">${data.targets_list.length}</span>
+                                <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
+                            </div>
+                        </div>
+                        <div class="risk-accordion-body" style="display: none; max-height: 220px; overflow-y: auto; padding: 8px 6px;">
+                            ${targetsBadgeList}
+                        </div>
+                    </div>
+                `;
+            }
+
+            let subdomainsAccordionHtml = '';
+            if (data.type === 'domain' || data.type === 'target' || data.type === 'subdomain') {
+                const connectedSubdomains = this.findConnectedSubdomains(data.id, elements);
+                if (connectedSubdomains.length > 0) {
+                    const subNamesList = connectedSubdomains.map(s => s.name || s.label);
+                    const subListHtml = connectedSubdomains.map((sub, idx) => `
+                        <div style="display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; margin-bottom: 4px; background: rgba(78, 205, 196, 0.07); border: 1px solid rgba(78, 205, 196, 0.22); border-radius: 4px; font-family: monospace; font-size: 0.8rem;">
+                            <span style="color: #4ecdc4; font-weight: 500; word-break: break-all;">${sub.name || sub.label}</span>
+                            <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.72rem;" onclick="window.dashboard.focusNode('${sub.id}')"><i data-lucide="crosshair" class="badge-icon"></i> Focus</button>
+                        </div>
+                    `).join('');
+
+                    const accordionTitle = data.type === 'subdomain' ? 'Child Subdomains' : 'Subdomains';
+                    subdomainsAccordionHtml = `
+                        <div class="risk-accordion-group" style="margin-top: 0.75rem; margin-bottom: 0.5rem;">
+                            <div class="risk-accordion-header" onclick="window.dashboard.toggleRiskAccordion(this)">
+                                <div class="risk-accordion-title">
+                                    <i data-lucide="globe" class="accordion-icon ui-icon"></i>
+                                    <span>${accordionTitle} (${connectedSubdomains.length})</span>
+                                </div>
+                                <div class="risk-accordion-status" style="display: flex; align-items: center; gap: 6px;">
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(78, 205, 196, 0.2); color: #4ecdc4; border-color: rgba(78, 205, 196, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(subNamesList).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i> Copy</button>
+                                    <span class="risk-pill-counter" style="color: #4ecdc4; background: rgba(78, 205, 196, 0.15); border-color: rgba(78, 205, 196, 0.4);">${connectedSubdomains.length}</span>
+                                    <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
+                                </div>
+                            </div>
+                            <div class="risk-accordion-body" style="display: none; max-height: 220px; overflow-y: auto; padding: 8px 6px;">
+                                ${subListHtml}
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            html = `
+                <h4>${sectionTitle}</h4>
+                <div class="property">
+                    <span class="key">${data.type === 'network' ? 'Organization / ASN:' : (data.type === 'target' ? 'Target Query:' : 'Domain / Host:')}</span>
                     <span class="value">${data.name || data.label}</span>
                 </div>
                 <div class="property">
                     <span class="key">Type:</span>
-                    <span class="value">${data.type}</span>
+                    <span class="value">${data.target_type ? `${data.type.toUpperCase()} (${data.target_type.toUpperCase()})` : data.type.toUpperCase()}</span>
                 </div>
+                ${fileTargetsHtml}
+                ${subdomainsAccordionHtml}
+                ${riskMetricsHtml}
             `;
         } else if (data.type === 'ip') {
+            const riskMetricsHtml = this.renderRiskMetricsAccordion(data, elements);
             html = `
                 <h4>IP Address Information</h4>
                 <div class="property">
@@ -1397,14 +3243,69 @@ class EASMDashboard {
                     <span class="key">ASN:</span>
                     <span class="value">${data.asn || 'Unknown'}</span>
                 </div>
+                ${riskMetricsHtml}
             `;
         } else if (data.type === 'service' || data.type === 'http' || data.type === 'https') {
+            let urlHtml = '';
+            let hostHtml = '';
+            let displayUrl = data.url;
+            let host = '';
+            
+            try {
+                const bannerStr = String(data.banner || '').toLowerCase();
+                const serviceStr = String(data.service || '').toLowerCase();
+                const productStr = String(data.product || '').toLowerCase();
+                const isHttpService = bannerStr.includes('http') || serviceStr.includes('http') || productStr.includes('http') || data.type === 'http' || data.type === 'https';
+
+                if (elements && Array.isArray(elements.edges) && Array.isArray(elements.nodes)) {
+                    const edge = elements.edges.find(e => e && e.data && e.data.target === data.id);
+                    if (edge) {
+                        const parentNode = elements.nodes.find(n => n && n.data && n.data.id === edge.data.source);
+                        if (parentNode && parentNode.data) {
+                            host = parentNode.data.ip || parentNode.data.name || parentNode.data.label || parentNode.data.id || '';
+                        }
+                    }
+                }
+
+                if (host) {
+                    hostHtml = `
+                    <div class="property">
+                        <span class="key">Host:</span>
+                        <span class="value">${host}</span>
+                    </div>`;
+                }
+
+                // Generate URL strictly for services that have wildcard *http* in banner/service
+                if (!displayUrl && isHttpService && host) {
+                    const isHttps = data.ssl || data.type === 'https' || serviceStr.includes('https') || bannerStr.includes('https') || [443, 8443].includes(parseInt(data.port));
+                    const scheme = isHttps ? 'https' : 'http';
+                    if (data.port) {
+                        const portSuffix = ((scheme === 'http' && data.port == 80) || (scheme === 'https' && data.port == 443)) ? '' : `:${data.port}`;
+                        displayUrl = `${scheme}://${host}${portSuffix}`;
+                    }
+                }
+
+                if (isHttpService && displayUrl) {
+                    urlHtml = `
+                    <div class="property">
+                        <span class="key">URL:</span>
+                        <span class="value"><a href="${displayUrl}" target="_blank" style="color: #00d4ff; text-decoration: underline; word-break: break-all;">${displayUrl}</a></span>
+                    </div>`;
+                }
+            } catch (err) {
+                console.error("Error generating service details HTML:", err);
+            }
+
+            const riskMetricsHtml = this.renderRiskMetricsAccordion(data, elements);
+
             html = `
                 <h4>Service Information</h4>
+                ${hostHtml}
                 <div class="property">
                     <span class="key">Port:</span>
                     <span class="value">${data.port}/${data.protocol}</span>
                 </div>
+                ${urlHtml}
                 <div class="property">
                     <span class="key">Service:</span>
                     <span class="value">${data.service || 'Unknown'}</span>
@@ -1421,22 +3322,162 @@ class EASMDashboard {
                     <span class="key">SSL/TLS:</span>
                     <span class="value">${data.ssl ? 'Yes' : 'No'}</span>
                 </div>
+                ${riskMetricsHtml}
             `;
         } else if (data.type === 'vulnerability') {
             const kevBadge = data.is_cisa_kev === true ? '<span class="vulnerability-badge kev">CISA KEV</span>' : '';
             const severityClass = (data.severity || 'unknown').toLowerCase();
             
-            // Find connected service to show the relationship
-            const connectedService = this.cy.edges(`[target="${data.id}"][label="HAS_VULN"]`).source();
-            let serviceInfo = '';
-            if (connectedService.length > 0) {
-                const serviceData = connectedService.data();
-                serviceInfo = `
-                <div class="property">
-                    <span class="key">Affected Service:</span>
-                    <span class="value">${serviceData.port}/${serviceData.protocol} (${serviceData.service || 'Unknown'})</span>
-                </div>`;
+            // Resolve connected service, host IP, and associated domain/subdomain
+            let serviceNodeId = data.service_id;
+            let ipNodeId = data.ip_id;
+            let ipAddress = data.ip;
+            let orgInfo = (data.org && data.org !== 'Unknown') ? data.org : '';
+            if (data.country && data.country !== 'Unknown') {
+                orgInfo = orgInfo ? `${orgInfo} [${data.country}]` : data.country;
             }
+            if (data.asn && data.asn !== 'Unknown') {
+                orgInfo = orgInfo ? `${orgInfo} (${data.asn})` : data.asn;
+            }
+
+            let servicePort = data.port;
+            let serviceProtocol = data.protocol;
+            let serviceName = data.service;
+            let serviceProduct = data.product;
+            let serviceVersion = data.version;
+            let serviceUrl = data.url;
+            let serviceSsl = data.ssl;
+
+            // Traverse Cytoscape graph or elements to resolve complete hierarchy if not already populated
+            let connectedServiceNode = null;
+            let connectedIpNode = null;
+            const associatedDomains = new Set();
+
+            if (elements && Array.isArray(elements.edges) && Array.isArray(elements.nodes)) {
+                // 1. Find edge HAS_VULN connected to this vulnerability
+                const vulnEdge = elements.edges.find(e => e && e.data && e.data.target === data.id && e.data.label === 'HAS_VULN');
+                if (vulnEdge) {
+                    const sourceNode = elements.nodes.find(n => n && n.data && n.data.id === vulnEdge.data.source);
+                    if (sourceNode && sourceNode.data) {
+                        if (['service', 'http', 'https'].includes(sourceNode.data.type)) {
+                            connectedServiceNode = sourceNode.data;
+                            serviceNodeId = sourceNode.data.id;
+                            servicePort = servicePort || sourceNode.data.port;
+                            serviceProtocol = serviceProtocol || sourceNode.data.protocol;
+                            serviceName = serviceName || sourceNode.data.service;
+                            serviceProduct = serviceProduct || sourceNode.data.product;
+                            serviceVersion = serviceVersion || sourceNode.data.version;
+                            serviceUrl = serviceUrl || sourceNode.data.url;
+                            serviceSsl = serviceSsl || sourceNode.data.ssl;
+
+                            // Find IP exposing this service
+                            const srvEdge = elements.edges.find(e => e && e.data && e.data.target === sourceNode.data.id && e.data.label === 'EXPOSES');
+                            if (srvEdge) {
+                                const ipNode = elements.nodes.find(n => n && n.data && n.data.id === srvEdge.data.source);
+                                if (ipNode && ipNode.data) {
+                                    connectedIpNode = ipNode.data;
+                                    ipNodeId = ipNode.data.id;
+                                    ipAddress = ipAddress || ipNode.data.ip || ipNode.data.name || ipNode.data.label;
+                                    if (!orgInfo && ipNode.data.org) orgInfo = ipNode.data.org;
+                                }
+                            }
+                        } else if (sourceNode.data.type === 'ip') {
+                            connectedIpNode = sourceNode.data;
+                            ipNodeId = sourceNode.data.id;
+                            ipAddress = ipAddress || sourceNode.data.ip || sourceNode.data.name || sourceNode.data.label;
+                            if (!orgInfo && sourceNode.data.org) orgInfo = sourceNode.data.org;
+                        }
+                    }
+                }
+
+                // If we know the IP node ID, find any subdomains / domains associated with it
+                if (ipNodeId) {
+                    elements.edges.forEach(e => {
+                        if (e && e.data) {
+                            // IP -> Subdomain (HAS_SUBDOMAIN)
+                            if (e.data.source === ipNodeId && e.data.label === 'HAS_SUBDOMAIN') {
+                                const subNode = elements.nodes.find(n => n && n.data && n.data.id === e.data.target);
+                                if (subNode && subNode.data) {
+                                    associatedDomains.add(subNode.data.name || subNode.data.label);
+                                }
+                            }
+                            // Subdomain -> IP (RESOLVES_TO)
+                            if (e.data.target === ipNodeId && e.data.label === 'RESOLVES_TO') {
+                                const subNode = elements.nodes.find(n => n && n.data && n.data.id === e.data.source);
+                                if (subNode && subNode.data) {
+                                    associatedDomains.add(subNode.data.name || subNode.data.label);
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+
+            // Build URL for web service if not set
+            if (!serviceUrl && servicePort) {
+                const isHttp = (serviceName && serviceName.toLowerCase().includes('http')) || [80, 443, 8080, 8443, 8000].includes(parseInt(servicePort));
+                if (isHttp) {
+                    const hostForUrl = associatedDomains.size > 0 ? Array.from(associatedDomains)[0] : ipAddress;
+                    if (hostForUrl) {
+                        const isHttps = serviceSsl || [443, 8443].includes(parseInt(servicePort));
+                        const scheme = isHttps ? 'https' : 'http';
+                        const portSuffix = ((scheme === 'http' && servicePort == 80) || (scheme === 'https' && servicePort == 443)) ? '' : `:${servicePort}`;
+                        serviceUrl = `${scheme}://${hostForUrl}${portSuffix}`;
+                    }
+                }
+            }
+
+            // Build Host & Service Section
+            let hostAndServiceHtml = '';
+            const domainsList = Array.from(associatedDomains);
+            const domainBadgeHtml = domainsList.length > 0 
+                ? domainsList.map(d => `<span class="mini-badge" style="background: rgba(0,212,255,0.15); color: #00d4ff; font-family: monospace;">${d}</span>`).join(' ')
+                : '';
+
+            hostAndServiceHtml = `
+                <h4 style="margin-top: 15px; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px; color: #00d4ff;">Associated Host & Target</h4>
+                
+                ${ipAddress ? `
+                <div class="property">
+                    <span class="key">Host / IP Address:</span>
+                    <span class="value" style="color: #00d4ff; font-weight: bold;">${ipAddress}</span>
+                </div>` : ''}
+
+                ${domainBadgeHtml ? `
+                <div class="property" style="flex-direction: column; align-items: flex-start; gap: 4px;">
+                    <span class="key">Associated Domain(s):</span>
+                    <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">${domainBadgeHtml}</div>
+                </div>` : ''}
+
+                ${orgInfo ? `
+                <div class="property">
+                    <span class="key">Organization / Network:</span>
+                    <span class="value">${orgInfo}</span>
+                </div>` : ''}
+
+                ${servicePort ? `
+                <div class="property">
+                    <span class="key">Affected Port / Protocol:</span>
+                    <span class="value" style="color: #ffa502; font-weight: bold;">${servicePort}/${(serviceProtocol || 'tcp').toUpperCase()}</span>
+                </div>` : ''}
+
+                ${(serviceName || serviceProduct || serviceVersion) ? `
+                <div class="property">
+                    <span class="key">Service / Product:</span>
+                    <span class="value">${[serviceName, serviceProduct, serviceVersion ? `v${serviceVersion}` : ''].filter(Boolean).join(' - ') || 'Unknown'}</span>
+                </div>` : ''}
+
+                ${serviceUrl ? `
+                <div class="property">
+                    <span class="key">Service URL:</span>
+                    <span class="value"><a href="${serviceUrl}" target="_blank" rel="noopener" style="color: #00d4ff; text-decoration: underline; word-break: break-all;">${serviceUrl}</a></span>
+                </div>` : ''}
+
+                <div class="risk-card-links" style="margin: 8px 0 12px 0; border-top: none;">
+                    ${ipNodeId ? `<button type="button" class="risk-focus-btn" onclick="window.dashboard.focusNode('${ipNodeId}')"><i data-lucide="crosshair" class="badge-icon"></i> Focus Host (${ipAddress || 'IP'})</button>` : ''}
+                    ${serviceNodeId ? `<button type="button" class="risk-focus-btn" onclick="window.dashboard.focusNode('${serviceNodeId}')"><i data-lucide="crosshair" class="badge-icon"></i> Focus Service</button>` : ''}
+                </div>
+            `;
             
             // Build exploits/PoCs section with GitHub and ExploitDB separation
             let exploitsSection = '';
@@ -1447,9 +3488,9 @@ class EASMDashboard {
                 exploitsSection = '<h4>Available Exploits & PoCs</h4>';
                 
                 if (githubExploits.length > 0) {
-                    exploitsSection += '<h5 style="color: #00d4ff; margin: 1rem 0 0.5rem 0;">🐙 GitHub PoCs</h5>';
+                    exploitsSection += '<h5 style="color: #00d4ff; margin: 1rem 0 0.5rem 0;"><i data-lucide="github" class="badge-icon"></i> GitHub PoCs</h5>';
                     githubExploits.forEach(exploit => {
-                        const verifiedBadge = exploit.verified ? '<span class="exploit-badge verified">✓ Verified</span>' : '';
+                        const verifiedBadge = exploit.verified ? '<span class="exploit-badge verified">Verified</span>' : '';
                         
                         exploitsSection += `
                         <div class="exploit-item">
@@ -1459,21 +3500,21 @@ class EASMDashboard {
                             </div>
                             <div class="exploit-title">${exploit.title}</div>
                             <div class="exploit-details">
-                                ${exploit.author ? `<span>👤 Author: ${exploit.author}</span>` : ''}
-                                ${exploit.date ? `<span>📅 Date: ${exploit.date}</span>` : ''}
-                                ${exploit.exploit_type ? `<span>🏷️ Type: ${exploit.exploit_type}</span>` : ''}
+                                ${exploit.author ? `<span>Author: ${exploit.author}</span>` : ''}
+                                ${exploit.date ? `<span>Date: ${exploit.date}</span>` : ''}
+                                ${exploit.exploit_type ? `<span>Type: ${exploit.exploit_type}</span>` : ''}
                             </div>
                             <div class="exploit-url">
-                                <a href="${exploit.url}" target="_blank" rel="noopener">🔗 ${exploit.url}</a>
+                                <a href="${exploit.url}" target="_blank" rel="noopener"><i data-lucide="external-link" class="badge-icon"></i> ${exploit.url}</a>
                             </div>
                         </div>`;
                     });
                 }
                 
                 if (exploitdbExploits.length > 0) {
-                    exploitsSection += '<h5 style="color: #e74c3c; margin: 1rem 0 0.5rem 0;">💥 ExploitDB</h5>';
+                    exploitsSection += '<h5 style="color: #e74c3c; margin: 1rem 0 0.5rem 0;"><i data-lucide="file-code" class="badge-icon"></i> ExploitDB</h5>';
                     exploitdbExploits.forEach(exploit => {
-                        const verifiedBadge = exploit.verified ? '<span class="exploit-badge verified">✓ Verified</span>' : '';
+                        const verifiedBadge = exploit.verified ? '<span class="exploit-badge verified">Verified</span>' : '';
                         
                         exploitsSection += `
                         <div class="exploit-item">
@@ -1483,12 +3524,12 @@ class EASMDashboard {
                             </div>
                             <div class="exploit-title">${exploit.title}</div>
                             <div class="exploit-details">
-                                ${exploit.author ? `<span>👤 Author: ${exploit.author}</span>` : ''}
-                                ${exploit.date ? `<span>📅 Date: ${exploit.date}</span>` : ''}
-                                ${exploit.exploit_type ? `<span>🏷️ Type: ${exploit.exploit_type}</span>` : ''}
+                                ${exploit.author ? `<span>Author: ${exploit.author}</span>` : ''}
+                                ${exploit.date ? `<span>Date: ${exploit.date}</span>` : ''}
+                                ${exploit.exploit_type ? `<span>Type: ${exploit.exploit_type}</span>` : ''}
                             </div>
                             <div class="exploit-url">
-                                <a href="${exploit.url}" target="_blank" rel="noopener">🔗 ${exploit.url}</a>
+                                <a href="${exploit.url}" target="_blank" rel="noopener"><i data-lucide="external-link" class="badge-icon"></i> ${exploit.url}</a>
                             </div>
                         </div>`;
                     });
@@ -1499,9 +3540,8 @@ class EASMDashboard {
                 <h4>Vulnerability Details</h4>
                 <div class="property">
                     <span class="key">CVE ID:</span>
-                    <span class="value">${data.cve_id}</span>
+                    <span class="value" style="color: #00d4ff; font-weight: bold;">${data.cve_id}</span>
                 </div>
-                ${serviceInfo}
                 <div class="property">
                     <span class="key">Severity:</span>
                     <span class="value">
@@ -1525,9 +3565,10 @@ class EASMDashboard {
                     <span class="key">Available PoCs:</span>
                     <span class="value">${data.exploit_count || 0}</span>
                 </div>
+                ${hostAndServiceHtml}
                 ${data.description ? `
                 <h4>Description</h4>
-                <p>${data.description}</p>
+                <p style="font-size: 0.85rem; line-height: 1.4; color: #ccc; background: #181818; padding: 8px; border-radius: 4px; border: 1px solid #2a2a2a;">${data.description}</p>
                 ` : ''}
                 ${exploitsSection}
             `;
@@ -1535,11 +3576,315 @@ class EASMDashboard {
 
         content.innerHTML = html;
         drawer.classList.add('open');
+        const inspectorBackdrop = document.getElementById('inspector-backdrop');
+        if (inspectorBackdrop && window.innerWidth <= 992) {
+            inspectorBackdrop.classList.add('active');
+        }
+
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+
+        if (this.cy) this.cy.resize();
+    }
+
+    toggleClusterExpansion(clusterId) {
+        let isExpanding = false;
+        let parentId = null;
+
+        const clusterNode = this.cy.getElementById(clusterId);
+        if (clusterNode.length > 0) {
+            parentId = clusterNode.data('parent_ip') || clusterNode.data('parent_srv');
+        }
+
+        if (this.expandedClusters.has(clusterId)) {
+            this.expandedClusters.delete(clusterId);
+            this.manualCollapsedClusters.add(clusterId);
+            isExpanding = false;
+        } else {
+            this.expandedClusters.add(clusterId);
+            this.manualCollapsedClusters.delete(clusterId);
+            isExpanding = true;
+        }
+        this.closeInspector();
+        
+        if (isExpanding && parentId) {
+            this.applyLeadFilter({ expandedClusterId: clusterId, parentId: parentId });
+        } else {
+            this.applyLeadFilter({ relayout: false });
+        }
+    }
+
+    toggleAssetChildrenCollapse(assetId, type) {
+        let prefix = 'cluster_srv_';
+        if (type === 'ip_vulns') {
+            prefix = 'cluster_ip_vuln_';
+        } else if (type === 'vulns') {
+            prefix = 'cluster_vuln_';
+        }
+        const clusterId = `${prefix}${assetId}`;
+
+        const existingCluster = this.cy.getElementById(clusterId);
+        const isCurrentlyCollapsed = existingCluster.length > 0 && !existingCluster.hidden();
+
+        if (isCurrentlyCollapsed) {
+            // Uncollapse: open and spread children
+            this.manualCollapsedClusters.delete(clusterId);
+            this.expandedClusters.add(clusterId);
+            this.closeInspector();
+            this.applyLeadFilter({ expandedClusterId: clusterId, parentId: assetId });
+        } else {
+            // Collapse: group children into cluster node
+            this.expandedClusters.delete(clusterId);
+            this.manualCollapsedClusters.add(clusterId);
+            this.closeInspector();
+            this.applyLeadFilter({ relayout: false });
+        }
+    }
+
+    showContextMenu(node, x, y) {
+        const menu = document.getElementById('cy-context-menu');
+        if (!menu) return;
+
+        const data = node.data();
+        const nodeType = data.type;
+        const nodeId = data.id;
+        const elements = this.graphData?.elements || (window.dashboard && window.dashboard.graphData?.elements);
+
+        // 1. Determine Collapse / Uncollapse actions (100% in English)
+        const collapseActions = [];
+
+        if (data.is_cluster || nodeType === 'cluster_services' || nodeType === 'cluster_vulns') {
+            const isServiceCluster = nodeType === 'cluster_services';
+            collapseActions.push({
+                id: 'ctx-action-cluster',
+                label: isServiceCluster ? `Uncollapse Services (${data.count})` : `Uncollapse Vulnerabilities (${data.count})`,
+                icon: 'maximize-2',
+                disabled: false,
+                action: () => {
+                    this.toggleClusterExpansion(nodeId);
+                }
+            });
+        } else if (nodeType === 'ip') {
+            const connectedServices = this.findConnectedServices(nodeId, elements);
+            const directVulns = this.findDirectVulnerabilities(nodeId, elements);
+
+            if (connectedServices.length > 0) {
+                const clusterId = `cluster_srv_${nodeId}`;
+                const existingCluster = this.cy.getElementById(clusterId);
+                const isServicesCollapsed = existingCluster.length > 0 && !existingCluster.hidden();
+
+                collapseActions.push({
+                    id: 'ctx-action-collapse-srv',
+                    label: isServicesCollapsed ? `Uncollapse Services (${connectedServices.length})` : `Collapse Services (${connectedServices.length})`,
+                    icon: isServicesCollapsed ? 'maximize-2' : 'minimize-2',
+                    disabled: false,
+                    action: () => {
+                        this.toggleAssetChildrenCollapse(nodeId, 'services');
+                    }
+                });
+            }
+
+            if (directVulns.length > 0) {
+                const clusterId = `cluster_ip_vuln_${nodeId}`;
+                const existingCluster = this.cy.getElementById(clusterId);
+                const isVulnsCollapsed = existingCluster.length > 0 && !existingCluster.hidden();
+
+                collapseActions.push({
+                    id: 'ctx-action-collapse-vuln',
+                    label: isVulnsCollapsed ? `Uncollapse Direct Vulnerabilities (${directVulns.length})` : `Collapse Direct Vulnerabilities (${directVulns.length})`,
+                    icon: isVulnsCollapsed ? 'maximize-2' : 'minimize-2',
+                    disabled: false,
+                    action: () => {
+                        this.toggleAssetChildrenCollapse(nodeId, 'ip_vulns');
+                    }
+                });
+            }
+
+            if (collapseActions.length === 0) {
+                collapseActions.push({
+                    id: 'ctx-action-collapse-none',
+                    label: 'Collapse / Uncollapse (No children)',
+                    icon: 'minimize-2',
+                    disabled: true,
+                    action: () => {}
+                });
+            }
+        } else if (nodeType === 'service' || nodeType === 'http' || nodeType === 'https') {
+            const connectedVulns = this.findConnectedVulnerabilities(nodeId, elements);
+            if (connectedVulns.length > 0) {
+                const clusterId = `cluster_vuln_${nodeId}`;
+                const existingCluster = this.cy.getElementById(clusterId);
+                const isVulnsCollapsed = existingCluster.length > 0 && !existingCluster.hidden();
+
+                collapseActions.push({
+                    id: 'ctx-action-collapse-srv-vuln',
+                    label: isVulnsCollapsed ? `Uncollapse Vulnerabilities (${connectedVulns.length})` : `Collapse Vulnerabilities (${connectedVulns.length})`,
+                    icon: isVulnsCollapsed ? 'maximize-2' : 'minimize-2',
+                    disabled: false,
+                    action: () => {
+                        this.toggleAssetChildrenCollapse(nodeId, 'vulns');
+                    }
+                });
+            } else {
+                collapseActions.push({
+                    id: 'ctx-action-collapse-none',
+                    label: 'Collapse / Uncollapse (No vulnerabilities)',
+                    icon: 'minimize-2',
+                    disabled: true,
+                    action: () => {}
+                });
+            }
+        } else {
+            collapseActions.push({
+                id: 'ctx-action-collapse-none',
+                label: 'Collapse / Uncollapse (Not applicable)',
+                icon: 'minimize-2',
+                disabled: true,
+                action: () => {}
+            });
+        }
+
+        // 2. Determine Copy Action (Available ONLY for domain, subdomain, ip, and vulnerability/cve)
+        let copyAction = null;
+        if (nodeType === 'domain') {
+            const textToCopy = data.name || data.label || nodeId;
+            copyAction = {
+                label: 'Copy Domain',
+                text: textToCopy
+            };
+        } else if (nodeType === 'subdomain') {
+            const textToCopy = data.name || data.label || nodeId;
+            copyAction = {
+                label: 'Copy Subdomain',
+                text: textToCopy
+            };
+        } else if (nodeType === 'ip') {
+            const textToCopy = data.ip || data.name || data.label || nodeId;
+            copyAction = {
+                label: 'Copy IP Address',
+                text: textToCopy
+            };
+        } else if (nodeType === 'vulnerability' || nodeType === 'cve') {
+            const textToCopy = data.cve_id || data.name || data.label || nodeId;
+            copyAction = {
+                label: 'Copy CVE ID',
+                text: textToCopy
+            };
+        }
+
+        const displayName = data.label || data.name || data.ip || data.cve_id || nodeId;
+
+        const collapseButtonsHtml = collapseActions.map(act => `
+            <button type="button" class="cy-context-menu-item primary ctx-collapse-btn" data-action-id="${act.id}" ${act.disabled ? 'disabled' : ''}>
+                <i data-lucide="${act.icon}" class="ui-icon"></i>
+                <span>${act.label}</span>
+            </button>
+        `).join('');
+
+        menu.innerHTML = `
+            <div class="cy-context-menu-header">
+                <span>${nodeType.toUpperCase()}</span>
+                <span class="node-title" title="${displayName}">${displayName}</span>
+            </div>
+            ${collapseButtonsHtml}
+            <div class="cy-context-menu-divider"></div>
+            <button type="button" class="cy-context-menu-item" id="ctx-action-inspect">
+                <i data-lucide="info" class="ui-icon"></i>
+                <span>Inspect Details</span>
+            </button>
+            <button type="button" class="cy-context-menu-item" id="ctx-action-focus">
+                <i data-lucide="crosshair" class="ui-icon"></i>
+                <span>Focus Node</span>
+            </button>
+            ${copyAction ? `
+            <button type="button" class="cy-context-menu-item" id="ctx-action-copy">
+                <i data-lucide="copy" class="ui-icon"></i>
+                <span>${copyAction.label}</span>
+            </button>
+            ` : ''}
+        `;
+
+        // Wire collapse button actions
+        menu.querySelectorAll('.ctx-collapse-btn').forEach(btn => {
+            const actId = btn.getAttribute('data-action-id');
+            const matchedAction = collapseActions.find(a => a.id === actId);
+            if (matchedAction && !matchedAction.disabled) {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.hideContextMenu();
+                    matchedAction.action();
+                });
+            }
+        });
+
+        const inspectBtn = menu.querySelector('#ctx-action-inspect');
+        if (inspectBtn) {
+            inspectBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.hideContextMenu();
+                this.showNodeInspector(node);
+            });
+        }
+
+        const focusBtn = menu.querySelector('#ctx-action-focus');
+        if (focusBtn) {
+            focusBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.hideContextMenu();
+                this.focusNode(nodeId);
+            });
+        }
+
+        if (copyAction) {
+            const copyBtn = menu.querySelector('#ctx-action-copy');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.hideContextMenu();
+                    this.copyTextList(copyAction.text, copyBtn);
+                });
+            }
+        }
+
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+
+        // Adjust position so it doesn't overflow window boundaries
+        menu.style.display = 'flex';
+        menu.style.visibility = 'hidden';
+
+        requestAnimationFrame(() => {
+            const menuRect = menu.getBoundingClientRect();
+            const maxX = window.innerWidth - menuRect.width - 12;
+            const maxY = window.innerHeight - menuRect.height - 12;
+
+            const posX = Math.max(10, Math.min(x, maxX));
+            const posY = Math.max(10, Math.min(y, maxY));
+
+            menu.style.left = `${posX}px`;
+            menu.style.top = `${posY}px`;
+            menu.style.visibility = 'visible';
+        });
+    }
+
+    hideContextMenu() {
+        const menu = document.getElementById('cy-context-menu');
+        if (menu) {
+            menu.style.display = 'none';
+        }
     }
 
     closeInspector() {
-        document.getElementById('inspector-drawer').classList.remove('open');
-        this.cy.nodes().unselect();
+        const drawer = document.getElementById('inspector-drawer');
+        if (drawer) drawer.classList.remove('open');
+        const inspectorBackdrop = document.getElementById('inspector-backdrop');
+        if (inspectorBackdrop) inspectorBackdrop.classList.remove('active');
+        if (this.cy) {
+            this.cy.nodes().unselect();
+            this.cy.resize();
+        }
     }
 
     showError(message) {
@@ -1548,7 +3893,7 @@ class EASMDashboard {
         if (loading) {
             loading.innerHTML = `
                 <div style="color: #ff4757; text-align: center;">
-                    <h3>⚠️ Error</h3>
+                    <h3><i data-lucide="alert-triangle" class="ui-icon" style="width: 20px; height: 20px; vertical-align: middle;"></i> Error</h3>
                     <p>${message}</p>
                     <p style="font-size: 0.9em; color: #aaa;">Check browser console for details</p>
                     <button onclick="location.reload()" style="margin-top: 15px; padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">
@@ -1557,6 +3902,7 @@ class EASMDashboard {
                 </div>
             `;
             loading.style.display = 'flex';
+            if (typeof lucide !== 'undefined') lucide.createIcons();
         }
     }
 
@@ -1566,7 +3912,7 @@ class EASMDashboard {
         if (leadList) {
             leadList.innerHTML = `
                 <div class="lead-loading" style="color: #ff9500;">
-                    ⚠️ API Connection Failed<br>
+                    <i data-lucide="alert-circle" class="ui-icon" style="width: 16px; height: 16px; vertical-align: middle;"></i> API Connection Failed<br>
                     <small>Unable to load leads from database</small><br>
                     <button onclick="location.reload()" 
                             style="margin-top: 10px; padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer;">
@@ -1574,6 +3920,7 @@ class EASMDashboard {
                     </button>
                 </div>
             `;
+            if (typeof lucide !== 'undefined') lucide.createIcons();
         }
     }
 
@@ -1643,15 +3990,6 @@ class EASMDashboard {
         if (layoutSelect) {
             const availableLayout = this.getAvailableLayout();
             layoutSelect.value = availableLayout;
-            
-            // Disable cose-bilkent option if not available
-            if (typeof cytoscapeCoseBilkent === 'undefined') {
-                const coseBilkentOption = layoutSelect.querySelector('option[value="cose-bilkent"]');
-                if (coseBilkentOption) {
-                    coseBilkentOption.disabled = true;
-                    coseBilkentOption.textContent += ' (Not Available)';
-                }
-            }
         }
     }
 }

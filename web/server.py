@@ -28,8 +28,8 @@ from core.database.storage import DatabaseManager
 from web.api.routes import router as api_router
 
 
-def create_app(db_path: str) -> FastAPI:
-    """Create FastAPI application with database connection."""
+def create_app(db_path: str = None) -> FastAPI:
+    """Create FastAPI application with optional database connection."""
     if not FASTAPI_AVAILABLE:
         raise ImportError("FastAPI and uvicorn are required for web server functionality. Install with: pip install fastapi uvicorn")
     
@@ -49,13 +49,40 @@ def create_app(db_path: str) -> FastAPI:
         allow_headers=["*"],
     )
     
-    # Verify database exists
-    if not Path(db_path).exists():
-        raise FileNotFoundError(f"Database file not found: {db_path}")
+    # Check if db_path was provided or auto-discover from data/dbs/
+    resolved_db_path = None
+    if db_path:
+        p = Path(db_path)
+        if not p.is_absolute():
+            candidate = Path.cwd() / "data" / "dbs" / db_path
+            if candidate.exists():
+                p = candidate
+            elif not db_path.endswith(".sqlite"):
+                cand_ext = Path.cwd() / "data" / "dbs" / f"{db_path}.sqlite"
+                if cand_ext.exists():
+                    p = cand_ext
+        if p.exists():
+            resolved_db_path = str(p.resolve())
+    
+    if not resolved_db_path:
+        # Auto-discover databases in data/dbs/ - Prioritize example.com.sqlite as default if present
+        dbs_dir = Path.cwd() / "data" / "dbs"
+        if dbs_dir.exists():
+            example_db = dbs_dir / "example.com.sqlite"
+            if example_db.exists():
+                resolved_db_path = str(example_db.resolve())
+            else:
+                existing_dbs = sorted(list(dbs_dir.glob("*.sqlite")))
+                if existing_dbs:
+                    resolved_db_path = str(existing_dbs[0].resolve())
     
     # Store database manager in app state
-    app.state.db_manager = DatabaseManager(Path(db_path))
-    app.state.db_path = db_path
+    if resolved_db_path and Path(resolved_db_path).exists():
+        app.state.db_manager = DatabaseManager(Path(resolved_db_path))
+        app.state.db_path = resolved_db_path
+    else:
+        app.state.db_manager = None
+        app.state.db_path = None
     
     # Include API routes
     app.include_router(api_router, prefix="/api/v1")
@@ -81,7 +108,7 @@ def create_app(db_path: str) -> FastAPI:
         """Health check endpoint."""
         return {
             "status": "healthy",
-            "database": db_path,
+            "database": app.state.db_path,
             "version": "2.0.0"
         }
     
@@ -96,7 +123,7 @@ def main():
         sys.exit(1)
     
     parser = argparse.ArgumentParser(description="DetecTI-CLI Web Server")
-    parser.add_argument("--db-path", required=True, help="Path to SQLite database")
+    parser.add_argument("--db-path", default=None, help="Path to SQLite database (optional)")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
     
@@ -114,6 +141,7 @@ def main():
             log_level="warning",  # Reduce log noise
             access_log=False
         )
+
     except Exception as e:
         print(f"Failed to start server: {e}", file=sys.stderr)
         sys.exit(1)
