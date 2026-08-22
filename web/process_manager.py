@@ -118,44 +118,49 @@ class WebServerManager:
         
         return None
     
-    def start_server(self, db_path: str, host: str = "127.0.0.1", port: int = 8000) -> bool:
+    def start_server(self, db_path: Optional[str] = None, host: str = "127.0.0.1", port: int = 8000) -> bool:
         """Start web server in background process."""
         if self.is_running():
             return False  # Already running
         
-        # Resolve database path
-        if not os.path.isabs(db_path):
-            # Check if it's in ./data/dbs/ directory
-            data_db_path = Path.cwd() / "data" / "dbs" / db_path
-            if data_db_path.exists():
-                db_path = str(data_db_path.resolve())
-            else:
-                # Try with .sqlite extension if not present
-                if not db_path.endswith('.sqlite'):
-                    data_db_path_with_ext = Path.cwd() / "data" / "dbs" / f"{db_path}.sqlite"
-                    if data_db_path_with_ext.exists():
-                        db_path = str(data_db_path_with_ext.resolve())
-                    else:
-                        # Try removing underscores and using dots (example_com -> example.com)
-                        normalized_name = db_path.replace('_', '.')
-                        data_db_normalized = Path.cwd() / "data" / "dbs" / f"{normalized_name}.sqlite"
-                        if data_db_normalized.exists():
-                            db_path = str(data_db_normalized.resolve())
-                        else:
-                            db_path = str(Path(db_path).resolve())
+        resolved_db_path = None
+        if db_path:
+            # Resolve database path
+            if not os.path.isabs(db_path):
+                # Check if it's in ./data/dbs/ directory
+                data_db_path = Path.cwd() / "data" / "dbs" / db_path
+                if data_db_path.exists():
+                    resolved_db_path = str(data_db_path.resolve())
                 else:
-                    db_path = str(Path(db_path).resolve())
-        
-        if not Path(db_path).exists():
-            raise FileNotFoundError(f"Database file not found: {db_path}")
+                    # Try with .sqlite extension if not present
+                    if not db_path.endswith('.sqlite'):
+                        data_db_path_with_ext = Path.cwd() / "data" / "dbs" / f"{db_path}.sqlite"
+                        if data_db_path_with_ext.exists():
+                            resolved_db_path = str(data_db_path_with_ext.resolve())
+                        else:
+                            # Try removing underscores and using dots (example_com -> example.com)
+                            normalized_name = db_path.replace('_', '.')
+                            data_db_normalized = Path.cwd() / "data" / "dbs" / f"{normalized_name}.sqlite"
+                            if data_db_normalized.exists():
+                                resolved_db_path = str(data_db_normalized.resolve())
+                            else:
+                                resolved_db_path = str(Path(db_path).resolve())
+                    else:
+                        resolved_db_path = str(Path(db_path).resolve())
+            else:
+                resolved_db_path = str(Path(db_path).resolve())
+            
+            if not Path(resolved_db_path).exists():
+                raise FileNotFoundError(f"Database file not found: {db_path}")
         
         # Start server process
         cmd = [
             sys.executable, "-m", "web.server",
-            "--db-path", db_path,
             "--host", host,
             "--port", str(port)
         ]
+        if resolved_db_path:
+            cmd.extend(["--db-path", resolved_db_path])
         
         try:
             # Start detached background process
@@ -178,7 +183,7 @@ class WebServerManager:
                     "pid": process.pid,
                     "port": port,
                     "host": host,
-                    "db_path": db_path,
+                    "db_path": resolved_db_path or "No DB pre-loaded (Select from UI)",
                     "started_at": datetime.now().isoformat() + "Z",
                     "status": "RUNNING"
                 }

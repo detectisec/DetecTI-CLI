@@ -3,14 +3,20 @@
 import json
 import sqlite3
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 from core.models import (
+    CISAKEVData,
+    EPSSData,
+    ExploitData,
     Finding,
     FindingType,
     HostResult,
+    PortData,
     ScanResult,
+    SeverityLevel,
     VulnerabilityData,
 )
 from .schema import SCHEMA_SQL
@@ -75,29 +81,34 @@ class DatabaseManager:
         subdomain_map = {}
         
         for finding in subdomain_findings:
-            # Extract domain from subdomain
+            # Extract domain from subdomain using tldextract (handles .com.br, .co.uk, .gov.br, etc.)
             subdomain = finding.value
             if '.' in subdomain:
-                parts = subdomain.split('.')
-                if len(parts) >= 2:
-                    domain = '.'.join(parts[-2:])  # Get root domain
-                    domain_id = self._get_or_create_domain(conn, domain)
-                    
-                    # Check if subdomain already exists
-                    cursor = conn.execute(
-                        "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
-                        (domain_id, subdomain)
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        subdomain_map[subdomain] = row[0]
-                    else:
-                        subdomain_id = str(uuid.uuid4())
-                        conn.execute("""
-                            INSERT INTO subdomains (id, domain_id, name)
-                            VALUES (?, ?, ?)
-                        """, (subdomain_id, domain_id, subdomain))
-                        subdomain_map[subdomain] = subdomain_id
+                try:
+                    import tldextract
+                    ext = tldextract.extract(subdomain)
+                    domain = ext.registered_domain if ext.registered_domain else '.'.join(subdomain.split('.')[-2:])
+                except Exception:
+                    parts = subdomain.split('.')
+                    domain = '.'.join(parts[-2:]) if len(parts) >= 2 else subdomain
+                
+                domain_id = self._get_or_create_domain(conn, domain)
+                
+                # Check if subdomain already exists
+                cursor = conn.execute(
+                    "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
+                    (domain_id, subdomain)
+                )
+                row = cursor.fetchone()
+                if row:
+                    subdomain_map[subdomain] = row[0]
+                else:
+                    subdomain_id = str(uuid.uuid4())
+                    conn.execute("""
+                        INSERT INTO subdomains (id, domain_id, name)
+                        VALUES (?, ?, ?)
+                    """, (subdomain_id, domain_id, subdomain))
+                    subdomain_map[subdomain] = subdomain_id
         
         return subdomain_map
 
@@ -296,6 +307,173 @@ class DatabaseManager:
             
             return stats
 
+    def reconstruct_scan_result(self) -> Optional[ScanResult]:
+        """Reconstruct a complete ScanResult model from the database."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            
+            # Fetch scan metadata
+            scan_row = conn.execute("SELECT * FROM scan_results ORDER BY created_at DESC LIMIT 1").fetchone()
+            if not scan_row:
+                # Check if there are ip_addresses or domains to construct a basic scan
+                first_ip = conn.execute("SELECT ip FROM ip_addresses LIMIT 1").fetchone()
+                first_domain = conn.execute("SELECT name FROM domains LIMIT 1").fetchone()
+                target = first_domain['name'] if first_domain else (first_ip['ip'] if first_ip else "unknown")
+                target_type = "domain" if first_domain else "ip"
+                scan_id = str(uuid.uuid4())
+                started_at = datetime.now(timezone.utc)
+                completed_at = started_at
+                elapsed_seconds = 0.0
+                modules_run = []
+            else:
+                target = scan_row['target']
+                target_type = scan_row['target_type']
+                scan_id = scan_row['id']
+                try:
+                    started_at = datetime.fromisoformat(scan_row['started_at'])
+                except Exception:
+                    started_at = datetime.now(timezone.utc)
+                try:
+                    completed_at = datetime.fromisoformat(scan_row['completed_at']) if scan_row['completed_at'] else None
+                except Exception:
+                    completed_at = None
+                elapsed_seconds = scan_row['elapsed_seconds'] or 0.0
+                try:
+                    modules_run = json.loads(scan_row['modules_run']) if scan_row['modules_run'] else []
+                except Exception:
+                    modules_run = []
+
+            # Fetch Hosts
+            hosts = []
+            ip_rows = conn.execute("SELECT * FROM ip_addresses").fetchall()
+            for ip_row in ip_rows:
+                ip_id = ip_row['id']
+                ip_addr = ip_row['ip']
+
+                # Hostnames
+                hostnames = [r[0] for r in conn.execute("""
+                    SELECT s.name FROM subdomains s
+                    JOIN subdomain_ips si ON s.id = si.subdomain_id
+                    WHERE si.ip_id = ?
+                """, (ip_id,)).fetchall()]
+
+                # Domains
+                domains = [r[0] for r in conn.execute("""
+                    SELECT DISTINCT d.name FROM domains d
+                    JOIN subdomains s ON d.id = s.domain_id
+                    JOIN subdomain_ips si ON s.id = si.subdomain_id
+                    WHERE si.ip_id = ?
+                """, (ip_id,)).fetchall()]
+
+                # Services
+                ports = []
+                service_rows = conn.execute("SELECT * FROM services WHERE ip_id = ?", (ip_id,)).fetchall()
+                for s_row in service_rows:
+                    sources = []
+                    if s_row['sources']:
+                        try:
+                            sources = json.loads(s_row['sources'])
+                        except Exception:
+                            sources = [s_row['sources']]
+                    
+                    ports.append(PortData(
+                        port=s_row['port'],
+                        transport=s_row['protocol'] or 'tcp',
+                        service=s_row['service_name'],
+                        product=s_row['product'],
+                        version=s_row['version'],
+                        banner=s_row['banner'],
+                        url=s_row['url'],
+                        ssl=bool(s_row['ssl']),
+                        sources=sources
+                    ))
+
+                # Vulnerabilities
+                vulns = []
+                vuln_rows = conn.execute("SELECT * FROM vulnerabilities WHERE ip_id = ?", (ip_id,)).fetchall()
+                for v_row in vuln_rows:
+                    exploits = []
+                    exp_rows = conn.execute("SELECT * FROM exploits WHERE vulnerability_id = ?", (v_row['id'],)).fetchall()
+                    for e_row in exp_rows:
+                        exploits.append(ExploitData(
+                            title=e_row['title'],
+                            source=e_row['source'],
+                            url=e_row['url'],
+                            verified=bool(e_row['verified']),
+                            author=e_row['author'],
+                            date=e_row['date'],
+                            exploit_type=e_row['exploit_type']
+                        ))
+
+                    cisa_kev = None
+                    if v_row['cisa_kev_data']:
+                        try:
+                            cisa_kev = CISAKEVData(**json.loads(v_row['cisa_kev_data']))
+                        except Exception:
+                            cisa_kev = CISAKEVData(in_cisa_kev=True)
+                    elif v_row['is_cisa_kev']:
+                        cisa_kev = CISAKEVData(in_cisa_kev=True)
+
+                    epss = None
+                    if v_row['epss_score'] is not None:
+                        epss = EPSSData(
+                            epss_score=v_row['epss_score'],
+                            epss_percentile=v_row['epss_percentile'] or 0.0
+                        )
+
+                    sev_str = v_row['severity'] or "UNKNOWN"
+                    sev = SeverityLevel(sev_str) if sev_str in SeverityLevel._value2member_map_ else SeverityLevel.UNKNOWN
+
+                    vulns.append(VulnerabilityData(
+                        cve_id=v_row['cve_id'],
+                        cvss_score=v_row['cvss_score'],
+                        cvss_version=v_row['cvss_version'],
+                        cvss_severity=sev,
+                        description=v_row['description'],
+                        cwe_id=v_row['cwe_id'],
+                        cwe_name=v_row['cwe_name'],
+                        epss=epss,
+                        cisa_kev=cisa_kev,
+                        exploits=exploits
+                    ))
+
+                hosts.append(HostResult(
+                    ip=ip_addr,
+                    hostnames=hostnames,
+                    domains=domains,
+                    org=ip_row['org'],
+                    asn=ip_row['asn'],
+                    country_name=ip_row['country'],
+                    city=ip_row['city'],
+                    region_code=ip_row['region_code'],
+                    ports=ports,
+                    vulnerabilities=vulns
+                ))
+
+            # Findings
+            findings = []
+            for s_row in conn.execute("SELECT name FROM subdomains").fetchall():
+                findings.append(Finding(
+                    type=FindingType.SUBDOMAIN,
+                    target=target,
+                    value=s_row['name'],
+                    source="recon"
+                ))
+
+            result = ScanResult(
+                scan_id=scan_id,
+                target=target,
+                target_type=target_type,
+                started_at=started_at,
+                completed_at=completed_at,
+                elapsed_seconds=elapsed_seconds,
+                modules_run=modules_run,
+                hosts=hosts,
+                findings=findings
+            )
+            result.calculate_summary()
+            return result
+
     @staticmethod
     def get_db_path_for_target(target: str, data_dir: Optional[Path] = None) -> Path:
         """Generate standardized database path for a target."""
@@ -307,3 +485,4 @@ class DatabaseManager:
         safe_target = safe_target[:50]  # Limit length
         
         return data_dir / f"{safe_target}.sqlite"
+

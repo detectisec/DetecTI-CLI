@@ -14,6 +14,7 @@ from core.models import (
     SeverityLevel,
     VulnerabilityData,
 )
+from reporters.html_reporter import HTMLReporter
 from reporters.json_reporter import JSONReporter
 from reporters.markdown_reporter import MarkdownReporter
 
@@ -76,7 +77,26 @@ def test_markdown_reporter(tmp_path: Path):
     assert "CISA Known Exploited" in md_content
     assert "50383" in md_content
     assert "Host: `192.168.1.50`" in md_content
+    assert "https://detecti.com.br" in md_content
 
     file_path = tmp_path / "report.md"
     MarkdownReporter.save(result, file_path)
     assert file_path.is_file()
+
+
+def test_html_reporter(tmp_path: Path):
+    """Test HTML reporter generation and save."""
+    result = create_sample_scan_result()
+    html_content = HTMLReporter.generate(result)
+
+    assert "<!DOCTYPE html>" in html_content
+    assert "192.168.1.50" in html_content
+    assert "CVE-2021-41773" in html_content
+    assert "DetecTI-CLI Intelligence Report" in html_content
+    assert "https://detecti.com.br" in html_content
+
+    file_path = tmp_path / "report.html"
+    HTMLReporter.save(result, file_path)
+    assert file_path.is_file()
+    assert file_path.read_text(encoding="utf-8").startswith("<!DOCTYPE html>")
+

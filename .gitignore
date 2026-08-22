@@ -1,0 +1,40 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Aider & LLM logs
+.aider*
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+detecti-venv/
+.venv/
+venv/
+ENV/
+
+# Node / JS temporary files
+node_modules/
+package.json
+package-lock.json
+test_browser.js
+test_empty_db.js
+
+# Temporary files & runtime state
+.webserver.json
+domain
+testeip
+*.log
+
+# Databases: Ignore all test/scan databases except the default example dataset
+data/dbs/*.sqlite
+!data/dbs/example.com.sqlite
