@@ -3,8 +3,9 @@
 .env.*
 !.env.example
 
-# Aider & LLM logs
+# Aider & LLM logs / Drafts
 .aider*
+BLOG_POST.md
 
 # Python cache & artifacts
 __pycache__/
