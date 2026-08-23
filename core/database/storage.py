@@ -521,13 +521,22 @@ class DatabaseManager:
                 banner = p.get("banner") or ""
                 ssl_flag = bool(p.get("ssl", False) or port_num == 443)
                 
-                # Check if this service already exists for this IP
+                # Check if this service already exists for this IP (case-insensitive on protocol or port match)
                 s_cursor = conn.execute("""
                     SELECT id, sources, banner, service_name, product, version, ssl 
                     FROM services 
-                    WHERE ip_id = ? AND port = ? AND protocol = ?
+                    WHERE ip_id = ? AND port = ? AND (LOWER(protocol) = LOWER(?) OR protocol IS NULL OR protocol = '')
                 """, (ip_id, port_num, proto))
                 existing_svc = s_cursor.fetchone()
+                
+                # If not matched, try matching just ip_id and port
+                if not existing_svc:
+                    s_cursor = conn.execute("""
+                        SELECT id, sources, banner, service_name, product, version, ssl 
+                        FROM services 
+                        WHERE ip_id = ? AND port = ?
+                    """, (ip_id, port_num))
+                    existing_svc = s_cursor.fetchone()
                 
                 if existing_svc:
                     svc_id, cur_sources_raw, cur_banner, cur_name, cur_prod, cur_ver, cur_ssl = existing_svc
@@ -656,6 +665,22 @@ class DatabaseManager:
                 service_id = None
                 if ip_id and port:
                     service_id = service_row_map.get((ip_id, port))
+                    if service_id:
+                        # Ensure service sources include active verification
+                        svc_row = conn.execute("SELECT sources FROM services WHERE id = ?", (service_id,)).fetchone()
+                        if svc_row:
+                            cur_sources_raw = svc_row[0]
+                            sources_list = []
+                            if cur_sources_raw:
+                                try:
+                                    sources_list = json.loads(cur_sources_raw)
+                                    if not isinstance(sources_list, list):
+                                        sources_list = [str(sources_list)]
+                                except Exception:
+                                    sources_list = [cur_sources_raw]
+                            if "Nuclei" not in sources_list:
+                                sources_list.append("Nuclei")
+                                conn.execute("UPDATE services SET sources = ? WHERE id = ?", (json.dumps(sources_list), service_id))
 
                 cve_id = (f.get("cve_id") or f.get("template_id") or "UNKNOWN").strip()
                 severity = (f.get("severity") or "INFO").upper()
