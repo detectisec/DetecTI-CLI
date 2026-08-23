@@ -154,15 +154,18 @@ flowchart TD
   - **Scoped Lead Selector & Filters**: Visually isolate individual hosts and subtrees without pulling unrelated sibling branches; filter by CISA KEV, High EPSS probability, Critical CVSS, or public PoCs.
   - **Asset Inspector**: Deep-dive into technical properties, CWE descriptions, affected ports, associated domains, and weaponized exploit URLs.
 - **🎯 Target Management & High-Speed Active Port Scanning (Masscan)**:
-  - **Right-Click Target Marking**: Mark/unmark any `IP Address` node as a scan target directly from the Cytoscape graph context menu (**Set as Target** / **Remove Target**).
-  - **Dedicated Target Management Drawer**: Right-side sliding panel providing real-time target status (`Idle`, `Scanning`, `Completed`, `Failed`), discovered open port counts, individual or bulk scan execution, and a live console output stream.
-  - **Flexible Scan Presets & Rate Control**: Quick port profiles (*Top 100*, *Web Ports*, *All Ports 0-65535*, *Custom*), packet rate slider (100 to 10,000 pps), `-Pn` (disable ping), and `--banners` (banner grabbing).
+  - **Right-Click Target Marking & Bulk Selection**:
+    - Mark/unmark any individual `IP Address` node as a scan target directly from the Cytoscape graph context menu (**Set as Target** / **Remove Target**).
+    - **Bulk Target Addition on Root Nodes**: Right-click on any `Organization`, `Network / ASN`, `Target Root`, or `Domain` node to instantly mark or unmark **all associated descendant IPs** as scan targets in a single click (**Set all N IPs as Targets** / **Remove all N IPs from Targets**).
+  - **Inspector Direct Actions**: Toggle individual or bulk target states directly from the **Asset Inspector** drawer for both IP nodes and parent Organization/Domain roots.
+  - **Dedicated Target Management Drawer**: Right-side sliding panel providing real-time target status (`Idle`, `Scanning`, `Completed`, `Failed`), discovered open port counts, port chips with banner tooltips, individual or bulk scan execution, and a live console output stream.
+  - **Flexible Scan Presets & Rate Control**: Quick port profiles (*Top 100*, *Web Ports*, *All Ports 0-65535*, *Custom*), packet rate slider (100 to 10,000 pps), `-Pn` (disable ping), and `--banners` (banner grabbing & service detection).
   - **Visual Topology Differentiation**:
     - Marked IP nodes display a discreet **Crosshair badge overlay** in the upper-right corner.
     - Exclusively active-scanned services render with a secondary high-contrast **Neon Violet / Purple (#a855f7)** color.
     - Services discovered passively and verified actively receive a **Cyan highlight border** and **`[Verified Active]`** badge.
     - Active scan service connections render as **dashed relationship edges** (`line-style: dashed`).
-  - **Atomic Database Persistence**: Automatic deduplication and SQLite persistence for newly discovered or verified services and banners directly into `./data/dbs/`.
+  - **Atomic Database Persistence**: Automatic deduplication and SQLite persistence for newly discovered or verified services, product/version detection, and raw service banners directly into `./data/dbs/`.
   - **System Binary & Permissions**: Requires `masscan` installed on the host with non-root Linux raw packet capabilities (`sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip $(which masscan)`).
 - **🔐 Pre-Flight API Verification & Sanity Checking**:
   - Built-in sanity layer (`config-check` and engine pre-flight) that filters dummy placeholder keys and verifies valid authentication before running scans, preventing silent 401/403 authorization errors.
