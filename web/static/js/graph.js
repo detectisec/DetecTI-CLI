@@ -974,9 +974,33 @@ class EASMDashboard {
 
         // Third pass: Smart Clustering / Collapsing for high fan-out nodes (>15 services or vulns)
         // Group overwhelming numbers of services or vulnerabilities into clean cluster nodes
+        // Clustered counts and children adhere strictly to active vulnerability, category and search filters!
         const clusterNodesToAdd = [];
         const clusterEdgesToAdd = [];
         const CLUSTER_THRESHOLD = 15;
+
+        // Vulnerability filter evaluator helper for clustering pass
+        const hasVulnFilters = this.filters.kev || this.filters.highEpss || this.filters.critical || this.filters.withPocs;
+        const vulnMatchesActiveFilter = (vulnNode) => {
+            if (!vulnNode) return false;
+            const data = typeof vulnNode.data === 'function' ? vulnNode.data() : vulnNode;
+            if (this.filters.kev) {
+                if (data.is_cisa_kev !== true && data.is_cisa_kev !== 1) return false;
+            }
+            if (this.filters.highEpss) {
+                const epssScore = parseFloat(data.epss_score || 0);
+                if (epssScore <= 0.5) return false;
+            }
+            if (this.filters.critical) {
+                const severity = String(data.severity || '').toUpperCase();
+                if (severity !== 'CRITICAL') return false;
+            }
+            if (this.filters.withPocs) {
+                const hasPocs = data.has_pocs === true || (Array.isArray(data.exploits) && data.exploits.length > 0);
+                if (!hasPocs) return false;
+            }
+            return true;
+        };
 
         // 3a. Cluster services under IP nodes with high fan-out or manual collapse
         this.cy.nodes('[type="ip"]').forEach(ipNode => {
@@ -988,7 +1012,17 @@ class EASMDashboard {
                 return;
             }
 
-            const serviceOutgoers = ipNode.outgoers('node[type="service"], node[type="http"], node[type="https"]').filter(s => visibleNodes.has(s.id()) || s.id().startsWith('srv_'));
+            let serviceOutgoers = ipNode.outgoers('node[type="service"], node[type="http"], node[type="https"]').filter(s => visibleNodes.has(s.id()) || s.id().startsWith('srv_'));
+            
+            // If vuln/category filters are active, only consider services that match or have matching vulns
+            if (this.filters.vulnServicesOnly || hasVulnFilters) {
+                serviceOutgoers = serviceOutgoers.filter(srv => {
+                    const childVulns = srv.outgoers('node[type="vulnerability"]');
+                    if (childVulns.length === 0) return false;
+                    return hasVulnFilters ? childVulns.some(vulnMatchesActiveFilter) : true;
+                });
+            }
+
             const isManuallyCollapsed = this.manualCollapsedClusters.has(clusterId);
             const isExpanded = this.expandedClusters.has(clusterId);
             const shouldCollapse = (isManuallyCollapsed || serviceOutgoers.length > CLUSTER_THRESHOLD) && !isExpanded;
@@ -1065,7 +1099,11 @@ class EASMDashboard {
                 return;
             }
 
-            const directVulnOutgoers = ipNode.outgoers('node[type="vulnerability"]').filter(v => visibleNodes.has(v.id()) || v.id().startsWith('vuln_'));
+            let directVulnOutgoers = ipNode.outgoers('node[type="vulnerability"]').filter(v => visibleNodes.has(v.id()) || v.id().startsWith('vuln_'));
+            if (hasVulnFilters) {
+                directVulnOutgoers = directVulnOutgoers.filter(vulnMatchesActiveFilter);
+            }
+
             const isManuallyCollapsed = this.manualCollapsedClusters.has(clusterId);
             const isExpanded = this.expandedClusters.has(clusterId);
             const shouldCollapse = (isManuallyCollapsed || directVulnOutgoers.length > CLUSTER_THRESHOLD) && !isExpanded;
@@ -1138,7 +1176,11 @@ class EASMDashboard {
                 return;
             }
 
-            const vulnOutgoers = srvNode.outgoers('node[type="vulnerability"]').filter(v => visibleNodes.has(v.id()) || v.id().startsWith('vuln_'));
+            let vulnOutgoers = srvNode.outgoers('node[type="vulnerability"]').filter(v => visibleNodes.has(v.id()) || v.id().startsWith('vuln_'));
+            if (hasVulnFilters) {
+                vulnOutgoers = vulnOutgoers.filter(vulnMatchesActiveFilter);
+            }
+
             const isManuallyCollapsed = this.manualCollapsedClusters.has(clusterId);
             const isExpanded = this.expandedClusters.has(clusterId);
             const shouldCollapse = (isManuallyCollapsed || vulnOutgoers.length > CLUSTER_THRESHOLD) && !isExpanded;
@@ -1235,10 +1277,10 @@ class EASMDashboard {
             if (parentNode.length > 0) {
                 const parentPos = parentNode.position();
                 
-                // Get the newly uncollapsed child nodes
+                // Get the newly uncollapsed child nodes that remain visible after applyFilters()
                 const isServiceCluster = options.expandedClusterId.startsWith('cluster_srv_');
                 const childSelector = isServiceCluster ? 'node[type="service"], node[type="http"], node[type="https"]' : 'node[type="vulnerability"]';
-                const children = parentNode.outgoers(childSelector);
+                const children = parentNode.outgoers(childSelector).filter(c => !c.hidden());
                 
                 if (children.length > 0) {
                     const total = children.length;
@@ -2558,15 +2600,15 @@ class EASMDashboard {
                 const parentNode = this.cy.getElementById(parentId);
                 if (parentNode.length > 0) {
                     const srvNodes = parentNode.outgoers('node[type="service"], node[type="http"], node[type="https"]');
+                    const matchingSrvs = srvNodes.filter(srv => srv.outgoers('node[type="vulnerability"]').some(vulnMatchesFilter));
                     const directVulns = parentNode.outgoers('node[type="vulnerability"]');
-                    let hasMatch = directVulns.some(vulnMatchesFilter);
-                    if (!hasMatch) {
-                        srvNodes.forEach(srv => {
-                            if (srv.outgoers('node[type="vulnerability"]').some(vulnMatchesFilter)) {
-                                hasMatch = true;
-                            }
-                        });
+                    let hasMatch = directVulns.some(vulnMatchesFilter) || matchingSrvs.length > 0;
+                    
+                    if (matchingSrvs.length > 0) {
+                        cNode.data('count', matchingSrvs.length);
+                        cNode.data('label', `+ ${matchingSrvs.length} ${matchingSrvs.length === 1 ? 'Service' : 'Services'}`);
                     }
+
                     if (hasMatch || nodesToKeep.has(parentId)) {
                         nodesToKeep.add(cNode.id());
                         nodesToKeep.add(parentId);
@@ -3666,17 +3708,20 @@ class EASMDashboard {
                 }
             });
         } else if (nodeType === 'ip') {
-            const connectedServices = this.findConnectedServices(nodeId, elements);
-            const directVulns = this.findDirectVulnerabilities(nodeId, elements);
+            const clusterSrv = this.cy.getElementById(`cluster_srv_${nodeId}`);
+            const isServicesCollapsed = clusterSrv.length > 0 && !clusterSrv.hidden();
+            let servicesCount = isServicesCollapsed ? (clusterSrv.data('count') || 0) : node.outgoers('node[type="service"], node[type="http"], node[type="https"]').filter(s => !s.hidden()).length;
+            if (servicesCount === 0 && isServicesCollapsed) servicesCount = clusterSrv.data('count') || 0;
 
-            if (connectedServices.length > 0) {
-                const clusterId = `cluster_srv_${nodeId}`;
-                const existingCluster = this.cy.getElementById(clusterId);
-                const isServicesCollapsed = existingCluster.length > 0 && !existingCluster.hidden();
+            const clusterVuln = this.cy.getElementById(`cluster_ip_vuln_${nodeId}`);
+            const isVulnsCollapsed = clusterVuln.length > 0 && !clusterVuln.hidden();
+            let directVulnsCount = isVulnsCollapsed ? (clusterVuln.data('count') || 0) : node.outgoers('node[type="vulnerability"]').filter(v => !v.hidden()).length;
+            if (directVulnsCount === 0 && isVulnsCollapsed) directVulnsCount = clusterVuln.data('count') || 0;
 
+            if (servicesCount > 0 || isServicesCollapsed) {
                 collapseActions.push({
                     id: 'ctx-action-collapse-srv',
-                    label: isServicesCollapsed ? `Uncollapse Services (${connectedServices.length})` : `Collapse Services (${connectedServices.length})`,
+                    label: isServicesCollapsed ? `Uncollapse Services (${servicesCount})` : `Collapse Services (${servicesCount})`,
                     icon: isServicesCollapsed ? 'maximize-2' : 'minimize-2',
                     disabled: false,
                     action: () => {
@@ -3685,14 +3730,10 @@ class EASMDashboard {
                 });
             }
 
-            if (directVulns.length > 0) {
-                const clusterId = `cluster_ip_vuln_${nodeId}`;
-                const existingCluster = this.cy.getElementById(clusterId);
-                const isVulnsCollapsed = existingCluster.length > 0 && !existingCluster.hidden();
-
+            if (directVulnsCount > 0 || isVulnsCollapsed) {
                 collapseActions.push({
                     id: 'ctx-action-collapse-vuln',
-                    label: isVulnsCollapsed ? `Uncollapse Direct Vulnerabilities (${directVulns.length})` : `Collapse Direct Vulnerabilities (${directVulns.length})`,
+                    label: isVulnsCollapsed ? `Uncollapse Direct Vulnerabilities (${directVulnsCount})` : `Collapse Direct Vulnerabilities (${directVulnsCount})`,
                     icon: isVulnsCollapsed ? 'maximize-2' : 'minimize-2',
                     disabled: false,
                     action: () => {
@@ -3711,15 +3752,15 @@ class EASMDashboard {
                 });
             }
         } else if (nodeType === 'service' || nodeType === 'http' || nodeType === 'https') {
-            const connectedVulns = this.findConnectedVulnerabilities(nodeId, elements);
-            if (connectedVulns.length > 0) {
-                const clusterId = `cluster_vuln_${nodeId}`;
-                const existingCluster = this.cy.getElementById(clusterId);
-                const isVulnsCollapsed = existingCluster.length > 0 && !existingCluster.hidden();
+            const clusterVuln = this.cy.getElementById(`cluster_vuln_${nodeId}`);
+            const isVulnsCollapsed = clusterVuln.length > 0 && !clusterVuln.hidden();
+            let vulnsCount = isVulnsCollapsed ? (clusterVuln.data('count') || 0) : node.outgoers('node[type="vulnerability"]').filter(v => !v.hidden()).length;
+            if (vulnsCount === 0 && isVulnsCollapsed) vulnsCount = clusterVuln.data('count') || 0;
 
+            if (vulnsCount > 0 || isVulnsCollapsed) {
                 collapseActions.push({
                     id: 'ctx-action-collapse-srv-vuln',
-                    label: isVulnsCollapsed ? `Uncollapse Vulnerabilities (${connectedVulns.length})` : `Collapse Vulnerabilities (${connectedVulns.length})`,
+                    label: isVulnsCollapsed ? `Uncollapse Vulnerabilities (${vulnsCount})` : `Collapse Vulnerabilities (${vulnsCount})`,
                     icon: isVulnsCollapsed ? 'maximize-2' : 'minimize-2',
                     disabled: false,
                     action: () => {
