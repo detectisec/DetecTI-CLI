@@ -507,19 +507,21 @@ class DatabaseManager:
                     continue
                 proto = (p.get("protocol") or "tcp").lower()
                 service_name = p.get("service_name") or f"service-{port_num}"
+                product = p.get("product") or ""
+                version = p.get("version") or ""
                 banner = p.get("banner") or ""
                 ssl_flag = bool(p.get("ssl", False) or port_num == 443)
                 
                 # Check if this service already exists for this IP
                 s_cursor = conn.execute("""
-                    SELECT id, sources, banner, service_name, ssl 
+                    SELECT id, sources, banner, service_name, product, version, ssl 
                     FROM services 
                     WHERE ip_id = ? AND port = ? AND protocol = ?
                 """, (ip_id, port_num, proto))
                 existing_svc = s_cursor.fetchone()
                 
                 if existing_svc:
-                    svc_id, cur_sources_raw, cur_banner, cur_name, cur_ssl = existing_svc
+                    svc_id, cur_sources_raw, cur_banner, cur_name, cur_prod, cur_ver, cur_ssl = existing_svc
                     sources_list = []
                     if cur_sources_raw:
                         try:
@@ -532,23 +534,27 @@ class DatabaseManager:
                     if "Masscan" not in sources_list:
                         sources_list.append("Masscan")
                     
-                    new_banner = cur_banner or banner
+                    # Update banner if active scan discovered a banner (override if new banner found)
+                    new_banner = banner if banner else (cur_banner or "")
+                    new_name = cur_name if (cur_name and not cur_name.startswith("service-")) else service_name
+                    new_prod = product if product else (cur_prod or "")
+                    new_ver = version if version else (cur_ver or "")
                     new_ssl = cur_ssl or (1 if ssl_flag else 0)
                     
                     conn.execute("""
                         UPDATE services 
-                        SET sources = ?, banner = ?, ssl = ?
+                        SET sources = ?, banner = ?, service_name = ?, product = ?, version = ?, ssl = ?
                         WHERE id = ?
-                    """, (json.dumps(sources_list), new_banner, new_ssl, svc_id))
+                    """, (json.dumps(sources_list), new_banner, new_name, new_prod, new_ver, new_ssl, svc_id))
                     updated_services += 1
                 else:
                     # Insert new service
                     new_svc_id = str(uuid.uuid4())
                     sources_json = json.dumps(["Masscan"])
                     conn.execute("""
-                        INSERT INTO services (id, ip_id, port, protocol, service_name, banner, ssl, sources)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (new_svc_id, ip_id, port_num, proto, service_name, banner, 1 if ssl_flag else 0, sources_json))
+                        INSERT INTO services (id, ip_id, port, protocol, service_name, product, version, banner, ssl, sources)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (new_svc_id, ip_id, port_num, proto, service_name, product, version, banner, 1 if ssl_flag else 0, sources_json))
                     added_services += 1
             
             # 3. Update scan_results metadata if present

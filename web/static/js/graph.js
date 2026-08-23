@@ -3464,6 +3464,12 @@ class EASMDashboard {
                     <span class="key">SSL/TLS:</span>
                     <span class="value">${data.ssl ? 'Yes' : 'No'}</span>
                 </div>
+                ${data.banner ? `
+                <div class="property banner-property" style="flex-direction: column; align-items: flex-start; gap: 0.25rem;">
+                    <span class="key" style="margin-bottom: 0.2rem;">Banner:</span>
+                    <pre class="service-banner-preview" style="background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 0.5rem 0.65rem; font-family: var(--font-mono, monospace); font-size: 0.76rem; color: #38bdf8; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; width: 100%; margin: 0;">${this.escapeHtml(data.banner)}</pre>
+                </div>
+                ` : ''}
                 ${data.is_active_only ? `
                 <div class="property">
                     <span class="key">Discovery:</span>
@@ -4332,9 +4338,19 @@ class EASMDashboard {
 
         const targetsHtml = Array.from(this.markedTargets).map(ip => {
             const statusObj = this.targetStatuses[ip] || { status: 'idle', ports_count: 0 };
-            const status = statusObj.status || 'idle';
-            const portsCount = statusObj.ports_count || (statusObj.ports ? statusObj.ports.length : 0);
-            const isScanning = status === 'scanning';
+            const portsList = Array.isArray(statusObj.ports) ? statusObj.ports : [];
+            const portsTagsHtml = portsList.length > 0 ? `
+                <div class="target-card-ports-chips" style="display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem;">
+                    ${portsList.slice(0, 8).map(p => {
+                        const pNum = p.port;
+                        const pProto = p.protocol || 'tcp';
+                        const pBanner = p.banner ? p.banner.trim() : '';
+                        const pTooltip = pBanner ? `Port ${pNum}/${pProto} - Banner: ${pBanner.substring(0, 100)}` : `Port ${pNum}/${pProto} (${p.service_name || 'open'})`;
+                        return `<span class="port-chip" style="background: rgba(168, 85, 247, 0.18); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.72rem; font-family: var(--font-mono, monospace);" title="${this.escapeHtml(pTooltip)}">${pNum}/${pProto}</span>`;
+                    }).join('')}
+                    ${portsList.length > 8 ? `<span style="color: var(--text-muted); font-size: 0.7rem; align-self: center;">+${portsList.length - 8} more</span>` : ''}
+                </div>
+            ` : '';
 
             return `
                 <div class="target-card-item" data-ip="${ip}">
@@ -4347,6 +4363,7 @@ class EASMDashboard {
                             <span>Discovered Ports: <strong style="color: #00f0ff;">${portsCount}</strong></span>
                             ${statusObj.error ? `<span style="color: #ef4444;" title="${statusObj.error}">Error</span>` : ''}
                         </div>
+                        ${portsTagsHtml}
                     </div>
                     <div class="target-card-actions">
                         ${isScanning ? `

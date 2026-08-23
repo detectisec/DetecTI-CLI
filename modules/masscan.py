@@ -172,7 +172,7 @@ class MasscanRunner:
                 pass
 
     def _parse_json_file(self, filepath: str, default_ip: str) -> List[Dict[str, Any]]:
-        """Parse masscan JSON output safely, fixing common JSON syntax edge cases."""
+        """Parse masscan JSON output safely, consolidating port records and extracting banners."""
         if not os.path.exists(filepath):
             return []
 
@@ -193,7 +193,8 @@ class MasscanRunner:
                 content += "\n]"
 
             data = json.loads(content)
-            results: List[Dict[str, Any]] = []
+            # Use dictionary keyed by (ip, port, proto) to merge duplicate masscan records (status + banners)
+            merged_ports: Dict[tuple, Dict[str, Any]] = {}
 
             for item in data:
                 ip = item.get("ip", default_ip)
@@ -210,21 +211,44 @@ class MasscanRunner:
                     service_name = service_info.get("name") if isinstance(service_info, dict) else None
                     banner = service_info.get("banner") if isinstance(service_info, dict) else None
 
-                    # Infer basic service name if not provided
-                    if not service_name:
-                        service_name = self._infer_service_name(port_num)
+                    key = (ip, int(port_num), proto)
+                    if key not in merged_ports:
+                        inferred_name = service_name or self._infer_service_name(int(port_num))
+                        merged_ports[key] = {
+                            "ip": ip,
+                            "port": int(port_num),
+                            "protocol": proto,
+                            "status": status,
+                            "ttl": ttl,
+                            "service_name": inferred_name,
+                            "product": "",
+                            "version": "",
+                            "banner": banner or "",
+                            "ssl": (int(port_num) == 443 or "https" in (inferred_name or "").lower() or "ssl" in (inferred_name or "").lower()),
+                            "source": "Masscan",
+                        }
+                    else:
+                        entry = merged_ports[key]
+                        if status:
+                            entry["status"] = status
+                        if ttl:
+                            entry["ttl"] = ttl
+                        if service_name and (not entry["service_name"] or entry["service_name"].startswith("service-")):
+                            entry["service_name"] = service_name
+                        if banner and len(banner) > len(entry.get("banner", "")):
+                            entry["banner"] = banner
+                        if int(port_num) == 443 or "https" in (entry["service_name"] or "").lower() or "ssl" in (entry["service_name"] or "").lower() or (service_name and "ssl" in service_name.lower()):
+                            entry["ssl"] = True
 
-                    results.append({
-                        "ip": ip,
-                        "port": int(port_num),
-                        "protocol": proto,
-                        "status": status,
-                        "ttl": ttl,
-                        "service_name": service_name,
-                        "banner": banner or "",
-                        "ssl": (port_num == 443 or "https" in (service_name or "").lower() or "ssl" in (service_name or "").lower()),
-                        "source": "Masscan",
-                    })
+            # Extract product and version from banner if available
+            results: List[Dict[str, Any]] = []
+            for entry in merged_ports.values():
+                banner_str = entry.get("banner", "")
+                if banner_str:
+                    prod, ver = self._extract_product_version(banner_str, entry["port"])
+                    entry["product"] = prod
+                    entry["version"] = ver
+                results.append(entry)
 
             # Sort by port number
             results.sort(key=lambda x: x["port"])
@@ -233,6 +257,46 @@ class MasscanRunner:
         except Exception as e:
             logger.warning(f"Error parsing masscan JSON output: {e}")
             return []
+
+    @staticmethod
+    def _extract_product_version(banner: str, port: int) -> tuple[str, str]:
+        """Extract product name and version string from banner."""
+        import re
+        if not banner:
+            return "", ""
+        
+        banner_clean = banner.strip()
+        
+        # 1. HTTP Server Header: Server: <name>/<version>
+        server_m = re.search(r"Server:\s*([^\r\n]+)", banner_clean, re.IGNORECASE)
+        if server_m:
+            server_val = server_m.group(1).strip()
+            parts = server_val.split("/", 1)
+            prod = parts[0].strip()
+            ver = ""
+            if len(parts) > 1:
+                ver = parts[1].split()[0].strip()
+            return prod, ver
+        
+        # 2. SSH Banner: SSH-2.0-OpenSSH_8.9p1 Ubuntu
+        if banner_clean.startswith("SSH-"):
+            parts = banner_clean.split("-", 2)
+            if len(parts) >= 3:
+                prod_ver = parts[2].split()[0].strip()
+                if "_" in prod_ver:
+                    p, v = prod_ver.split("_", 1)
+                    return p, v
+                return prod_ver, ""
+
+        # 3. Simple banner like 'cloudflare' or 'nginx'
+        first_line = banner_clean.splitlines()[0].strip() if banner_clean else ""
+        if len(first_line) < 40 and not first_line.startswith("HTTP/"):
+            parts = first_line.split("/", 1)
+            if len(parts) == 2:
+                return parts[0].strip(), parts[1].split()[0].strip()
+            return first_line, ""
+
+        return "", ""
 
     @staticmethod
     def _infer_service_name(port: int) -> str:
