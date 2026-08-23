@@ -287,20 +287,20 @@ class DatabaseManager:
                 stats['open_services'] = 0
             
             try:
-                # Count vulnerabilities
-                cursor = conn.execute("SELECT COUNT(*) FROM vulnerabilities")
+                # Count unique vulnerabilities by CVE ID
+                cursor = conn.execute("SELECT COUNT(DISTINCT cve_id) FROM vulnerabilities")
                 stats['total_vulnerabilities'] = cursor.fetchone()[0]
             except Exception:
                 stats['total_vulnerabilities'] = 0
             
             try:
-                cursor = conn.execute("SELECT COUNT(*) FROM vulnerabilities WHERE is_cisa_kev = 1")
+                cursor = conn.execute("SELECT COUNT(DISTINCT cve_id) FROM vulnerabilities WHERE is_cisa_kev = 1")
                 stats['cisa_kev_count'] = cursor.fetchone()[0]
             except Exception:
                 stats['cisa_kev_count'] = 0
             
             try:
-                cursor = conn.execute("SELECT COUNT(*) FROM vulnerabilities WHERE epss_score > 0.5")
+                cursor = conn.execute("SELECT COUNT(DISTINCT cve_id) FROM vulnerabilities WHERE epss_score > 0.5")
                 stats['high_epss_count'] = cursor.fetchone()[0]
             except Exception:
                 stats['high_epss_count'] = 0

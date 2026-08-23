@@ -577,10 +577,20 @@ class EASMDashboard {
                 }
             });
             
-            // Remove duplicates
-            const uniqueVulns = vulnerabilities.filter((vuln, index, self) => 
-                index === self.findIndex(v => v.id === vuln.id)
-            );
+            // Remove duplicates by CVE ID or ID
+            const seenCveKeys = new Set();
+            const uniqueVulns = [];
+            vulnerabilities.forEach(v => {
+                const cveKey = (v.cve_id || v.label || v.name || v.id || '').trim().toUpperCase();
+                if (cveKey && cveKey !== 'UNKNOWN') {
+                    if (!seenCveKeys.has(cveKey)) {
+                        seenCveKeys.add(cveKey);
+                        uniqueVulns.push(v);
+                    }
+                } else if (!uniqueVulns.some(uv => uv.id === v.id)) {
+                    uniqueVulns.push(v);
+                }
+            });
             
             return uniqueVulns;
         } catch (error) {
@@ -2795,35 +2805,45 @@ class EASMDashboard {
         const criticalVulns = connectedVulns.filter(v => String(v.severity || '').toUpperCase() === 'CRITICAL');
         const criticalCount = criticalVulns.length;
         
-        // Extract all exploits from connected vulnerabilities
+        // Extract all exploits from connected vulnerabilities without duplicates
         const allExploits = [];
+        const seenExploitKeys = new Set();
         connectedVulns.forEach(vuln => {
+            const cveId = vuln.cve_id || vuln.label || vuln.name || 'Unknown CVE';
             if (vuln.exploits && Array.isArray(vuln.exploits) && vuln.exploits.length > 0) {
                 vuln.exploits.forEach(exp => {
-                    allExploits.push({
-                        cve_id: vuln.cve_id || vuln.label || vuln.name || 'Unknown CVE',
-                        vuln_id: vuln.id,
-                        title: exp.title || `Exploit for ${vuln.cve_id || vuln.label}`,
-                        source: exp.source || 'Exploit',
-                        url: exp.url || '#',
-                        verified: Boolean(exp.verified),
-                        author: exp.author || '',
-                        date: exp.date || '',
-                        exploit_type: exp.exploit_type || ''
-                    });
+                    const expKey = `${cveId}_${exp.url || exp.title || exp.source}`;
+                    if (!seenExploitKeys.has(expKey)) {
+                        seenExploitKeys.add(expKey);
+                        allExploits.push({
+                            cve_id: cveId,
+                            vuln_id: vuln.id,
+                            title: exp.title || `Exploit for ${cveId}`,
+                            source: exp.source || 'Exploit',
+                            url: exp.url || '#',
+                            verified: Boolean(exp.verified),
+                            author: exp.author || '',
+                            date: exp.date || '',
+                            exploit_type: exp.exploit_type || ''
+                        });
+                    }
                 });
             } else if ((vuln.exploit_count || 0) > 0) {
-                allExploits.push({
-                    cve_id: vuln.cve_id || vuln.label || vuln.name || 'Unknown CVE',
-                    vuln_id: vuln.id,
-                    title: `Exploit for ${vuln.cve_id || vuln.label}`,
-                    source: 'Public PoC',
-                    url: '#',
-                    verified: false,
-                    author: '',
-                    date: '',
-                    exploit_type: 'PoC'
-                });
+                const expKey = `${cveId}_poc_default`;
+                if (!seenExploitKeys.has(expKey)) {
+                    seenExploitKeys.add(expKey);
+                    allExploits.push({
+                        cve_id: cveId,
+                        vuln_id: vuln.id,
+                        title: `Exploit for ${cveId}`,
+                        source: 'Public PoC',
+                        url: '#',
+                        verified: false,
+                        author: '',
+                        date: '',
+                        exploit_type: 'PoC'
+                    });
+                }
             }
         });
         const pocCount = allExploits.length || connectedVulns.filter(v => (v.exploit_count || 0) > 0).length;
