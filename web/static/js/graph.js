@@ -3370,155 +3370,145 @@ class EASMDashboard {
             const kevBadge = data.is_cisa_kev === true ? '<span class="vulnerability-badge kev">CISA KEV</span>' : '';
             const severityClass = (data.severity || 'unknown').toLowerCase();
             
-            // Resolve connected service, host IP, and associated domain/subdomain
-            let serviceNodeId = data.service_id;
-            let ipNodeId = data.ip_id;
-            let ipAddress = data.ip;
-            let orgInfo = (data.org && data.org !== 'Unknown') ? data.org : '';
-            if (data.country && data.country !== 'Unknown') {
-                orgInfo = orgInfo ? `${orgInfo} [${data.country}]` : data.country;
-            }
-            if (data.asn && data.asn !== 'Unknown') {
-                orgInfo = orgInfo ? `${orgInfo} (${data.asn})` : data.asn;
-            }
-
-            let servicePort = data.port;
-            let serviceProtocol = data.protocol;
-            let serviceName = data.service;
-            let serviceProduct = data.product;
-            let serviceVersion = data.version;
-            let serviceUrl = data.url;
-            let serviceSsl = data.ssl;
-
-            // Traverse Cytoscape graph or elements to resolve complete hierarchy if not already populated
-            let connectedServiceNode = null;
-            let connectedIpNode = null;
+            // Resolve connected service(s), host IP(s), and associated domain(s)
+            const associatedServices = [];
+            const associatedHosts = [];
             const associatedDomains = new Set();
 
             if (elements && Array.isArray(elements.edges) && Array.isArray(elements.nodes)) {
-                // 1. Find edge HAS_VULN connected to this vulnerability
-                const vulnEdge = elements.edges.find(e => e && e.data && e.data.target === data.id && e.data.label === 'HAS_VULN');
-                if (vulnEdge) {
+                // Find all incoming HAS_VULN edges connected to this vulnerability node
+                const vulnEdges = elements.edges.filter(e => e && e.data && e.data.target === data.id && e.data.label === 'HAS_VULN');
+                
+                vulnEdges.forEach(vulnEdge => {
                     const sourceNode = elements.nodes.find(n => n && n.data && n.data.id === vulnEdge.data.source);
                     if (sourceNode && sourceNode.data) {
                         if (['service', 'http', 'https'].includes(sourceNode.data.type)) {
-                            connectedServiceNode = sourceNode.data;
-                            serviceNodeId = sourceNode.data.id;
-                            servicePort = servicePort || sourceNode.data.port;
-                            serviceProtocol = serviceProtocol || sourceNode.data.protocol;
-                            serviceName = serviceName || sourceNode.data.service;
-                            serviceProduct = serviceProduct || sourceNode.data.product;
-                            serviceVersion = serviceVersion || sourceNode.data.version;
-                            serviceUrl = serviceUrl || sourceNode.data.url;
-                            serviceSsl = serviceSsl || sourceNode.data.ssl;
-
+                            const sData = sourceNode.data;
+                            
                             // Find IP exposing this service
-                            const srvEdge = elements.edges.find(e => e && e.data && e.data.target === sourceNode.data.id && e.data.label === 'EXPOSES');
+                            let srvIp = null;
+                            const srvEdge = elements.edges.find(e => e && e.data && e.data.target === sData.id && e.data.label === 'EXPOSES');
                             if (srvEdge) {
                                 const ipNode = elements.nodes.find(n => n && n.data && n.data.id === srvEdge.data.source);
                                 if (ipNode && ipNode.data) {
-                                    connectedIpNode = ipNode.data;
-                                    ipNodeId = ipNode.data.id;
-                                    ipAddress = ipAddress || ipNode.data.ip || ipNode.data.name || ipNode.data.label;
-                                    if (!orgInfo && ipNode.data.org) orgInfo = ipNode.data.org;
+                                    srvIp = ipNode.data;
+                                    if (!associatedHosts.some(h => h.id === srvIp.id)) {
+                                        associatedHosts.push(srvIp);
+                                    }
                                 }
                             }
+
+                            associatedServices.push({
+                                id: sData.id,
+                                port: sData.port,
+                                protocol: sData.protocol,
+                                service: sData.service,
+                                product: sData.product,
+                                version: sData.version,
+                                url: sData.url,
+                                ssl: sData.ssl,
+                                ip: srvIp ? (srvIp.ip || srvIp.name || srvIp.label) : (sData.ip || ''),
+                                ip_id: srvIp ? srvIp.id : (sData.ip_id || null)
+                            });
                         } else if (sourceNode.data.type === 'ip') {
-                            connectedIpNode = sourceNode.data;
-                            ipNodeId = sourceNode.data.id;
-                            ipAddress = ipAddress || sourceNode.data.ip || sourceNode.data.name || sourceNode.data.label;
-                            if (!orgInfo && sourceNode.data.org) orgInfo = sourceNode.data.org;
+                            const ipData = sourceNode.data;
+                            if (!associatedHosts.some(h => h.id === ipData.id)) {
+                                associatedHosts.push(ipData);
+                            }
                         }
                     }
-                }
+                });
 
-                // If we know the IP node ID, find any subdomains / domains associated with it
-                if (ipNodeId) {
+                // Find associated domains / subdomains for all connected hosts
+                associatedHosts.forEach(hostData => {
+                    const hId = hostData.id;
                     elements.edges.forEach(e => {
                         if (e && e.data) {
-                            // IP -> Subdomain (HAS_SUBDOMAIN)
-                            if (e.data.source === ipNodeId && e.data.label === 'HAS_SUBDOMAIN') {
+                            if (e.data.source === hId && e.data.label === 'HAS_SUBDOMAIN') {
                                 const subNode = elements.nodes.find(n => n && n.data && n.data.id === e.data.target);
-                                if (subNode && subNode.data) {
-                                    associatedDomains.add(subNode.data.name || subNode.data.label);
-                                }
+                                if (subNode && subNode.data) associatedDomains.add(subNode.data.name || subNode.data.label);
                             }
-                            // Subdomain -> IP (RESOLVES_TO)
-                            if (e.data.target === ipNodeId && e.data.label === 'RESOLVES_TO') {
+                            if (e.data.target === hId && e.data.label === 'RESOLVES_TO') {
                                 const subNode = elements.nodes.find(n => n && n.data && n.data.id === e.data.source);
-                                if (subNode && subNode.data) {
-                                    associatedDomains.add(subNode.data.name || subNode.data.label);
-                                }
+                                if (subNode && subNode.data) associatedDomains.add(subNode.data.name || subNode.data.label);
                             }
                         }
                     });
-                }
+                });
             }
 
-            // Build URL for web service if not set
-            if (!serviceUrl && servicePort) {
-                const isHttp = (serviceName && serviceName.toLowerCase().includes('http')) || [80, 443, 8080, 8443, 8000].includes(parseInt(servicePort));
-                if (isHttp) {
-                    const hostForUrl = associatedDomains.size > 0 ? Array.from(associatedDomains)[0] : ipAddress;
-                    if (hostForUrl) {
-                        const isHttps = serviceSsl || [443, 8443].includes(parseInt(servicePort));
-                        const scheme = isHttps ? 'https' : 'http';
-                        const portSuffix = ((scheme === 'http' && servicePort == 80) || (scheme === 'https' && servicePort == 443)) ? '' : `:${servicePort}`;
-                        serviceUrl = `${scheme}://${hostForUrl}${portSuffix}`;
-                    }
-                }
-            }
-
-            // Build Host & Service Section
+            // Build Host & Service Section HTML
             let hostAndServiceHtml = '';
             const domainsList = Array.from(associatedDomains);
             const domainBadgeHtml = domainsList.length > 0 
                 ? domainsList.map(d => `<span class="mini-badge" style="background: rgba(0,212,255,0.15); color: #00d4ff; font-family: monospace;">${d}</span>`).join(' ')
                 : '';
 
-            hostAndServiceHtml = `
-                <h4 style="margin-top: 15px; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px; color: #00d4ff;">Associated Host & Target</h4>
-                
-                ${ipAddress ? `
+            let hostsListHtml = '';
+            if (associatedHosts.length > 0) {
+                hostsListHtml = associatedHosts.map(h => {
+                    const hIp = h.ip || h.name || h.label || 'Unknown IP';
+                    const hOrg = [h.org, h.country ? `[${h.country}]` : '', h.asn ? `(${h.asn})` : ''].filter(Boolean).join(' ');
+                    return `
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; margin-bottom: 4px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 4px;">
+                        <div>
+                            <span style="color: #00d4ff; font-weight: bold; font-family: monospace;">${hIp}</span>
+                            ${hOrg ? `<span style="color: #94a3b8; font-size: 0.78rem; margin-left: 6px;">${hOrg}</span>` : ''}
+                        </div>
+                        <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.72rem;" onclick="window.dashboard.focusNode('${h.id}')"><i data-lucide="crosshair" class="badge-icon"></i> Focus</button>
+                    </div>`;
+                }).join('');
+            } else if (data.ip) {
+                hostsListHtml = `
                 <div class="property">
                     <span class="key">Host / IP Address:</span>
-                    <span class="value" style="color: #00d4ff; font-weight: bold;">${ipAddress}</span>
+                    <span class="value" style="color: #00d4ff; font-weight: bold;">${data.ip}</span>
+                </div>`;
+            }
+
+            let servicesListHtml = '';
+            if (associatedServices.length > 0) {
+                servicesListHtml = associatedServices.map(s => {
+                    const sPort = s.port ? `${s.port}/${(s.protocol || 'tcp').toUpperCase()}` : 'Port N/A';
+                    const sDesc = [s.service, s.product, s.version ? `v${s.version}` : ''].filter(Boolean).join(' - ') || 'Unknown';
+                    return `
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; margin-bottom: 4px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 4px;">
+                        <div>
+                            <span style="color: #ffa502; font-weight: bold; font-family: monospace;">${sPort}</span>
+                            <span style="color: #cbd5e1; font-size: 0.82rem; margin-left: 6px;">${sDesc}</span>
+                            ${s.ip ? `<span style="color: #64748b; font-size: 0.75rem; margin-left: 4px;">(${s.ip})</span>` : ''}
+                        </div>
+                        <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.72rem;" onclick="window.dashboard.focusNode('${s.id}')"><i data-lucide="crosshair" class="badge-icon"></i> Focus</button>
+                    </div>`;
+                }).join('');
+            } else if (data.port) {
+                servicesListHtml = `
+                <div class="property">
+                    <span class="key">Affected Port / Protocol:</span>
+                    <span class="value" style="color: #ffa502; font-weight: bold;">${data.port}/${(data.protocol || 'tcp').toUpperCase()}</span>
+                </div>`;
+            }
+
+            hostAndServiceHtml = `
+                <h4 style="margin-top: 15px; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px; color: #00d4ff;">Affected Targets & Services</h4>
+                
+                ${hostsListHtml ? `
+                <div style="margin-bottom: 8px;">
+                    <span class="key" style="display: block; margin-bottom: 4px; font-weight: 500;">Affected Host(s):</span>
+                    ${hostsListHtml}
+                </div>` : ''}
+
+                ${servicesListHtml ? `
+                <div style="margin-bottom: 8px;">
+                    <span class="key" style="display: block; margin-bottom: 4px; font-weight: 500;">Affected Service(s):</span>
+                    ${servicesListHtml}
                 </div>` : ''}
 
                 ${domainBadgeHtml ? `
-                <div class="property" style="flex-direction: column; align-items: flex-start; gap: 4px;">
+                <div class="property" style="flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px;">
                     <span class="key">Associated Domain(s):</span>
                     <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">${domainBadgeHtml}</div>
                 </div>` : ''}
-
-                ${orgInfo ? `
-                <div class="property">
-                    <span class="key">Organization / Network:</span>
-                    <span class="value">${orgInfo}</span>
-                </div>` : ''}
-
-                ${servicePort ? `
-                <div class="property">
-                    <span class="key">Affected Port / Protocol:</span>
-                    <span class="value" style="color: #ffa502; font-weight: bold;">${servicePort}/${(serviceProtocol || 'tcp').toUpperCase()}</span>
-                </div>` : ''}
-
-                ${(serviceName || serviceProduct || serviceVersion) ? `
-                <div class="property">
-                    <span class="key">Service / Product:</span>
-                    <span class="value">${[serviceName, serviceProduct, serviceVersion ? `v${serviceVersion}` : ''].filter(Boolean).join(' - ') || 'Unknown'}</span>
-                </div>` : ''}
-
-                ${serviceUrl ? `
-                <div class="property">
-                    <span class="key">Service URL:</span>
-                    <span class="value"><a href="${serviceUrl}" target="_blank" rel="noopener" style="color: #00d4ff; text-decoration: underline; word-break: break-all;">${serviceUrl}</a></span>
-                </div>` : ''}
-
-                <div class="risk-card-links" style="margin: 8px 0 12px 0; border-top: none;">
-                    ${ipNodeId ? `<button type="button" class="risk-focus-btn" onclick="window.dashboard.focusNode('${ipNodeId}')"><i data-lucide="crosshair" class="badge-icon"></i> Focus Host (${ipAddress || 'IP'})</button>` : ''}
-                    ${serviceNodeId ? `<button type="button" class="risk-focus-btn" onclick="window.dashboard.focusNode('${serviceNodeId}')"><i data-lucide="crosshair" class="badge-icon"></i> Focus Service</button>` : ''}
-                </div>
             `;
             
             // Build exploits/PoCs section with GitHub and ExploitDB separation

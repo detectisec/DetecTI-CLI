@@ -402,9 +402,16 @@ class GraphBuilder:
         return nodes, edges
     
     def _build_vulnerability_nodes(self, conn: sqlite3.Connection) -> tuple[List[Dict], List[Dict]]:
-        """Build vulnerability nodes with risk indicators and PoC information."""
+        """Build vulnerability nodes with risk indicators and PoC information.
+        
+        Consolidates vulnerability nodes by CVE ID (or vuln ID) so that identical
+        vulnerabilities affecting multiple services or IPs share a single node on the graph
+        with incoming HAS_VULN edges from each affected service/IP.
+        """
         nodes = []
         edges = []
+        seen_vuln_node_ids = set()
+        seen_edge_ids = set()
         
         try:
             cursor = conn.execute("""
@@ -430,6 +437,9 @@ class GraphBuilder:
                 
                 # Build vulnerability label - keep it simple with just CVE ID
                 label = cve_id or "Unknown CVE"
+                # Use normalized CVE node ID if available to merge identical CVEs into one node
+                clean_cve = (cve_id or "").strip()
+                node_id = f"vuln_{clean_cve.replace(' ', '_').lower()}" if clean_cve and clean_cve.upper() != "UNKNOWN" else f"vuln_{vuln_id}"
                 
                 # Determine risk level for styling
                 risk_level = "low"
@@ -442,75 +452,84 @@ class GraphBuilder:
                 elif severity == "MEDIUM":
                     risk_level = "medium"
                 
-                # Get exploit details for this vulnerability
-                exploit_cursor = conn.execute("""
-                    SELECT title, source, url, verified, author, date, exploit_type
-                    FROM exploits WHERE vulnerability_id = ?
-                """, (vuln_id,))
-                
-                exploits = []
-                for exploit_row in exploit_cursor.fetchall():
-                    exploits.append({
-                        "title": exploit_row[0],
-                        "source": exploit_row[1],
-                        "url": exploit_row[2],
-                        "verified": bool(exploit_row[3]),
-                        "author": exploit_row[4],
-                        "date": exploit_row[5],
-                        "exploit_type": exploit_row[6]
+                # Only construct the node data once per unique CVE
+                if node_id not in seen_vuln_node_ids:
+                    seen_vuln_node_ids.add(node_id)
+                    
+                    # Get exploit details for this vulnerability
+                    exploit_cursor = conn.execute("""
+                        SELECT title, source, url, verified, author, date, exploit_type
+                        FROM exploits WHERE vulnerability_id = ?
+                    """, (vuln_id,))
+                    
+                    exploits = []
+                    for exploit_row in exploit_cursor.fetchall():
+                        exploits.append({
+                            "title": exploit_row[0],
+                            "source": exploit_row[1],
+                            "url": exploit_row[2],
+                            "verified": bool(exploit_row[3]),
+                            "author": exploit_row[4],
+                            "date": exploit_row[5],
+                            "exploit_type": exploit_row[6]
+                        })
+                    
+                    nodes.append({
+                        "data": {
+                            "id": node_id,
+                            "label": label,
+                            "type": "vulnerability",
+                            "cve_id": cve_id or "Unknown",
+                            "severity": severity or "UNKNOWN",
+                            "cvss_score": cvss_score or 0,
+                            "epss_score": epss_score or 0,
+                            "is_cisa_kev": bool(is_cisa_kev),
+                            "risk_level": risk_level,
+                            "description": description or "",
+                            "exploit_count": exploit_count,
+                            "exploits": exploits,
+                            "has_pocs": exploit_count > 0,
+                            "ip": ip_address or "",
+                            "ip_id": f"ip_{resolved_ip_id}" if resolved_ip_id else (f"ip_{ip_id}" if ip_id else None),
+                            "org": org or "",
+                            "country": country or "",
+                            "asn": asn or "",
+                            "service_id": f"srv_{service_id}" if service_id else None,
+                            "port": port,
+                            "protocol": protocol,
+                            "service": service_name or "",
+                            "product": product or "",
+                            "version": version or "",
+                            "url": url or "",
+                            "ssl": bool(ssl) if ssl is not None else False
+                        }
                     })
                 
-                nodes.append({
-                    "data": {
-                        "id": f"vuln_{vuln_id}",
-                        "label": label,
-                        "type": "vulnerability",
-                        "cve_id": cve_id or "Unknown",
-                        "severity": severity or "UNKNOWN",
-                        "cvss_score": cvss_score or 0,
-                        "epss_score": epss_score or 0,
-                        "is_cisa_kev": bool(is_cisa_kev),
-                        "risk_level": risk_level,
-                        "description": description or "",
-                        "exploit_count": exploit_count,
-                        "exploits": exploits,
-                        "has_pocs": exploit_count > 0,
-                        "ip": ip_address or "",
-                        "ip_id": f"ip_{resolved_ip_id}" if resolved_ip_id else (f"ip_{ip_id}" if ip_id else None),
-                        "org": org or "",
-                        "country": country or "",
-                        "asn": asn or "",
-                        "service_id": f"srv_{service_id}" if service_id else None,
-                        "port": port,
-                        "protocol": protocol,
-                        "service": service_name or "",
-                        "product": product or "",
-                        "version": version or "",
-                        "url": url or "",
-                        "ssl": bool(ssl) if ssl is not None else False
-                    }
-                })
-                
-                # ALWAYS prioritize service-level connection if service_id exists (Services -> Vulnerabilities)
+                # Create HAS_VULN edge from Service or IP to the deduplicated Vulnerability node
                 if service_id:
-                    edges.append({
-                        "data": {
-                            "id": f"e_srv_vuln_{service_id}_{vuln_id}",
-                            "source": f"srv_{service_id}",
-                            "target": f"vuln_{vuln_id}",
-                            "label": "HAS_VULN"
-                        }
-                    })
-                # Only connect directly to IP if no service association exists (IP -> Vulnerabilities)
+                    edge_id = f"e_srv_vuln_{service_id}_{node_id}"
+                    if edge_id not in seen_edge_ids:
+                        seen_edge_ids.add(edge_id)
+                        edges.append({
+                            "data": {
+                                "id": edge_id,
+                                "source": f"srv_{service_id}",
+                                "target": node_id,
+                                "label": "HAS_VULN"
+                            }
+                        })
                 elif ip_id:
-                    edges.append({
-                        "data": {
-                            "id": f"e_ip_vuln_{ip_id}_{vuln_id}",
-                            "source": f"ip_{ip_id}",
-                            "target": f"vuln_{vuln_id}",
-                            "label": "HAS_VULN"
-                        }
-                    })
+                    edge_id = f"e_ip_vuln_{ip_id}_{node_id}"
+                    if edge_id not in seen_edge_ids:
+                        seen_edge_ids.add(edge_id)
+                        edges.append({
+                            "data": {
+                                "id": edge_id,
+                                "source": f"ip_{ip_id}",
+                                "target": node_id,
+                                "label": "HAS_VULN"
+                            }
+                        })
         except Exception as e:
             print(f"Error building vulnerability nodes: {e}")
         
