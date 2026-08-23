@@ -224,6 +224,7 @@ class EASMDashboard {
             updateMetric('subdomains-count', summary.total_subdomains);
             updateMetric('ips-count', summary.total_ips);
             updateMetric('services-count', summary.open_services);
+            updateMetric('verified-services-count', summary.verified_services !== undefined ? summary.verified_services : 0);
             updateMetric('vulns-count', summary.total_vulnerabilities);
             updateMetric('kev-count', summary.cisa_kev_count);
             
