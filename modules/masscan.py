@@ -14,6 +14,9 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("detecti.masscan")
 
 
+DEFAULT_HTTP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
+
 class MasscanRunner:
     """Async Masscan execution engine for targeted active port scanning."""
 
@@ -89,9 +92,10 @@ class MasscanRunner:
         if disable_ping:
             cmd.append("-Pn")
 
-        # Banner grabbing
+        # Banner grabbing & HTTP User-Agent evasion
         if banners:
             cmd.append("--banners")
+            cmd.extend(["--http-user-agent", DEFAULT_HTTP_USER_AGENT])
 
         # Custom flags
         if custom_flags:
