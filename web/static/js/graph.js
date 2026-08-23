@@ -4653,10 +4653,13 @@ class EASMDashboard {
         const scanIndicator = document.getElementById('target-scan-indicator');
 
         // Check if any target is currently scanning
-        const isAnyScanning = Object.values(this.targetStatuses).some(t => 
-            t.status === 'scanning' || t.status === 'running' || 
+        const isAnyMasscanRunning = Object.values(this.targetStatuses).some(t => 
+            t.status === 'scanning' || t.status === 'running'
+        );
+        const isAnyNucleiRunning = Object.values(this.targetStatuses).some(t => 
             t.nuclei_status === 'scanning' || t.nuclei_status === 'running'
         );
+        const isAnyScanning = isAnyMasscanRunning || isAnyNucleiRunning;
 
         if (targetBtn) {
             if (isAnyScanning) {
@@ -4668,6 +4671,38 @@ class EASMDashboard {
 
         if (scanIndicator) {
             scanIndicator.style.display = isAnyScanning ? 'inline-flex' : 'none';
+        }
+
+        // Update Masscan "Scan All Ports" / "Stop All Ports" button
+        const scanAllBtn = document.getElementById('btn-scan-all-targets');
+        if (scanAllBtn) {
+            if (isAnyMasscanRunning) {
+                scanAllBtn.classList.add('btn-scan-stopping');
+                scanAllBtn.innerHTML = '<i data-lucide="square" class="ui-icon" style="width: 14px; height: 14px;"></i><span>Stop All Ports</span>';
+                scanAllBtn.title = 'Stop all running Masscan port scans';
+            } else {
+                scanAllBtn.classList.remove('btn-scan-stopping');
+                scanAllBtn.innerHTML = '<i data-lucide="play" class="ui-icon"></i><span>Scan All Ports</span>';
+                scanAllBtn.title = 'Run active port scan on all marked targets';
+            }
+        }
+
+        // Update Nuclei "Run Nuclei on All Targets" / "Stop Nuclei on All" button
+        const runAllNucleiBtn = document.getElementById('btn-run-all-nuclei');
+        if (runAllNucleiBtn) {
+            if (isAnyNucleiRunning) {
+                runAllNucleiBtn.classList.add('btn-scan-stopping');
+                runAllNucleiBtn.innerHTML = '<i data-lucide="square" class="ui-icon" style="width: 14px; height: 14px;"></i><span>Stop Nuclei Scan</span>';
+                runAllNucleiBtn.title = 'Stop all running Nuclei scans';
+            } else {
+                runAllNucleiBtn.classList.remove('btn-scan-stopping');
+                runAllNucleiBtn.innerHTML = '<i data-lucide="shield-alert" class="ui-icon"></i><span>Run Nuclei on All Targets</span>';
+                runAllNucleiBtn.title = 'Run Nuclei vulnerability scan on all targets';
+            }
+        }
+
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
         }
 
         if (badge) {
@@ -4869,19 +4904,33 @@ class EASMDashboard {
             });
         });
 
-        // Scan All Ports button
+        // Scan All Ports button (toggles start vs stop)
         const scanAllBtn = document.getElementById('btn-scan-all-targets');
         if (scanAllBtn) {
             scanAllBtn.addEventListener('click', () => {
-                this.startActiveScan();
+                const isRunning = Object.values(this.targetStatuses).some(t => 
+                    t.status === 'scanning' || t.status === 'running'
+                );
+                if (isRunning) {
+                    this.cancelActiveScan(null, 'masscan');
+                } else {
+                    this.startActiveScan();
+                }
             });
         }
 
-        // Run Nuclei on All Targets button
+        // Run Nuclei on All Targets button (toggles start vs stop)
         const runAllNucleiBtn = document.getElementById('btn-run-all-nuclei');
         if (runAllNucleiBtn) {
             runAllNucleiBtn.addEventListener('click', () => {
-                this.startNucleiScan();
+                const isRunning = Object.values(this.targetStatuses).some(t => 
+                    t.nuclei_status === 'scanning' || t.nuclei_status === 'running'
+                );
+                if (isRunning) {
+                    this.cancelActiveScan(null, 'nuclei');
+                } else {
+                    this.startNucleiScan();
+                }
             });
         }
 
@@ -4979,6 +5028,7 @@ class EASMDashboard {
                 this.targetStatuses[ip].status = 'scanning';
             }
         });
+        this.updateTargetBadgeCount();
         this.renderTargetsList();
 
         this.addScanLog('info', `Dispatching Masscan active port scan for ${targets.length} target(s) [${config.preset}]...`);
@@ -5051,6 +5101,7 @@ class EASMDashboard {
                 this.targetStatuses[ip].nuclei_status = 'scanning';
             }
         });
+        this.updateTargetBadgeCount();
         this.renderTargetsList();
 
         this.addScanLog('info', `[Nuclei] Dispatching vulnerability scan on ${targets.length} target(s) [Severities: ${config.severities.join(', ')}]...`);
@@ -5088,6 +5139,7 @@ class EASMDashboard {
                     if (scanType === 'all' || scanType === 'nuclei') this.targetStatuses[ip].nuclei_status = 'idle';
                 });
             }
+            this.updateTargetBadgeCount();
             this.renderTargetsList();
         } catch (err) {
             console.error('Failed to cancel scan:', err);
