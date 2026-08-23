@@ -9,6 +9,44 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def is_placeholder_key(val: Optional[str]) -> bool:
+    """Check if a string represents an unconfigured placeholder or template value."""
+    if not val or not isinstance(val, str):
+        return True
+    cleaned = val.strip().lower()
+    if not cleaned:
+        return True
+    if cleaned in ("none", "null", "undefined", "dummy", "xxx", "placeholder", "changeme", "example"):
+        return True
+    placeholder_prefixes_or_suffixes = (
+        "insert_your_",
+        "your_api",
+        "your_token",
+        "your_key",
+        "seu_",
+        "sua_",
+        "_aqui",
+        "_here",
+        "token_aqui",
+        "chave_aqui",
+        "api_key_here",
+        "changeme",
+        "<insert",
+    )
+    if any(p in cleaned for p in placeholder_prefixes_or_suffixes):
+        return True
+    if cleaned.startswith("<") and cleaned.endswith(">"):
+        return True
+    return False
+
+
+def sanitize_api_key(val: Optional[str]) -> Optional[str]:
+    """Return stripped string if valid and not a placeholder, else None."""
+    if not val or is_placeholder_key(val):
+        return None
+    return val.strip()
+
+
 def _find_legacy_api_key() -> Optional[str]:
     """Look for legacy API.txt file in working directory or package root."""
     candidate_paths = [
@@ -20,8 +58,9 @@ def _find_legacy_api_key() -> Optional[str]:
         if path.is_file():
             try:
                 content = path.read_text(encoding="utf-8").strip()
-                if content and content != "INSERT_YOUR_SHODAN_API_HERE":
-                    return content
+                sanitized = sanitize_api_key(content)
+                if sanitized:
+                    return sanitized
             except Exception:
                 pass
     return None
@@ -109,24 +148,31 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def populate_fallback_keys(self) -> Settings:
-        """Fallback to direct environment variables or API.txt if not set."""
-        if not self.shodan_api_key:
-            # Check os.environ
-            self.shodan_api_key = os.getenv("SHODAN_API_KEY") or _find_legacy_api_key()
-        if not self.nvd_api_key:
-            self.nvd_api_key = os.getenv("NVD_API_KEY")
-        if not self.whoisfreaks_api_key:
-            self.whoisfreaks_api_key = os.getenv("WHOISFREAKS_API_KEY")
-        if not self.github_token:
-            self.github_token = os.getenv("GITHUB_TOKEN")
-        if not self.censys_pat_token:
-            self.censys_pat_token = os.getenv("CENSYS_PAT_TOKEN")
-        if not self.censys_org_id:
-            self.censys_org_id = os.getenv("CENSYS_ORG_ID")
-        if not self.censys_api_id:
-            self.censys_api_id = os.getenv("CENSYS_API_ID")
-        if not self.censys_api_secret:
-            self.censys_api_secret = os.getenv("CENSYS_API_SECRET")
+        """Fallback to direct environment variables or API.txt if not set, filtering out placeholders."""
+        raw_shodan = self.shodan_api_key or os.getenv("SHODAN_API_KEY") or _find_legacy_api_key()
+        self.shodan_api_key = sanitize_api_key(raw_shodan)
+
+        raw_nvd = self.nvd_api_key or os.getenv("NVD_API_KEY")
+        self.nvd_api_key = sanitize_api_key(raw_nvd)
+
+        raw_whois = self.whoisfreaks_api_key or os.getenv("WHOISFREAKS_API_KEY")
+        self.whoisfreaks_api_key = sanitize_api_key(raw_whois)
+
+        raw_github = self.github_token or os.getenv("GITHUB_TOKEN")
+        self.github_token = sanitize_api_key(raw_github)
+
+        raw_censys_pat = self.censys_pat_token or os.getenv("CENSYS_PAT_TOKEN")
+        self.censys_pat_token = sanitize_api_key(raw_censys_pat)
+
+        raw_censys_org = self.censys_org_id or os.getenv("CENSYS_ORG_ID")
+        self.censys_org_id = sanitize_api_key(raw_censys_org)
+
+        raw_censys_id = self.censys_api_id or os.getenv("CENSYS_API_ID")
+        self.censys_api_id = sanitize_api_key(raw_censys_id)
+
+        raw_censys_secret = self.censys_api_secret or os.getenv("CENSYS_API_SECRET")
+        self.censys_api_secret = sanitize_api_key(raw_censys_secret)
+
         return self
 
 

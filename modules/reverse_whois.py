@@ -29,6 +29,11 @@ class ReverseWhoisModule(BaseModule):
         r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
     )
 
+    def is_configured(self) -> bool:
+        """Check if WhoisFreaks paid API is configured (optional - free fallback available)."""
+        from config import is_placeholder_key
+        return bool(settings.whoisfreaks_api_key and not is_placeholder_key(settings.whoisfreaks_api_key))
+
     async def run(
         self,
         target: str,
@@ -38,7 +43,7 @@ class ReverseWhoisModule(BaseModule):
         target = target.strip()
         findings: List[Finding] = []
 
-        if settings.whoisfreaks_api_key:
+        if self.is_configured():
             logger.info("Executing structured Reverse WHOIS via WhoisFreaks API...")
             findings = await self._query_whoisfreaks(target)
             if findings:

@@ -26,9 +26,33 @@ class ShodanModule(BaseModule):
     description: str = "Shodan.io internet-wide scanner & asset intelligence"
     category: str = "recon"
 
+    def __init__(self, client: Optional[AsyncHTTPClient] = None):
+        super().__init__(client=client)
+        self._auth_failed = False
+
     def is_configured(self) -> bool:
-        """Check if Shodan API key is set."""
-        return bool(settings.shodan_api_key)
+        """Check if valid Shodan API key is set."""
+        if self._auth_failed:
+            return False
+        from config import is_placeholder_key
+        return bool(settings.shodan_api_key and not is_placeholder_key(settings.shodan_api_key))
+
+    async def validate_credentials(self) -> bool:
+        """Perform a fast pre-flight authentication verification check against Shodan API."""
+        if not self.is_configured():
+            return False
+        url = "https://api.shodan.io/api-info"
+        params = {"key": settings.shodan_api_key}
+        try:
+            resp = await self.http_client.get(url=url, params=params, timeout=6.0, raise_for_status=False)
+            if resp.status_code in (401, 403):
+                self._auth_failed = True
+                logger.debug("Shodan API key validation failed (HTTP 401/403).")
+                return False
+            return resp.status_code == 200
+        except Exception as exc:
+            logger.debug(f"Shodan API key pre-check encountered network exception: {exc}")
+            return True
 
     async def run(
         self,
@@ -36,8 +60,8 @@ class ShodanModule(BaseModule):
         context: Optional[Dict[str, Any]] = None,
     ) -> List[Finding]:
         """Execute Shodan queries based on target input type."""
-        if not self.is_configured():
-            logger.warning("Shodan API key is not configured. Skipping Shodan module.")
+        if self._auth_failed or not self.is_configured():
+            logger.warning("Shodan API key is not configured or invalid. Skipping Shodan module.")
             return []
 
         target = target.strip()

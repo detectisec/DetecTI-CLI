@@ -263,28 +263,24 @@ def update_xdb_command() -> None:
 
 @app.command(name="config-check")
 def config_check_command() -> None:
-    """Check configured API keys, environment settings, and endpoint reachability."""
+    """Check configured API keys, environment settings, and live endpoint verification."""
     print_banner()
-    print_section_header("API Keys & Environment Status")
+    print_section_header("API Keys & Environment Verification")
 
-    shodan_status = "[bold green]Configured[/bold green]" if settings.shodan_api_key else "[bold yellow]Not Configured (Required for Shodan recon)[/bold yellow]"
-    if settings.censys_pat_token:
-        org_suffix = f" (Org: {settings.censys_org_id})" if settings.censys_org_id else ""
-        censys_status = f"[bold green]Configured (PAT Token{org_suffix})[/bold green]"
-    elif settings.censys_api_id and settings.censys_api_secret:
-        censys_status = "[bold green]Configured (Legacy API)[/bold green]"
-    else:
-        censys_status = "[dim]Not Set (Required for Censys recon)[/dim]"
+    engine = ThreatTrackEngine()
+    api_statuses = asyncio.run(engine.verify_environment_apis())
 
-    nvd_status = "[bold green]Configured (High rate limits)[/bold green]" if settings.nvd_api_key else "[dim]Not Set (Public rate limits apply)[/dim]"
-    whois_status = "[bold green]Configured (WhoisFreaks API)[/bold green]" if settings.whoisfreaks_api_key else "[dim]Not Set (Free HackerTarget fallback active)[/dim]"
-    github_status = "[bold green]Configured[/bold green]" if settings.github_token else "[dim]Not Set (Public PoC API active)[/dim]"
+    for mod_key, info in api_statuses.items():
+        name = info.get("name", mod_key.title())
+        status = info.get("status", "Unknown")
+        if info.get("valid"):
+            status_styled = f"[bold green]{status}[/bold green]"
+        elif info.get("configured"):
+            status_styled = f"[bold red]{status}[/bold red]"
+        else:
+            status_styled = f"[dim]{status}[/dim]"
+        console.print(f" • [cyan]{name}:[/cyan] {status_styled}")
 
-    console.print(f" • [cyan]Shodan API Key:[/cyan] {shodan_status}")
-    console.print(f" • [cyan]Censys Credentials:[/cyan] {censys_status}")
-    console.print(f" • [cyan]NVD API Key:[/cyan] {nvd_status}")
-    console.print(f" • [cyan]WhoisFreaks API Key:[/cyan] {whois_status}")
-    console.print(f" • [cyan]GitHub Token:[/cyan] {github_status}")
     console.print(f" • [cyan]HTTP Concurrency Limit:[/cyan] {settings.http_concurrency_limit}")
     console.print(f" • [cyan]HTTP Timeout:[/cyan] {settings.http_timeout}s")
 

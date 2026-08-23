@@ -163,16 +163,45 @@ class CensysModule(BaseModule):
         base_url: Optional[str] = None,
     ):
         super().__init__(client=client)
-        self.pat_token = pat_token or settings.censys_pat_token or os.getenv("CENSYS_PAT_TOKEN")
-        self.org_id = org_id or settings.censys_org_id or os.getenv("CENSYS_ORG_ID")
+        from config import is_placeholder_key
+        raw_pat = pat_token or settings.censys_pat_token or os.getenv("CENSYS_PAT_TOKEN")
+        self.pat_token = None if is_placeholder_key(raw_pat) else raw_pat
+        raw_org = org_id or settings.censys_org_id or os.getenv("CENSYS_ORG_ID")
+        self.org_id = None if is_placeholder_key(raw_org) else raw_org
         self.base_url = (base_url or settings.censys_platform_api_url or "https://api.platform.censys.io/v3").rstrip("/")
         self._quota_exhausted = False  # Flag to skip further API calls when quota is exhausted
+        self._auth_failed = False  # Flag to skip further API calls when credentials are invalid
 
     def is_configured(self) -> bool:
-        """Check if Censys API credentials (PAT token or legacy ID/Secret) are set."""
-        has_pat = bool(self.pat_token or settings.censys_pat_token or os.getenv("CENSYS_PAT_TOKEN"))
-        has_legacy = bool(settings.censys_api_id and settings.censys_api_secret)
+        """Check if valid Censys API credentials (PAT token or legacy ID/Secret) are set."""
+        if self._auth_failed:
+            return False
+        from config import is_placeholder_key
+        has_pat = bool(self.pat_token and not is_placeholder_key(self.pat_token))
+        has_legacy = bool(
+            settings.censys_api_id
+            and not is_placeholder_key(settings.censys_api_id)
+            and settings.censys_api_secret
+            and not is_placeholder_key(settings.censys_api_secret)
+        )
         return has_pat or has_legacy
+
+    async def validate_credentials(self) -> bool:
+        """Perform a non-intrusive pre-flight authentication verification check."""
+        if not self.is_configured():
+            return False
+        url = f"{self.base_url}/global/asset/host/8.8.8.8"
+        headers = self._get_auth_headers(accept_header="application/vnd.censys.api.v3.host.v1+json")
+        try:
+            resp = await self.http_client.get(url=url, headers=headers, timeout=6.0, raise_for_status=False)
+            if resp.status_code in (401, 403):
+                self._auth_failed = True
+                logger.debug(f"Censys credential validation failed (HTTP {resp.status_code}).")
+                return False
+            return True
+        except Exception as exc:
+            logger.debug(f"Censys credential pre-check encountered network exception: {exc}")
+            return True
 
     def _get_auth_headers(self, accept_header: str = "application/json") -> Dict[str, str]:
         """Generate Platform API v3 Bearer token (or legacy fallback) and Organization headers."""
@@ -273,6 +302,9 @@ class CensysModule(BaseModule):
 
     async def get_host_info(self, ip: str) -> List[Finding]:
         """Fetch complete host dossier and open services from Censys Platform API v3."""
+        if self._auth_failed or not self.is_configured():
+            return []
+
         url = f"{self.base_url}/global/asset/host/{ip}"
         headers = self._get_auth_headers(accept_header="application/vnd.censys.api.v3.host.v1+json")
 
@@ -284,8 +316,9 @@ class CensysModule(BaseModule):
                 logger.debug(f"Host {ip} not found in Censys Platform.")
                 return []
             elif resp.status_code in (401, 403):
-                logger.error(f"Censys Authentication/Permission error ({resp.status_code}): {resp.text}")
-                raise CensysAuthError(f"Authentication failed for IP {ip}: HTTP {resp.status_code}")
+                self._auth_failed = True
+                logger.warning(f"Censys Authentication/Permission error ({resp.status_code}): Access credentials invalid. Censys module bypassed.")
+                return []
             elif resp.status_code == 422:
                 # Check if it's a quota exhaustion error first
                 is_quota_exhausted = False
@@ -617,6 +650,9 @@ class CensysModule(BaseModule):
         max_pages: Optional[int] = None,
     ) -> List[Finding]:
         """Execute CenQL unified search via Censys Platform API v3 across all pages (POST /v3/global/search/query)."""
+        if self._auth_failed or not self.is_configured():
+            return []
+
         findings: List[Finding] = []
         url = f"{self.base_url}/global/search/query"
         headers = self._get_auth_headers()
@@ -654,12 +690,13 @@ class CensysModule(BaseModule):
                             "Direct IP host lookups are supported on Free tier."
                         )
                     else:
-                        logger.error(f"Censys Auth Error (403): {err_msg}")
-                        raise CensysAuthError(f"Authentication failed for query '{query}': {err_msg}")
+                        self._auth_failed = True
+                        logger.warning(f"Censys Authentication/Permission error (403): Access credentials invalid or unauthorized. Censys module bypassed.")
                     break
                 elif resp.status_code == 401:
-                    logger.error(f"Censys Auth Error (401): {resp.text}")
-                    raise CensysAuthError(f"Authentication failed for query '{query}': HTTP 401")
+                    self._auth_failed = True
+                    logger.warning("Censys Authentication error (401): Access credentials invalid. Censys module bypassed.")
+                    break
                 elif resp.status_code == 422:
                     # Check if it's a quota exhaustion error first
                     is_quota_exhausted = False

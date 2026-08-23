@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from config import settings
+
 from core.models import (
     Finding,
     FindingType,
@@ -110,6 +112,112 @@ class ThreatTrackEngine:
 
         return "query"
 
+    async def verify_environment_apis(self, enabled_modules: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
+        """Verify API keys present in the environment/config and perform non-blocking pre-flight checks."""
+        active_mod_names = (
+            [m for m in enabled_modules if m in self.modules]
+            if enabled_modules and "all" not in enabled_modules
+            else list(self.modules.keys())
+        )
+        
+        status_report: Dict[str, Dict[str, Any]] = {}
+
+        # 1. Shodan
+        if "shodan" in active_mod_names:
+            shodan_mod: ShodanModule = self.modules["shodan"]  # type: ignore
+            if shodan_mod.is_configured():
+                is_valid = await shodan_mod.validate_credentials()
+                status_report["shodan"] = {
+                    "name": "Shodan",
+                    "configured": True,
+                    "valid": is_valid,
+                    "status": "Active & Valid" if is_valid else "Invalid Credentials (Bypassed)",
+                    "tier": "Standard API",
+                }
+            else:
+                status_report["shodan"] = {
+                    "name": "Shodan",
+                    "configured": False,
+                    "valid": False,
+                    "status": "Not Configured (Required for Shodan recon)",
+                    "tier": "None",
+                }
+
+        # 2. Censys
+        if "censys" in active_mod_names:
+            censys_mod: CensysModule = self.modules["censys"]  # type: ignore
+            if censys_mod.is_configured():
+                is_valid = await censys_mod.validate_credentials()
+                status_report["censys"] = {
+                    "name": "Censys",
+                    "configured": True,
+                    "valid": is_valid,
+                    "status": "Active & Valid" if is_valid else "Invalid / Unauthorized (Bypassed)",
+                    "tier": "PAT Token" if censys_mod.pat_token else "Legacy API",
+                }
+            else:
+                status_report["censys"] = {
+                    "name": "Censys",
+                    "configured": False,
+                    "valid": False,
+                    "status": "Not Configured / Placeholder (Bypassed)",
+                    "tier": "None",
+                }
+
+        # 3. NVD
+        if "nvd" in active_mod_names:
+            nvd_mod: NVDModule = self.modules["nvd"]  # type: ignore
+            if nvd_mod.is_configured():
+                status_report["nvd"] = {
+                    "name": "NVD (NIST)",
+                    "configured": True,
+                    "valid": True,
+                    "status": "Active (High-speed 0.6s rate limit)",
+                    "tier": "API Key",
+                }
+            else:
+                status_report["nvd"] = {
+                    "name": "NVD (NIST)",
+                    "configured": False,
+                    "valid": True,
+                    "status": "Active (Public mode, 6.0s rate limit)",
+                    "tier": "Free / Public",
+                }
+
+        # 4. WhoisFreaks / Reverse WHOIS
+        if "reverse_whois" in active_mod_names:
+            whois_mod: ReverseWhoisModule = self.modules["reverse_whois"]  # type: ignore
+            if whois_mod.is_configured():
+                status_report["reverse_whois"] = {
+                    "name": "WhoisFreaks",
+                    "configured": True,
+                    "valid": True,
+                    "status": "Active (WhoisFreaks API)",
+                    "tier": "Paid API",
+                }
+            else:
+                status_report["reverse_whois"] = {
+                    "name": "WhoisFreaks",
+                    "configured": False,
+                    "valid": True,
+                    "status": "Active (HackerTarget / RDAP Fallback)",
+                    "tier": "Free OSINT",
+                }
+
+        # 5. ExploitDB / GitHub Token
+        if "exploitdb" in active_mod_names:
+            from config import is_placeholder_key
+            has_gh = bool(settings.github_token and not is_placeholder_key(settings.github_token))
+            status_report["exploitdb"] = {
+                "name": "ExploitDB / GitHub PoCs",
+                "configured": has_gh,
+                "valid": True,
+                "status": "Active (Local ExploitDB + Authenticated GitHub PoCs)" if has_gh else "Active (Local ExploitDB + Public PoC API)",
+                "tier": "GitHub Token" if has_gh else "Public PoC API",
+            }
+
+        return status_report
+
     async def scan(
         self,
         target: str,
@@ -131,6 +239,10 @@ class ThreatTrackEngine:
             if enabled_modules and "all" not in enabled_modules
             else list(self.modules.keys())
         )
+
+        # Pre-flight API verification layer: validate all APIs present in environment/config
+        self._notify("engine", "Verifying environment API credentials and endpoints...")
+        await self.verify_environment_apis(active_mod_names)
 
         result = ScanResult(
             target=target,
