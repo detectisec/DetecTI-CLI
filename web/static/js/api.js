@@ -115,13 +115,23 @@ class APIClient {
         });
     }
 
-    async cancelActiveScan(target = null, all = false) {
+    async startNucleiScan(config = {}) {
+        return this.request('/scan/nuclei', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(config)
+        });
+    }
+
+    async cancelActiveScan(target = null, all = false, scanType = 'all') {
         return this.request('/scan/cancel', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ target: target, all: all })
+            body: JSON.stringify({ target: target, all: all, scan_type: scanType })
         });
     }
 
@@ -132,4 +142,5 @@ class APIClient {
 
 // Global API client instance
 window.api = new APIClient();
+
 

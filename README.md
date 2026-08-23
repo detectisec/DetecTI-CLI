@@ -5,7 +5,7 @@
 <img width="90" src="https://avatars.githubusercontent.com/u/129181562?s=200&v=4" alt="DetecTI Security Logo">
 
 ### Modern External Attack Surface Mapping & Threat Intelligence Engine
-**Asynchronous • Modular • High-Concurrency • EPSS + CISA KEV Prioritization • Shodan • Censys • crt.sh • Reverse WHOIS**
+**Asynchronous • Modular • High-Concurrency • EPSS + CISA KEV Prioritization • Masscan & Nuclei Active Scanning • Shodan • Censys • crt.sh • Reverse WHOIS**
 
 [![Website: detecti.com.br](https://img.shields.io/badge/Official_Website-detecti.com.br-00d4ff.svg)](https://detecti.com.br)
 [![Documentation: Official Docs](https://img.shields.io/badge/Documentation-Official_Docs-8A2BE2.svg)](https://detecti.com.br/docs/detecti-cli/en.html)
@@ -17,17 +17,20 @@
 
 ---
 
-## 📚 Official Documentation
+## 📚 Official Documentation & Introduction
 
 > 📖 Complete guides, installation, CLI usage, architecture, and threat intelligence scoring are available in the [**DetecTI-CLI Official Documentation**](https://detecti.com.br/docs/detecti-cli/en.html).
+
+### 🛡️ About DetecTI-CLI
+**DetecTI-CLI** is an enterprise-grade cyber intelligence and External Attack Surface Management (EASM) platform engineered by [DetecTI Security](https://detecti.com.br). It empowers cybersecurity professionals, red teams, and security operations centers to dynamically map an organization's digital footprint, correlate internet-facing infrastructure across multiple intelligence feeds, perform high-speed active port and vulnerability validation, and prioritize risks using actionable weaponization intelligence.
 
 ---
 
 ## 🚀 Overview
 
-**DetecTI-CLI** is a high-performance Python 3.11+ engine developed by [DetecTI Security](https://detecti.com.br) designed for **External Attack Surface Management (EASM)**, **Asset Reconnaissance**, and **Vulnerability Weaponization Intelligence**.
+**DetecTI-CLI** is a high-performance Python 3.11+ engine designed for **External Attack Surface Management (EASM)**, **Active & Passive Asset Reconnaissance**, and **Vulnerability Weaponization Intelligence**.
 
-It maps exposed internet infrastructure (domains, subdomains, IPs, and open services), correlates organizational relationships via **Reverse WHOIS** and **Certificate Transparency**, and enriches identified CVEs with real-world exploitation risk data (**FIRST EPSS + CISA KEV**), weakness taxonomy (**CWE Name**), and public weaponization proofs (**ExploitDB + GitHub PoCs**).
+It maps exposed internet infrastructure (domains, subdomains, IPs, open services, and banners), correlates organizational relationships via **Reverse WHOIS** and **Certificate Transparency**, executes high-speed active verification with **Masscan**, performs targeted vulnerability validation with **Nuclei** strictly against verified active endpoints, and enriches identified CVEs with real-world exploitation risk data (**FIRST EPSS + CISA KEV**), weakness taxonomy (**CWE Name**), provenance tracking (**Vulnerability Source**), and public weaponization proofs (**ExploitDB + GitHub PoCs**).
 
 ---
 
@@ -40,6 +43,7 @@ flowchart TD
     classDef input fill:#1e293b,stroke:#00d4ff,stroke-width:2px,color:#fff
     classDef recon fill:#1e1e2e,stroke:#3b82f6,stroke-width:2px,color:#fff
     classDef enrich fill:#2a1b3d,stroke:#9333ea,stroke-width:2px,color:#fff
+    classDef active fill:#3b1e5a,stroke:#a855f7,stroke-width:2px,color:#fff
     classDef intel fill:#3b1e1e,stroke:#ef4444,stroke-width:2px,color:#fff
     classDef correlate fill:#143024,stroke:#10b981,stroke-width:2px,color:#fff
     classDef output fill:#2d2d2d,stroke:#f59e0b,stroke-width:2px,color:#fff
@@ -58,8 +62,13 @@ flowchart TD
         IP_EXTRACT -->|Parallel Host Dossiers| CENSYS_ENRICH[🌐 Censys: Deep Port, Service & TLS Scan per IP]:::recon
     end
 
+    subgraph Stage1_8 [Stage 1.8: Active Verification & Target Scanning]
+        IP_EXTRACT -->|Marked Scan Targets| MASSCAN[⚡ Masscan: High-Speed Port & Banner Grabbing]:::active
+        MASSCAN -->|Verified Active Ports| NUCLEI[🛡️ Nuclei: Active Vulnerability Scan]:::active
+    end
+
     subgraph Stage2 [Stage 2: Threat Intelligence & Vulnerability Scoring]
-        SHODAN & CENSYS_DIRECT & CENSYS_ENRICH -->|Aggregated CVE IDs| CVE_AGG[CVE Aggregator & Deduplication]:::enrich
+        SHODAN & CENSYS_DIRECT & CENSYS_ENRICH & NUCLEI -->|Aggregated CVE IDs & Findings| CVE_AGG[CVE Aggregator & Deduplication]:::enrich
         CVE_AGG --> NVD[🛡️ NVD 2.0: CVSS Base Score, Severity & CWE Name]:::intel
         CVE_AGG --> EPSS[📈 FIRST EPSS: Real-world Exploit Probability %]:::intel
         CVE_AGG --> CISA[🚨 CISA KEV: Active Exploitation & Ransomware Flag]:::intel
@@ -71,12 +80,12 @@ flowchart TD
     end
 
     subgraph Stage4 [Stage 4: Unified Graph Modeling & Correlation]
-        NVD & EPSS & CISA & XDB & GITHUB --> CORRELATION[🔗 Unified Engine Correlation & Graph Synthesis]:::correlate
-        CRTSH & WHOIS & SHODAN & CENSYS_ENRICH --> CORRELATION
+        NVD & EPSS & CISA & XDB & GITHUB & NUCLEI --> CORRELATION[🔗 Unified Engine Correlation & Graph Synthesis]:::correlate
+        CRTSH & WHOIS & SHODAN & CENSYS_ENRICH & MASSCAN --> CORRELATION
     end
 
     subgraph Stage5 [Stage 5: Multi-Channel Output]
-        CORRELATION --> DB[(💾 SQLite Persistence)]:::output
+        CORRELATION --> DB[(💾 SQLite Persistence with Auto-Migrations)]:::output
         CORRELATION --> CLI[📊 Rich Terminal Tables & Risk Badges]:::output
         CORRELATION --> REPORT[📄 JSON, Markdown & HTML Reports]:::output
         CORRELATION --> WEB[🌐 Responsive Cytoscape.js Web Dashboard]:::output
@@ -89,32 +98,34 @@ flowchart TD
    - Categorizes input into `IP`, `CIDR range`, `Domain`, `CVE-ID`, `Email`, `Custom Query`, or `Batch File`.
 
 2. **Stage 1: Primary Reconnaissance & Target Discovery**:
-   - **Shodan**: Primary discovery engine for custom queries (e.g., `org:`, `port:`), CIDR subnets (`192.168.1.0/24`), direct IP lookups, and domain DNS record mapping (resolving subdomains to their active `A` record IPs).
-   - **Certificate Transparency (crt.sh)**: Discovers all issued TLS/SSL certificates to uncover wildcards and hidden subdomains.
-   - **Reverse WHOIS (WhoisFreaks API + HackerTarget fallback)**: Identifies associated parent/child domains registered by the same organization or registrant.
+   - **Shodan**: Primary discovery engine for custom queries (e.g., `org:`, `port:`), CIDR subnets (`192.168.1.0/24`), direct IP lookups, and domain DNS record mapping (resolving subdomains to active `A` record IPs).
+   - **Certificate Transparency (crt.sh)**: Discovers issued TLS/SSL certificates to uncover wildcards and hidden subdomains.
+   - **Reverse WHOIS (WhoisFreaks API + HackerTarget fallback)**: Identifies associated parent/child domains registered by the same organization.
    - **Censys (Direct IP Lookups)**: Queries host profiles for direct single IP targets, or acts as a primary fallback if Shodan is unconfigured.
 
 3. **Stage 1.5: Complementary Censys Host & Service Enrichment**:
-   - Once subdomains and resolved IPs are discovered in Stage 1, the engine extracts **all unique discovered IPs**.
-   - **Censys** executes parallel host dossiers (`/v3/global/asset/host/{ip}`) on each IP to enrich open ports, web service protocols (`http://` vs `https://`), software versions, TLS certificates, and identify additional CVEs.
-   - Port & service data from Shodan and Censys are merged and deduplicated into a single unified host profile.
+   - Extracts **all unique discovered IPs** and queries parallel host dossiers (`/v3/global/asset/host/{ip}`) to enrich open ports, web service protocols, software versions, banners, TLS certificates, and additional CVEs.
 
-4. **Stage 2: Threat Intelligence & Vulnerability Prioritization**:
-   - All unique CVE IDs identified across Shodan and Censys are aggregated and deduplicated.
+4. **Stage 1.8: Target Management & Active Scanning (Masscan + Nuclei)**:
+   - **Masscan Active Port Scan**: Targets marked on the graph are scanned at high speeds with banner grabbing (`--banners`) to verify live exposed services.
+   - **Verified Active Rule for Nuclei**: Nuclei vulnerability scanning only executes on **"Verified Active"** endpoints (discovered or validated by Masscan). If an IP target has not yet been scanned with Masscan, a pre-scan verification is executed automatically before dispatching Nuclei templates.
+
+5. **Stage 2: Threat Intelligence & Vulnerability Prioritization**:
+   - All unique CVE IDs identified across passive feeds and active Nuclei scans are aggregated and tracked by their provenance (**Vulnerability Source**: `Nuclei`, `NVD`, etc.).
    - **NVD 2.0 API**: Retrieves official CVSS v3.1, v3.0, and v2.0 base scores, vector metrics, and **CWE (Common Weakness Enumeration)** weakness name.
-   - **FIRST EPSS API**: Appends real-world exploitation probability percentages (0.0% to 100%) and global percentile scores.
+   - **FIRST EPSS API**: Appends real-world exploitation probability percentages (0.0% to 100%) and percentile scores.
    - **CISA KEV Catalog**: Cross-checks vulnerabilities actively leveraged in ransomware and targeted cyber campaigns.
 
-5. **Stage 3: Weaponization & PoC Hunting**:
+6. **Stage 3: Weaponization & PoC Hunting**:
    - **ExploitDB (searchsploit)**: Matches CVEs against local exploit scripts, PoCs, and shellcodes with verification tags.
-   - **GitHub PoC Intelligence**: Queries real-world public exploit repositories, verification status, and stars.
+   - **GitHub PoC Intelligence**: Queries real-world public exploit repositories and verification status.
 
-6. **Stage 4: Graph Modeling & Relational Synthesis**:
+7. **Stage 4: Graph Modeling & Relational Synthesis**:
    - Binds assets into a structured, query-rooted hierarchical topology:
      $$\text{Target Query Root} \xrightarrow{\text{MATCHES\_DOMAIN}} \text{Domains / Org Networks} \xrightarrow{\text{HAS\_SUBDOMAIN / CONTAINS\_IP}} \text{Subdomains / IPs} \xrightarrow{\text{RESOLVES\_TO}} \text{Hosts} \xrightarrow{\text{EXPOSES}} \text{Services} \xrightarrow{\text{HAS\_VULN}} \text{CVEs}$$
 
-7. **Stage 5: Persistence & Presentation**:
-   - Automatically stores all relationships in a relational SQLite database.
+8. **Stage 5: Persistence & Presentation**:
+   - Stores all relationships in a relational SQLite database with auto-migration support.
    - Outputs formatted JSON, Executive Markdown, standalone HTML reports, and interactive web visualization graphs with direct references to [DetecTI Security](https://detecti.com.br).
 
 ---
@@ -134,39 +145,51 @@ flowchart TD
   - **FIRST EPSS**: Exploit Prediction Scoring System (probability percentage & percentile).
   - **CISA KEV**: Catalogs vulnerabilities actively exploited in real-world attacks & ransomware campaigns.
   - **ExploitDB & GitHub PoCs**: Direct links to public exploits and proof-of-concept repositories.
+  - **Source Provenance Tracking**: Clear visibility of where each vulnerability was identified (`Nuclei`, `NVD`, etc.) in all graph views, node inspectors, and Risk Metrics accordions.
 - **💻 Interactive & Fully Responsive Web Dashboard**:
   - Asynchronous FastAPI web server rendering rich EASM network graphs with Cytoscape.js.
   - **Intuitive Mouse Navigation & Node Organization**:
     - **Left-Click (Drag)**: Pan and navigate smoothly across the canvas.
     - **Left-Click (Node)**: Select single node and inspect deep asset metadata in the Asset Inspector.
     - **Ctrl + Left-Click (Node)** / **Cmd + Left-Click**: Additive sequential multi-selection of target nodes.
-    - **Right-Click (Node)**: Custom Context Menu to Collapse/Uncollapse Services or Vulnerabilities, Inspect Details, Focus Node, or Copy Domain/IP/CVE identifiers.
+    - **Right-Click (Node)**: Custom Context Menu to Collapse/Uncollapse Services or Vulnerabilities, Set/Remove Targets, Focus Node, or Copy Domain/IP/CVE identifiers.
     - **Right-Click (Drag)**: Box area selection to group and reposition multiple nodes together.
     - **Smooth Scroll Wheel**: Seamless zoom in/out centered directly at the cursor position.
   - **Retractable Filters & Controls Drawer**: Smoothly collapse the left sidebar to liberate 100% of the screen for graph exploration across all desktop and mobile devices.
+  - **Granular Graph Filters**:
+    - `CISA KEV (Known Exploited)`
+    - `High EPSS (>50% Exploit Probability)`
+    - `Critical Vulnerabilities (CVSS 9.0+)`
+    - `Hide Low & Info Findings`
+    - `Nuclei Scan Findings Only`
+    - `Verified Public PoCs / Exploits`
+    - `Exposed Services Branches`
+    - `Verified Active Services Only`
+    - `Vulnerable Services Only`
   - **Visual Topology & Semantic Relationships**: Interactive graph engine with distinct node geometry, high-contrast colors (Electric Purple root query anchor, Royal Blue ASN octagons, deep blue domains, turquoise subdomains, purple IPs, orange/green service hexagons, red CVE diamonds, and crimson CISA KEV highlights), and directed relationship edges.
-  - **Query Target Anchoring**: Graph topology automatically positions the scanned query/target (e.g. `example.com`, CIDR or Shodan query) as the root of all subdomains, IPs, and vulnerabilities.
   - **Dynamic Database Switcher**: Seamlessly switch between any saved SQLite databases without server restart (including a rich pre-packaged demo dataset in `example.com.sqlite`).
   - **Export Data Menu**: One-click download of active scan data in **JSON**, **Executive Markdown**, and **Standalone HTML** formats.
   - **Floating Action Controls**: Instant access to `📐 Fit to Screen`, `🔍 Reset Zoom`, `🔄 Re-layout`, and **Layout Selector** (`🌳 Hierarchical (Top-Down, Default)`, `🌐 Force-Directed`, `🎯 Concentric`, `▦ Grid`).
-  - **Smart Collapsible Clusters (High Fan-Out Optimization)**: Group high-density services or vulnerabilities into clean, collapsible cluster nodes with a dashed border. Fully controllable via right-click context menu and side inspector drawer.
-  - **Mobile & Tablet Optimized**: Responsive off-canvas navigation drawer with backdrop overlay, touch ergonomics, and debounced canvas resize.
-  - **Scoped Lead Selector & Filters**: Visually isolate individual hosts and subtrees without pulling unrelated sibling branches; filter by CISA KEV, High EPSS probability, Critical CVSS, or public PoCs.
-  - **Asset Inspector**: Deep-dive into technical properties, CWE descriptions, affected ports, associated domains, and weaponized exploit URLs.
+  - **Smart Collapsible Clusters (High Fan-Out Optimization)**: Group high-density services or vulnerabilities into clean, collapsible cluster nodes with a dashed border.
+  - **Asset Inspector & Risk Metrics Accordions**: Deep-dive into technical properties, CWE descriptions, affected ports, associated domains, weaponized exploit URLs, and explicit vulnerability **Source** attribution.
 - **🎯 Target Management & High-Speed Active Port Scanning (Masscan)**:
   - **Right-Click Target Marking & Bulk Selection**:
     - Mark/unmark any individual `IP Address` node as a scan target directly from the Cytoscape graph context menu (**Set as Target** / **Remove Target**).
     - **Bulk Target Addition on Root Nodes**: Right-click on any `Organization`, `Network / ASN`, `Target Root`, or `Domain` node to instantly mark or unmark **all associated descendant IPs** as scan targets in a single click (**Set all N IPs as Targets** / **Remove all N IPs from Targets**).
   - **Inspector Direct Actions**: Toggle individual or bulk target states directly from the **Asset Inspector** drawer for both IP nodes and parent Organization/Domain roots.
-  - **Dedicated Target Management Drawer**: Right-side sliding panel providing real-time target status (`Idle`, `Scanning`, `Completed`, `Failed`), discovered open port counts, port chips with banner tooltips, individual or bulk scan execution, and a live console output stream.
+  - **Target Management Drawer**: Right-side sliding panel providing real-time target status (`Idle`, `Scanning`, `Completed`, `Failed`), discovered open port counts, port chips with banner tooltips, individual or bulk scan execution, and a live console output stream.
+  - **Live Scan Indicator**: Pulsing **`Scanning...`** badge and visual status indicators on the Targets header button while port or vulnerability scans are executing in the background.
   - **Flexible Scan Presets & Rate Control**: Quick port profiles (*Top 100*, *Web Ports*, *All Ports 0-65535*, *Custom*), packet rate slider (100 to 10,000 pps), `-Pn` (disable ping), and `--banners` (banner grabbing & service detection).
   - **Visual Topology Differentiation**:
     - Marked IP nodes display a discreet **Crosshair badge overlay** in the upper-right corner.
     - Exclusively active-scanned services render with a secondary high-contrast **Neon Violet / Purple (#a855f7)** color.
     - Services discovered passively and verified actively receive a **Cyan highlight border** and **`[Verified Active]`** badge.
     - Active scan service connections render as **dashed relationship edges** (`line-style: dashed`).
-  - **Atomic Database Persistence**: Automatic deduplication and SQLite persistence for newly discovered or verified services, product/version detection, and raw service banners directly into `./data/dbs/`.
-  - **System Binary & Permissions**: Requires `masscan` installed on the host with non-root Linux raw packet capabilities (`sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip $(which masscan)`).
+- **🛡️ Active Vulnerability Scanning (Nuclei)**:
+  - Integration with ProjectDiscovery's **Nuclei** engine for template-based vulnerability assessment.
+  - **Mandatory "Verified Active" Enforcement**: Scans are strictly targeted at ports confirmed open and active via Masscan. Unverified targets trigger an automated pre-scan verification prior to template execution.
+  - Configurable severity filters (Critical, High, Medium, Low, Info), protocol/template tags, rate limits, concurrency, and custom flags.
+  - Automated database merging, deduplication, and immediate Cytoscape graph node generation with weaponized PoC linkage.
 - **🔐 Pre-Flight API Verification & Sanity Checking**:
   - Built-in sanity layer (`config-check` and engine pre-flight) that filters dummy placeholder keys and verifies valid authentication before running scans, preventing silent 401/403 authorization errors.
 - **📊 Executive & Structured Reporting**:
@@ -175,7 +198,6 @@ flowchart TD
   - Structured **JSON** export (`--format json`).
   - Executive **Markdown** report generation (`--format markdown`) with official DetecTI Security attribution.
   - Standalone, styled **HTML** report generation (`--format html`) with print-to-PDF formatting.
-
 
 ---
 
@@ -197,6 +219,16 @@ flowchart TD
 
   # Grant non-root raw socket capabilities to allow WebUI execution:
   sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip $(which masscan)
+  ```
+- **Nuclei** (Optional / Recommended for Active Vulnerability Scanning):
+  - Nuclei should be installed and accessible in your system `PATH` to run active vulnerability scans from the WebUI.
+  ```bash
+  # Via Go:
+  go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+
+  # Via Binary / Homebrew / Package Manager (Debian/Ubuntu/Kali):
+  sudo apt install -y nuclei   # If available in your distribution repo
+  # Or download pre-built binary from https://github.com/projectdiscovery/nuclei/releases
   ```
 
 ### Install with pip or editable mode
@@ -374,6 +406,8 @@ DetecTI-CLI/
 │   ├── reverse_whois.py     # Reverse WHOIS (Hybrid WhoisFreaks + Free Fallback)
 │   ├── shodan.py            # Shodan Host, DNS, Range & Query Scanner
 │   ├── censys.py            # Censys Platform API v3 Asset & Host Intelligence (CenQL)
+│   ├── masscan.py           # High-Speed Active Port Scanner & Banner Grabbing Runner
+│   ├── nuclei.py            # Asynchronous Nuclei Vulnerability Scanner Engine
 │   ├── nvd.py               # NVD 2.0 (CVSS/CWE) + EPSS Probability + CISA KEV
 │   └── exploitdb.py         # ExploitDB (searchsploit) & GitHub PoC Collector
 ├── reporters/               # Report Generation Subsystem

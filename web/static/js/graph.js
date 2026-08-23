@@ -12,8 +12,11 @@ class EASMDashboard {
             kev: false,
             highEpss: false,
             critical: false,
+            hideLowInfo: false,
+            nucleiOnly: false,
             withPocs: false,
             servicesOnly: false,
+            verifiedServicesOnly: false,
             vulnServicesOnly: false
         };
         this.searchTerm = '';
@@ -1001,10 +1004,12 @@ class EASMDashboard {
         const CLUSTER_THRESHOLD = 15;
 
         // Vulnerability filter evaluator helper for clustering pass
-        const hasVulnFilters = this.filters.kev || this.filters.highEpss || this.filters.critical || this.filters.withPocs;
+        const hasVulnFilters = this.filters.kev || this.filters.highEpss || this.filters.critical || this.filters.hideLowInfo || this.filters.nucleiOnly || this.filters.withPocs;
         const vulnMatchesActiveFilter = (vulnNode) => {
             if (!vulnNode) return false;
             const data = typeof vulnNode.data === 'function' ? vulnNode.data() : vulnNode;
+            const severity = String(data.severity || '').toUpperCase();
+            const source = String(data.source || '').toLowerCase();
             if (this.filters.kev) {
                 if (data.is_cisa_kev !== true && data.is_cisa_kev !== 1) return false;
             }
@@ -1013,8 +1018,13 @@ class EASMDashboard {
                 if (epssScore <= 0.5) return false;
             }
             if (this.filters.critical) {
-                const severity = String(data.severity || '').toUpperCase();
                 if (severity !== 'CRITICAL') return false;
+            }
+            if (this.filters.hideLowInfo) {
+                if (severity === 'LOW' || severity === 'INFO' || severity === 'UNKNOWN') return false;
+            }
+            if (this.filters.nucleiOnly) {
+                if (!source.includes('nuclei')) return false;
             }
             if (this.filters.withPocs) {
                 const hasPocs = data.has_pocs === true || (Array.isArray(data.exploits) && data.exploits.length > 0);
@@ -1041,6 +1051,13 @@ class EASMDashboard {
                     const childVulns = srv.outgoers('node[type="vulnerability"]');
                     if (childVulns.length === 0) return false;
                     return hasVulnFilters ? childVulns.some(vulnMatchesActiveFilter) : true;
+                });
+            } else if (this.filters.verifiedServicesOnly) {
+                serviceOutgoers = serviceOutgoers.filter(srv => {
+                    const sData = typeof srv.data === 'function' ? srv.data() : srv;
+                    if (sData.is_active_scan === true || sData.verified_active === true) return true;
+                    const sources = Array.isArray(sData.sources) ? sData.sources : [];
+                    return sources.some(s => typeof s === 'string' && (s.toLowerCase().includes('masscan') || s.toLowerCase().includes('active') || s.toLowerCase().includes('nuclei')));
                 });
             }
 
@@ -1268,6 +1285,9 @@ class EASMDashboard {
             this.cy.add(clusterEdgesToAdd);
             clusterNodesToAdd.forEach(c => visibleNodes.add(c.data.id));
         }
+
+        // Store currently scoped visible lead nodes
+        this.visibleLeadNodes = new Set(visibleNodes);
 
         // Fourth pass: Hide all nodes that are not in the visible set
         this.cy.nodes().forEach(node => {
@@ -1597,7 +1617,7 @@ class EASMDashboard {
                 {
                     selector: 'node[type="vulnerability"]',
                     style: {
-                        'background-color': '#e74c3c',
+                        'background-color': '#ef4444',
                         'label': 'data(cve_id)',
                         'color': '#ffffff',
                         'text-valign': 'center',
@@ -1608,47 +1628,57 @@ class EASMDashboard {
                         'height': '50px',
                         'shape': 'diamond',
                         'border-width': '2px',
-                        'border-color': '#c0392b'
+                        'border-color': '#b91c1c'
                     }
                 },
                 
+                // Critical severity vulnerabilities
+                {
+                    selector: 'node[type="vulnerability"][severity="CRITICAL"], node[risk_level="critical"]',
+                    style: {
+                        'background-color': '#ef4444',
+                        'border-color': '#b91c1c',
+                        'border-width': '3px'
+                    }
+                },
+
                 // High severity vulnerabilities
                 {
-                    selector: 'node[risk_level="high"]',
+                    selector: 'node[type="vulnerability"][severity="HIGH"], node[risk_level="high"]',
                     style: {
-                        'background-color': '#ff6b6b',
-                        'border-color': '#ff5252',
+                        'background-color': '#f97316',
+                        'border-color': '#c2410c',
                         'border-width': '2px'
                     }
                 },
                 
                 // Medium severity vulnerabilities
                 {
-                    selector: 'node[risk_level="medium"]',
+                    selector: 'node[type="vulnerability"][severity="MEDIUM"], node[risk_level="medium"]',
                     style: {
-                        'background-color': '#ff8c00',
-                        'border-color': '#ff7f00',
+                        'background-color': '#eab308',
+                        'border-color': '#a16207',
                         'border-width': '2px'
                     }
                 },
                 
                 // Low severity vulnerabilities
                 {
-                    selector: 'node[risk_level="low"]',
+                    selector: 'node[type="vulnerability"][severity="LOW"], node[risk_level="low"]',
                     style: {
-                        'background-color': '#2ed573',
-                        'border-color': '#20bf6b',
+                        'background-color': '#3b82f6',
+                        'border-color': '#1d4ed8',
                         'border-width': '2px'
                     }
                 },
                 
-                // Critical vulnerabilities (darker red with pulsing animation)
+                // Info severity vulnerabilities
                 {
-                    selector: 'node[risk_level="critical"]',
+                    selector: 'node[type="vulnerability"][severity="INFO"], node[type="vulnerability"][severity="UNKNOWN"]',
                     style: {
-                        'background-color': '#8b0000',
-                        'border-color': '#dc143c',
-                        'border-width': '4px'
+                        'background-color': '#64748b',
+                        'border-color': '#475569',
+                        'border-width': '2px'
                     }
                 },
                 
@@ -1671,7 +1701,7 @@ class EASMDashboard {
                         'line-color': '#555555',
                         'target-arrow-color': '#555555',
                         'target-arrow-shape': 'triangle',
-                        'curve-style': 'straight', // Straight edges render 5x faster than bezier
+                        'curve-style': 'straight',
                         'label': 'data(label)',
                         'font-size': '7px',
                         'color': '#888888',
@@ -1679,14 +1709,58 @@ class EASMDashboard {
                     }
                 },
                 
-                // Vulnerability edges (red) - thicker to emphasize the service->vuln relationship
+                // Vulnerability edges (HAS_VULN)
                 {
                     selector: 'edge[label="HAS_VULN"]',
                     style: {
-                        'line-color': '#e74c3c',
-                        'target-arrow-color': '#e74c3c',
-                        'width': '3px',
-                        'line-style': 'solid'
+                        'line-color': '#ef4444',
+                        'target-arrow-color': '#ef4444',
+                        'width': '2px',
+                        'line-style': 'dotted'
+                    }
+                },
+
+                // Critical vulnerability edges
+                {
+                    selector: 'edge[label="HAS_VULN"][vuln_severity="CRITICAL"]',
+                    style: {
+                        'line-color': '#ef4444',
+                        'target-arrow-color': '#ef4444',
+                        'width': '2.5px',
+                        'line-style': 'dotted'
+                    }
+                },
+
+                // High vulnerability edges
+                {
+                    selector: 'edge[label="HAS_VULN"][vuln_severity="HIGH"]',
+                    style: {
+                        'line-color': '#f97316',
+                        'target-arrow-color': '#f97316',
+                        'width': '2px',
+                        'line-style': 'dotted'
+                    }
+                },
+
+                // Medium vulnerability edges
+                {
+                    selector: 'edge[label="HAS_VULN"][vuln_severity="MEDIUM"]',
+                    style: {
+                        'line-color': '#eab308',
+                        'target-arrow-color': '#eab308',
+                        'width': '2px',
+                        'line-style': 'dotted'
+                    }
+                },
+
+                // Low / Info vulnerability edges
+                {
+                    selector: 'edge[label="HAS_VULN"][vuln_severity="LOW"], edge[label="HAS_VULN"][vuln_severity="INFO"]',
+                    style: {
+                        'line-color': '#3b82f6',
+                        'target-arrow-color': '#3b82f6',
+                        'width': '1.5px',
+                        'line-style': 'dotted'
                     }
                 },
                 
@@ -2380,6 +2454,22 @@ class EASMDashboard {
             });
         }
 
+        const filterHideLowInfo = document.getElementById('filter-hide-low-info');
+        if (filterHideLowInfo) {
+            filterHideLowInfo.addEventListener('change', (e) => {
+                this.filters.hideLowInfo = e.target.checked;
+                this.applyLeadFilter({ relayout: false });
+            });
+        }
+
+        const filterNucleiOnly = document.getElementById('filter-nuclei-only');
+        if (filterNucleiOnly) {
+            filterNucleiOnly.addEventListener('change', (e) => {
+                this.filters.nucleiOnly = e.target.checked;
+                this.applyLeadFilter({ relayout: false });
+            });
+        }
+
         const filterWithPocs = document.getElementById('filter-with-pocs');
         if (filterWithPocs) {
             filterWithPocs.addEventListener('change', (e) => {
@@ -2392,6 +2482,14 @@ class EASMDashboard {
         if (filterServicesOnly) {
             filterServicesOnly.addEventListener('change', (e) => {
                 this.filters.servicesOnly = e.target.checked;
+                this.applyLeadFilter({ relayout: false });
+            });
+        }
+
+        const filterVerifiedServices = document.getElementById('filter-verified-services');
+        if (filterVerifiedServices) {
+            filterVerifiedServices.addEventListener('change', (e) => {
+                this.filters.verifiedServicesOnly = e.target.checked;
                 this.applyLeadFilter({ relayout: false });
             });
         }
@@ -2577,7 +2675,10 @@ class EASMDashboard {
             
             targetSet.add(nodeId);
             startNode.incomers('node').forEach(parent => {
-                addAllAncestors(parent, targetSet, visited);
+                const pId = parent.id();
+                if (!this.visibleLeadNodes || this.visibleLeadNodes.has(pId)) {
+                    addAllAncestors(parent, targetSet, visited);
+                }
             });
         };
 
@@ -2589,8 +2690,9 @@ class EASMDashboard {
             visited.add(nodeId);
 
             startNode.outgoers('node').forEach(child => {
-                if (nodesToKeep.has(child.id())) {
-                    targetSet.add(child.id());
+                const cId = child.id();
+                if ((!this.visibleLeadNodes || this.visibleLeadNodes.has(cId)) && nodesToKeep.has(cId)) {
+                    targetSet.add(cId);
                     addAllDescendants(child, targetSet, visited);
                 }
             });
@@ -2600,6 +2702,7 @@ class EASMDashboard {
         const searchMatchingNodeIds = new Set();
         if (this.searchTerm) {
             this.cy.nodes().forEach(node => {
+                if (this.visibleLeadNodes && !this.visibleLeadNodes.has(node.id())) return;
                 const data = node.data();
                 let parentData = {};
                 const parentNode = node.incomers('node').first();
@@ -2634,10 +2737,12 @@ class EASMDashboard {
         }
 
         // 2. Vulnerability filter evaluator
-        const hasVulnFilters = this.filters.kev || this.filters.highEpss || this.filters.critical || this.filters.withPocs;
+        const hasVulnFilters = this.filters.kev || this.filters.highEpss || this.filters.critical || this.filters.hideLowInfo || this.filters.nucleiOnly || this.filters.withPocs;
         const vulnMatchesFilter = (vulnNode) => {
             if (!vulnNode) return false;
             const data = typeof vulnNode.data === 'function' ? vulnNode.data() : vulnNode;
+            const severity = String(data.severity || '').toUpperCase();
+            const source = String(data.source || '').toLowerCase();
             if (this.filters.kev) {
                 if (data.is_cisa_kev !== true && data.is_cisa_kev !== 1) return false;
             }
@@ -2646,8 +2751,13 @@ class EASMDashboard {
                 if (epssScore <= 0.5) return false;
             }
             if (this.filters.critical) {
-                const severity = String(data.severity || '').toUpperCase();
                 if (severity !== 'CRITICAL') return false;
+            }
+            if (this.filters.hideLowInfo) {
+                if (severity === 'LOW' || severity === 'INFO' || severity === 'UNKNOWN') return false;
+            }
+            if (this.filters.nucleiOnly) {
+                if (!source.includes('nuclei')) return false;
             }
             if (this.filters.withPocs) {
                 const hasPocs = data.has_pocs === true || (Array.isArray(data.exploits) && data.exploits.length > 0);
@@ -2660,8 +2770,9 @@ class EASMDashboard {
         const nodesToKeep = new Set();
 
         if (hasVulnFilters) {
-            // Find all matching vulnerabilities
+            // Find all matching vulnerabilities within lead scope
             this.cy.nodes('[type="vulnerability"]').forEach(node => {
+                if (this.visibleLeadNodes && !this.visibleLeadNodes.has(node.id())) return;
                 if (vulnMatchesFilter(node)) {
                     nodesToKeep.add(node.id());
                     addAllAncestors(node, nodesToKeep);
@@ -2670,6 +2781,7 @@ class EASMDashboard {
 
             // Evaluate cluster_vulns nodes
             this.cy.nodes('[type="cluster_vulns"]').forEach(cNode => {
+                if (this.visibleLeadNodes && !this.visibleLeadNodes.has(cNode.id())) return;
                 const parentId = cNode.data('parent_srv') || cNode.data('parent_ip');
                 const parentNode = this.cy.getElementById(parentId);
                 if (parentNode.length > 0) {
@@ -2686,6 +2798,7 @@ class EASMDashboard {
 
             // Evaluate cluster_services nodes
             this.cy.nodes('[type="cluster_services"]').forEach(cNode => {
+                if (this.visibleLeadNodes && !this.visibleLeadNodes.has(cNode.id())) return;
                 const parentId = cNode.data('parent_ip');
                 const parentNode = this.cy.getElementById(parentId);
                 if (parentNode.length > 0) {
@@ -2708,16 +2821,19 @@ class EASMDashboard {
             });
         } else if (this.filters.vulnServicesOnly) {
             this.cy.nodes('[type="vulnerability"]').forEach(node => {
+                if (this.visibleLeadNodes && !this.visibleLeadNodes.has(node.id())) return;
                 nodesToKeep.add(node.id());
                 addAllAncestors(node, nodesToKeep);
             });
             this.cy.nodes('[type="cluster_vulns"]').forEach(cNode => {
+                if (this.visibleLeadNodes && !this.visibleLeadNodes.has(cNode.id())) return;
                 nodesToKeep.add(cNode.id());
                 const parentId = cNode.data('parent_srv') || cNode.data('parent_ip');
                 nodesToKeep.add(parentId);
                 addAllAncestors(this.cy.getElementById(parentId), nodesToKeep);
             });
             this.cy.nodes('[type="cluster_services"]').forEach(cNode => {
+                if (this.visibleLeadNodes && !this.visibleLeadNodes.has(cNode.id())) return;
                 const parentId = cNode.data('parent_ip');
                 const parentNode = this.cy.getElementById(parentId);
                 if (parentNode.length > 0) {
@@ -2731,23 +2847,67 @@ class EASMDashboard {
                     }
                 }
             });
-        } else if (this.filters.servicesOnly) {
+        } else if (this.filters.verifiedServicesOnly) {
+            const isVerifiedActiveSrv = (srvNode) => {
+                const data = typeof srvNode.data === 'function' ? srvNode.data() : srvNode;
+                if (data.is_active_scan === true || data.verified_active === true) return true;
+                const sources = Array.isArray(data.sources) ? data.sources : [];
+                return sources.some(s => typeof s === 'string' && (s.toLowerCase().includes('masscan') || s.toLowerCase().includes('active') || s.toLowerCase().includes('nuclei')));
+            };
+
             this.cy.nodes('[type="service"], node[type="http"], node[type="https"]').forEach(node => {
-                nodesToKeep.add(node.id());
-                addAllAncestors(node, nodesToKeep);
-                node.outgoers('node').forEach(v => nodesToKeep.add(v.id()));
+                if (this.visibleLeadNodes && !this.visibleLeadNodes.has(node.id())) return;
+                if (isVerifiedActiveSrv(node)) {
+                    nodesToKeep.add(node.id());
+                    addAllAncestors(node, nodesToKeep);
+                    node.outgoers('node').forEach(v => {
+                        if (!this.visibleLeadNodes || this.visibleLeadNodes.has(v.id())) nodesToKeep.add(v.id());
+                    });
+                }
             });
             this.cy.nodes('[type="cluster_services"]').forEach(cNode => {
+                if (this.visibleLeadNodes && !this.visibleLeadNodes.has(cNode.id())) return;
+                const parentId = cNode.data('parent_ip');
+                const parentNode = this.cy.getElementById(parentId);
+                if (parentNode.length > 0) {
+                    const srvNodes = parentNode.outgoers('node[type="service"], node[type="http"], node[type="https"]');
+                    const activeSrvs = srvNodes.filter(isVerifiedActiveSrv);
+                    if (activeSrvs.length > 0) {
+                        nodesToKeep.add(cNode.id());
+                        nodesToKeep.add(parentId);
+                        addAllAncestors(parentNode, nodesToKeep);
+                        cNode.data('count', activeSrvs.length);
+                        cNode.data('label', `+ ${activeSrvs.length} Verified ${activeSrvs.length === 1 ? 'Service' : 'Services'}`);
+                    }
+                }
+            });
+        } else if (this.filters.servicesOnly) {
+            this.cy.nodes('[type="service"], node[type="http"], node[type="https"]').forEach(node => {
+                if (this.visibleLeadNodes && !this.visibleLeadNodes.has(node.id())) return;
+                nodesToKeep.add(node.id());
+                addAllAncestors(node, nodesToKeep);
+                node.outgoers('node').forEach(v => {
+                    if (!this.visibleLeadNodes || this.visibleLeadNodes.has(v.id())) nodesToKeep.add(v.id());
+                });
+            });
+            this.cy.nodes('[type="cluster_services"]').forEach(cNode => {
+                if (this.visibleLeadNodes && !this.visibleLeadNodes.has(cNode.id())) return;
                 nodesToKeep.add(cNode.id());
                 const parentId = cNode.data('parent_ip');
                 nodesToKeep.add(parentId);
                 addAllAncestors(this.cy.getElementById(parentId), nodesToKeep);
             });
         } else {
-            // No restrictive category filter active: keep all
-            this.cy.nodes().forEach(node => {
-                nodesToKeep.add(node.id());
-            });
+            // No restrictive category filter active: keep all nodes that are currently within the lead scope
+            if (this.visibleLeadNodes && this.visibleLeadNodes.size > 0) {
+                this.visibleLeadNodes.forEach(id => {
+                    nodesToKeep.add(id);
+                });
+            } else {
+                this.cy.nodes().forEach(node => {
+                    nodesToKeep.add(node.id());
+                });
+            }
         }
 
         // Invariant: Whenever a parent asset is kept on screen, all its active collapsed
@@ -2923,12 +3083,18 @@ class EASMDashboard {
                 const epss = v.epss_score ? `EPSS ${(v.epss_score * 100).toFixed(1)}%` : '';
                 const expCount = (v.exploits && v.exploits.length) || v.exploit_count || 0;
                 const cveName = v.cve_id || v.name || v.label;
+                const vulnSource = v.source || 'NVD';
+                const isNuclei = String(vulnSource).toLowerCase().includes('nuclei');
+                const sourceBadge = isNuclei 
+                    ? '<span class="mini-badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4);"><i data-lucide="shield-alert" class="badge-icon"></i> Nuclei</span>'
+                    : '<span class="mini-badge" style="background: rgba(0, 240, 255, 0.12); color: #00f0ff; border: 1px solid rgba(0, 240, 255, 0.3);"><i data-lucide="database" class="badge-icon"></i> NVD</span>';
                 
                 return `
                 <div class="risk-item-card vuln-item severity-${sevClass}">
                     <div class="risk-card-top">
                         <div class="risk-card-title">
                             <span class="cve-code">${cveName}</span>
+                            ${sourceBadge}
                             ${isKev ? '<span class="mini-badge kev"><i data-lucide="shield-alert" class="badge-icon"></i> CISA KEV</span>' : ''}
                             ${expCount > 0 ? `<span class="mini-badge poc"><i data-lucide="file-code" class="badge-icon"></i> ${expCount} PoC</span>` : ''}
                         </div>
@@ -2937,10 +3103,11 @@ class EASMDashboard {
                     <div class="risk-card-metrics">
                         ${cvss ? `<span class="metric-pill"><strong>Score:</strong> ${cvss}</span>` : ''}
                         ${epss ? `<span class="metric-pill"><strong>Prob:</strong> ${epss}</span>` : ''}
+                        <span class="metric-pill" style="color: ${isNuclei ? '#c084fc' : '#00f0ff'};"><strong>Source:</strong> ${vulnSource}</span>
                     </div>
                     ${v.description ? `<div class="risk-card-desc" title="${v.description.replace(/"/g, '&quot;')}">${v.description}</div>` : ''}
                     <div class="risk-card-links">
-                        <a href="https://nvd.nist.gov/vuln/detail/${cveName}" target="_blank" rel="noopener" class="risk-link-btn"><i data-lucide="external-link" class="badge-icon"></i> NVD Details</a>
+                        ${cveName && cveName.startsWith('CVE-') ? `<a href="https://nvd.nist.gov/vuln/detail/${cveName}" target="_blank" rel="noopener" class="risk-link-btn"><i data-lucide="external-link" class="badge-icon"></i> NVD Details</a>` : ''}
                         ${v.id ? `<button type="button" class="risk-focus-btn" onclick="window.dashboard.focusNode('${v.id}')"><i data-lucide="crosshair" class="badge-icon"></i> Focus</button>` : ''}
                     </div>
                 </div>`;
@@ -2958,12 +3125,18 @@ class EASMDashboard {
                 const epss = v.epss_score ? `EPSS ${(v.epss_score * 100).toFixed(1)}%` : '';
                 const expCount = (v.exploits && v.exploits.length) || v.exploit_count || 0;
                 const cveName = v.cve_id || v.name || v.label;
+                const vulnSource = v.source || 'NVD';
+                const isNuclei = String(vulnSource).toLowerCase().includes('nuclei');
+                const sourceBadge = isNuclei 
+                    ? '<span class="mini-badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4);"><i data-lucide="shield-alert" class="badge-icon"></i> Nuclei</span>'
+                    : '<span class="mini-badge" style="background: rgba(0, 240, 255, 0.12); color: #00f0ff; border: 1px solid rgba(0, 240, 255, 0.3);"><i data-lucide="database" class="badge-icon"></i> NVD</span>';
                 
                 return `
                 <div class="risk-item-card vuln-item severity-critical">
                     <div class="risk-card-top">
                         <div class="risk-card-title">
                             <span class="cve-code" style="color: #ff4757;">${cveName}</span>
+                            ${sourceBadge}
                             ${isKev ? '<span class="mini-badge kev"><i data-lucide="shield-alert" class="badge-icon"></i> CISA KEV</span>' : ''}
                             ${expCount > 0 ? `<span class="mini-badge poc"><i data-lucide="file-code" class="badge-icon"></i> ${expCount} PoC</span>` : ''}
                         </div>
@@ -2972,6 +3145,7 @@ class EASMDashboard {
                     <div class="risk-card-metrics">
                         ${cvss ? `<span class="metric-pill"><strong>Score:</strong> ${cvss}</span>` : ''}
                         ${epss ? `<span class="metric-pill"><strong>Prob:</strong> ${epss}</span>` : ''}
+                        <span class="metric-pill" style="color: ${isNuclei ? '#c084fc' : '#00f0ff'};"><strong>Source:</strong> ${vulnSource}</span>
                     </div>
                     ${v.description ? `<div class="risk-card-desc" title="${v.description.replace(/"/g, '&quot;')}">${v.description}</div>` : ''}
                     <div class="risk-card-links">
@@ -3742,6 +3916,14 @@ class EASMDashboard {
                     <span class="value">${data.epss_score ? (data.epss_score * 100).toFixed(1) + '%' : 'N/A'}</span>
                 </div>
                 <div class="property">
+                    <span class="key">Source:</span>
+                    <span class="value">
+                        <span class="mini-badge" style="background: rgba(0, 240, 255, 0.12); color: #00f0ff; border: 1px solid rgba(0, 240, 255, 0.3); font-weight: 600; padding: 2px 8px; border-radius: 4px;">
+                            ${data.source || 'NVD'}
+                        </span>
+                    </span>
+                </div>
+                <div class="property">
                     <span class="key">Risk Level:</span>
                     <span class="value">${data.risk_level || 'Unknown'}</span>
                 </div>
@@ -4467,11 +4649,33 @@ class EASMDashboard {
 
     updateTargetBadgeCount() {
         const badge = document.getElementById('target-badge-count');
+        const targetBtn = document.getElementById('btn-toggle-targets');
+        const scanIndicator = document.getElementById('target-scan-indicator');
+
+        // Check if any target is currently scanning
+        const isAnyScanning = Object.values(this.targetStatuses).some(t => 
+            t.status === 'scanning' || t.status === 'running' || 
+            t.nuclei_status === 'scanning' || t.nuclei_status === 'running'
+        );
+
+        if (targetBtn) {
+            if (isAnyScanning) {
+                targetBtn.classList.add('is-scanning');
+            } else {
+                targetBtn.classList.remove('is-scanning');
+            }
+        }
+
+        if (scanIndicator) {
+            scanIndicator.style.display = isAnyScanning ? 'inline-flex' : 'none';
+        }
+
         if (badge) {
             const count = this.markedTargets.size;
             badge.textContent = count;
-            badge.style.display = count > 0 ? 'inline-block' : 'none';
+            badge.style.display = (count > 0 && !isAnyScanning) ? 'inline-block' : 'none';
         }
+
         const counterHeader = document.getElementById('targets-header-count');
         if (counterHeader) {
             counterHeader.textContent = `${this.markedTargets.size} Targets`;
@@ -4523,10 +4727,15 @@ class EASMDashboard {
         itemsList.style.display = 'flex';
 
         const targetsHtml = Array.from(this.markedTargets).map(ip => {
-            const statusObj = this.targetStatuses[ip] || { status: 'idle', ports_count: 0 };
+            const statusObj = this.targetStatuses[ip] || { status: 'idle', nuclei_status: 'idle', ports_count: 0 };
             const status = statusObj.status || 'idle';
+            const nucleiStatus = statusObj.nuclei_status || 'idle';
             const portsCount = statusObj.ports_count || (Array.isArray(statusObj.ports) ? statusObj.ports.length : 0);
-            const isScanning = status === 'scanning' || status === 'running';
+            const vulnsCount = statusObj.vulns_count || 0;
+            const isScanningPorts = status === 'scanning' || status === 'running';
+            const isScanningNuclei = nucleiStatus === 'scanning' || nucleiStatus === 'running';
+            const isAnyScanning = isScanningPorts || isScanningNuclei;
+
             const portsList = Array.isArray(statusObj.ports) ? statusObj.ports : [];
             const portsTagsHtml = portsList.length > 0 ? `
                 <div class="target-card-ports-chips" style="display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem;">
@@ -4546,26 +4755,41 @@ class EASMDashboard {
                     <div class="target-card-left">
                         <div class="target-card-ip-row">
                             <span class="target-card-ip">${ip}</span>
-                            <span class="target-status-tag ${status}">${status}</span>
+                            <span class="target-status-tag ${status}" title="Port Scan: ${status}">${status}</span>
+                            ${nucleiStatus !== 'idle' ? `<span class="target-status-tag ${nucleiStatus}" style="border-color: rgba(239, 68, 68, 0.5); color: #f87171;" title="Nuclei: ${nucleiStatus}">Nuclei: ${nucleiStatus}</span>` : ''}
                         </div>
-                        <div class="target-card-meta">
-                            <span>Discovered Ports: <strong style="color: #00f0ff;">${portsCount}</strong></span>
-                            ${statusObj.error ? `<span style="color: #ef4444;" title="${statusObj.error}">Error</span>` : ''}
+                        <div class="target-card-meta" style="display: flex; gap: 0.75rem; font-size: 0.74rem; color: var(--text-secondary); margin-top: 0.2rem;">
+                            <span>Ports: <strong style="color: #00f0ff;">${portsCount}</strong></span>
+                            <span>Vulns: <strong style="color: #f87171;">${vulnsCount}</strong></span>
+                            ${statusObj.error ? `<span style="color: #ef4444;" title="${this.escapeHtml(statusObj.error)}">Error</span>` : ''}
                         </div>
                         ${portsTagsHtml}
                     </div>
-                    <div class="target-card-actions">
-                        ${isScanning ? `
-                            <button type="button" class="target-item-btn" title="Cancel scan" onclick="window.dashboard.cancelActiveScan('${ip}')">
-                                <i data-lucide="square" class="ui-icon"></i>
+                    <div class="target-actions-btns">
+                        ${isScanningPorts ? `
+                            <button type="button" class="btn-target-scan-mini" title="Cancel Port Scan" onclick="window.dashboard.cancelActiveScan('${ip}', 'masscan')">
+                                <i data-lucide="square" class="ui-icon" style="width: 12px; height: 12px; color: #f59e0b;"></i>
+                                <span>Stop</span>
                             </button>
                         ` : `
-                            <button type="button" class="target-item-btn" title="Scan this IP" onclick="window.dashboard.startActiveScan('${ip}')">
-                                <i data-lucide="play" class="ui-icon"></i>
+                            <button type="button" class="btn-target-scan-mini port-scan" title="Scan Ports (Masscan)" onclick="window.dashboard.startActiveScan('${ip}')">
+                                <i data-lucide="play" class="ui-icon" style="width: 12px; height: 12px;"></i>
+                                <span>Ports</span>
                             </button>
                         `}
-                        <button type="button" class="target-item-btn btn-remove" title="Remove target" onclick="window.dashboard.removeTarget('${ip}')">
-                            <i data-lucide="trash-2" class="ui-icon"></i>
+                        ${isScanningNuclei ? `
+                            <button type="button" class="btn-target-scan-mini" title="Cancel Nuclei Scan" onclick="window.dashboard.cancelActiveScan('${ip}', 'nuclei')">
+                                <i data-lucide="square" class="ui-icon" style="width: 12px; height: 12px; color: #ef4444;"></i>
+                                <span>Stop</span>
+                            </button>
+                        ` : `
+                            <button type="button" class="btn-target-scan-mini nuclei-scan" title="Scan Vulns (Nuclei)" onclick="window.dashboard.startNucleiScan('${ip}')">
+                                <i data-lucide="shield-alert" class="ui-icon" style="width: 12px; height: 12px;"></i>
+                                <span>Vulns</span>
+                            </button>
+                        `}
+                        <button type="button" class="btn-target-remove-mini" title="Remove target" onclick="window.dashboard.removeTarget('${ip}')">
+                            <i data-lucide="trash-2" class="ui-icon" style="width: 14px; height: 14px;"></i>
                         </button>
                     </div>
                 </div>
@@ -4601,10 +4825,63 @@ class EASMDashboard {
             });
         }
 
+        // Drawer Expand / Collapse Toggle Button
+        const expandBtn = document.getElementById('btn-toggle-drawer-expand');
+        const drawer = document.getElementById('targets-drawer');
+        if (expandBtn && drawer) {
+            expandBtn.addEventListener('click', () => {
+                drawer.classList.toggle('expanded');
+                const isExpanded = drawer.classList.contains('expanded');
+                const expIcon = expandBtn.querySelector('.expand-icon');
+                const colIcon = expandBtn.querySelector('.collapse-icon');
+                if (expIcon && colIcon) {
+                    expIcon.style.display = isExpanded ? 'none' : 'block';
+                    colIcon.style.display = isExpanded ? 'block' : 'none';
+                }
+                // Dynamically resize cytoscape canvas
+                if (this.cy) {
+                    setTimeout(() => {
+                        this.cy.resize();
+                    }, 320);
+                }
+            });
+        }
+
+        // Drawer Tabs Switching
+        const tabBtns = document.querySelectorAll('.drawer-tab-btn');
+        const tabPanes = {
+            'targets-tab': document.getElementById('tab-pane-targets'),
+            'nuclei-tab': document.getElementById('tab-pane-nuclei'),
+            'logs-tab': document.getElementById('tab-pane-logs'),
+        };
+
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const targetTab = btn.getAttribute('data-tab');
+                tabBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                Object.keys(tabPanes).forEach(k => {
+                    if (tabPanes[k]) {
+                        tabPanes[k].style.display = (k === targetTab) ? 'flex' : 'none';
+                    }
+                });
+            });
+        });
+
+        // Scan All Ports button
         const scanAllBtn = document.getElementById('btn-scan-all-targets');
         if (scanAllBtn) {
             scanAllBtn.addEventListener('click', () => {
                 this.startActiveScan();
+            });
+        }
+
+        // Run Nuclei on All Targets button
+        const runAllNucleiBtn = document.getElementById('btn-run-all-nuclei');
+        if (runAllNucleiBtn) {
+            runAllNucleiBtn.addEventListener('click', () => {
+                this.startNucleiScan();
             });
         }
 
@@ -4615,7 +4892,18 @@ class EASMDashboard {
             });
         }
 
-        // Preset buttons
+        // Clear logs button
+        const clearLogsBtn = document.getElementById('btn-clear-scan-logs');
+        if (clearLogsBtn) {
+            clearLogsBtn.addEventListener('click', () => {
+                const consoleEl = document.getElementById('scan-live-console');
+                if (consoleEl) {
+                    consoleEl.innerHTML = '<div class="console-line info">[System] Log console cleared.</div>';
+                }
+            });
+        }
+
+        // Preset buttons for Masscan
         const presetBtns = document.querySelectorAll('.preset-btn');
         const customPortsGroup = document.getElementById('custom-ports-group');
         presetBtns.forEach(btn => {
@@ -4629,7 +4917,7 @@ class EASMDashboard {
             });
         });
 
-        // Rate slider
+        // Rate slider for Masscan
         const rateSlider = document.getElementById('input-scan-rate');
         const rateDisplay = document.getElementById('scan-rate-display');
         if (rateSlider && rateDisplay) {
@@ -4646,13 +4934,12 @@ class EASMDashboard {
             return;
         }
 
-        const consoleSection = document.getElementById('scan-live-console-section');
-        if (consoleSection) consoleSection.style.display = 'flex';
+        // Switch to logs tab or show feedback
+        this.switchToLogsTab();
 
-        // Check permissions first
         try {
             const perm = await window.api.checkScanPermissions();
-            if (!perm.available) {
+            if (perm.masscan && !perm.masscan.available) {
                 this.addScanLog('error', 'Masscan executable not found on system. Please install masscan.');
                 return;
             }
@@ -4669,11 +4956,15 @@ class EASMDashboard {
         let portsValue = '--top-ports 100';
         if (this.currentPortPreset === 'custom' && customPortsInput) {
             portsValue = customPortsInput.value || '--top-ports 100';
+        } else if (this.currentPortPreset === 'all') {
+            portsValue = '-p0-65535';
+        } else if (this.currentPortPreset === 'web') {
+            portsValue = '-p80,443,8080,8443,8000,8888,9000,9443';
         }
 
         const config = {
             targets: targets,
-            preset: this.currentPortPreset,
+            preset: this.currentPortPreset || 'top100',
             ports: portsValue,
             rate: rateSlider ? parseInt(rateSlider.value) : 1000,
             disable_ping: pnCheckbox ? pnCheckbox.checked : true,
@@ -4681,7 +4972,6 @@ class EASMDashboard {
             custom_flags: extraFlagsInput ? extraFlagsInput.value : ''
         };
 
-        // Mark targets as scanning locally
         targets.forEach(ip => {
             if (!this.targetStatuses[ip]) {
                 this.targetStatuses[ip] = { ip: ip, status: 'scanning', ports_count: 0 };
@@ -4691,32 +4981,111 @@ class EASMDashboard {
         });
         this.renderTargetsList();
 
-        this.addScanLog('info', `Dispatching Masscan active scan for ${targets.length} target(s) [${config.preset}]...`);
+        this.addScanLog('info', `Dispatching Masscan active port scan for ${targets.length} target(s) [${config.preset}]...`);
 
         try {
             const res = await window.api.startActiveScan(config);
             if (res.success) {
-                this.addScanLog('success', res.message || 'Active scan running in background.');
+                this.addScanLog('success', res.message || 'Port scan running in background.');
                 this.startStatusPolling();
             } else {
-                this.addScanLog('error', res.detail || 'Failed to start active scan.');
+                this.addScanLog('error', res.detail || 'Failed to start active port scan.');
             }
         } catch (err) {
             this.addScanLog('error', `Error starting active scan: ${err.message}`);
         }
     }
 
-    async cancelActiveScan(target = null) {
+    async startNucleiScan(specificTarget = null) {
+        const targets = specificTarget ? [specificTarget] : Array.from(this.markedTargets);
+        if (targets.length === 0) {
+            this.addScanLog('warning', 'No targets marked for Nuclei scanning.');
+            return;
+        }
+
+        this.switchToLogsTab();
+
         try {
-            await window.api.cancelActiveScan(target, target === null);
-            this.addScanLog('warning', target ? `Cancelled scan on ${target}` : 'Cancelled all active scans.');
+            const perm = await window.api.checkScanPermissions();
+            if (perm.nuclei && !perm.nuclei.available) {
+                this.addScanLog('error', 'Nuclei binary not found on system. Please install Nuclei.');
+                return;
+            }
+        } catch (e) {
+            console.warn('Could not verify Nuclei permissions:', e);
+        }
+
+        // Collect selected severities
+        const severities = [];
+        if (document.getElementById('chk-nuclei-sev-critical')?.checked) severities.push('critical');
+        if (document.getElementById('chk-nuclei-sev-high')?.checked) severities.push('high');
+        if (document.getElementById('chk-nuclei-sev-medium')?.checked) severities.push('medium');
+        if (document.getElementById('chk-nuclei-sev-low')?.checked) severities.push('low');
+        if (document.getElementById('chk-nuclei-sev-info')?.checked) severities.push('info');
+
+        // Collect selected tags
+        const tags = [];
+        document.querySelectorAll('.chk-nuclei-tag:checked').forEach(chk => {
+            tags.push(chk.value);
+        });
+
+        const customTagsInput = document.getElementById('input-nuclei-custom-tags');
+        const rateLimitInput = document.getElementById('input-nuclei-rate-limit');
+        const concurrencyInput = document.getElementById('input-nuclei-concurrency');
+        const customFlagsInput = document.getElementById('input-nuclei-custom-flags');
+
+        const config = {
+            targets: targets,
+            severities: severities.length > 0 ? severities : ['critical', 'high'],
+            tags: tags,
+            custom_tags: customTagsInput ? customTagsInput.value : '',
+            rate_limit: rateLimitInput ? parseInt(rateLimitInput.value) : 150,
+            concurrency: concurrencyInput ? parseInt(concurrencyInput.value) : 25,
+            custom_flags: customFlagsInput ? customFlagsInput.value : ''
+        };
+
+        targets.forEach(ip => {
+            if (!this.targetStatuses[ip]) {
+                this.targetStatuses[ip] = { ip: ip, nuclei_status: 'scanning', vulns_count: 0 };
+            } else {
+                this.targetStatuses[ip].nuclei_status = 'scanning';
+            }
+        });
+        this.renderTargetsList();
+
+        this.addScanLog('info', `[Nuclei] Dispatching vulnerability scan on ${targets.length} target(s) [Severities: ${config.severities.join(', ')}]...`);
+
+        try {
+            const res = await window.api.startNucleiScan(config);
+            if (res.success) {
+                this.addScanLog('success', res.message || 'Nuclei scan started.');
+                this.startStatusPolling();
+            } else {
+                this.addScanLog('error', res.detail || 'Failed to start Nuclei scan.');
+            }
+        } catch (err) {
+            this.addScanLog('error', `Error starting Nuclei scan: ${err.message}`);
+        }
+    }
+
+    switchToLogsTab() {
+        const logsTabBtn = document.querySelector('.drawer-tab-btn[data-tab="logs-tab"]');
+        if (logsTabBtn) {
+            logsTabBtn.click();
+        }
+    }
+
+    async cancelActiveScan(target = null, scanType = 'all') {
+        try {
+            await window.api.cancelActiveScan(target, target === null, scanType);
+            this.addScanLog('warning', target ? `Cancelled ${scanType} scan on ${target}` : `Cancelled all ${scanType} scans.`);
             if (target && this.targetStatuses[target]) {
-                this.targetStatuses[target].status = 'idle';
+                if (scanType === 'all' || scanType === 'masscan') this.targetStatuses[target].status = 'idle';
+                if (scanType === 'all' || scanType === 'nuclei') this.targetStatuses[target].nuclei_status = 'idle';
             } else if (!target) {
                 Object.keys(this.targetStatuses).forEach(ip => {
-                    if (this.targetStatuses[ip].status === 'scanning') {
-                        this.targetStatuses[ip].status = 'idle';
-                    }
+                    if (scanType === 'all' || scanType === 'masscan') this.targetStatuses[ip].status = 'idle';
+                    if (scanType === 'all' || scanType === 'nuclei') this.targetStatuses[ip].nuclei_status = 'idle';
                 });
             }
             this.renderTargetsList();
@@ -4735,6 +5104,7 @@ class EASMDashboard {
                     status.targets.forEach(t => {
                         this.targetStatuses[t.ip] = t;
                     });
+                    this.updateTargetBadgeCount();
                     this.renderTargetsList();
 
                     if (Array.isArray(status.recent_logs) && status.recent_logs.length > 0) {
@@ -4746,7 +5116,8 @@ class EASMDashboard {
                     if (status.running_scans === 0) {
                         clearInterval(this.scanPollingInterval);
                         this.scanPollingInterval = null;
-                        this.addScanLog('success', 'All active scans finished. Refreshing attack surface graph...');
+                        this.updateTargetBadgeCount();
+                        this.addScanLog('success', 'All scan tasks completed. Refreshing attack surface graph & metrics...');
                         await this.loadSummary();
                         await this.loadGraph(true);
                     }
@@ -4809,3 +5180,4 @@ document.addEventListener('DOMContentLoaded', () => {
         window.dashboard.init();
     }, 100);
 });
+

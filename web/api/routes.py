@@ -1,9 +1,10 @@
 """REST API routes for DetecTI-CLI EASM dashboard."""
 
 import asyncio
+import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.requests import Request
@@ -257,10 +258,12 @@ async def export_graph_data(
 # ----------------------------------------------------------------------
 
 from modules.masscan import MasscanRunner
+from modules.nuclei import NucleiRunner
 
 # In-memory target registry and running tasks tracking
 _target_registry: Dict[str, Dict] = {}
 _running_scan_tasks: Dict[str, asyncio.Task] = {}
+_running_nuclei_tasks: Dict[str, asyncio.Task] = {}
 _scan_log_history: List[Dict] = []
 
 
@@ -278,9 +281,20 @@ class ActiveScanRequest(BaseModel):
     custom_flags: Optional[str] = None
 
 
+class NucleiScanRequest(BaseModel):
+    targets: Optional[List[str]] = None
+    severities: Optional[List[str]] = ["critical", "high"]
+    tags: Optional[List[str]] = None
+    custom_tags: Optional[str] = None
+    rate_limit: Optional[int] = 150
+    concurrency: Optional[int] = 25
+    custom_flags: Optional[str] = None
+
+
 class CancelScanRequest(BaseModel):
     target: Optional[str] = None
     all: Optional[bool] = False
+    scan_type: Optional[str] = "all"  # 'masscan', 'nuclei', or 'all'
 
 
 def _append_scan_log(level: str, message: str, target: Optional[str] = None):
@@ -291,7 +305,7 @@ def _append_scan_log(level: str, message: str, target: Optional[str] = None):
         "target": target,
     }
     _scan_log_history.append(entry)
-    if len(_scan_log_history) > 100:
+    if len(_scan_log_history) > 150:
         _scan_log_history.pop(0)
 
 
@@ -315,11 +329,14 @@ async def set_target(req: TargetActionRequest) -> Dict:
         _target_registry[ip] = {
             "ip": ip,
             "status": "idle",
+            "nuclei_status": "idle",
             "ports_count": 0,
             "ports": [],
+            "vulns_count": 0,
             "error": None,
             "added_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "last_scan": None,
+            "last_nuclei_scan": None,
         }
         _append_scan_log("info", f"IP {ip} added to active targets.", target=ip)
     
@@ -340,6 +357,12 @@ async def remove_target(req: TargetActionRequest) -> Dict:
             task.cancel()
         _running_scan_tasks.pop(ip, None)
 
+    if ip in _running_nuclei_tasks:
+        task = _running_nuclei_tasks[ip]
+        if not task.done():
+            task.cancel()
+        _running_nuclei_tasks.pop(ip, None)
+
     if ip in _target_registry:
         del _target_registry[ip]
         _append_scan_log("info", f"IP {ip} removed from targets.", target=ip)
@@ -358,6 +381,12 @@ async def clear_all_targets() -> Dict:
         if not task.done():
             task.cancel()
     _running_scan_tasks.clear()
+
+    for ip, task in list(_running_nuclei_tasks.items()):
+        if not task.done():
+            task.cancel()
+    _running_nuclei_tasks.clear()
+
     count = len(_target_registry)
     _target_registry.clear()
     _append_scan_log("info", "All targets cleared.")
@@ -369,9 +398,14 @@ async def clear_all_targets() -> Dict:
 
 @router.get("/scan/check-permissions")
 async def check_scan_permissions() -> Dict:
-    """Verify Masscan binary availability and execution permissions."""
-    runner = MasscanRunner()
-    return runner.check_permissions()
+    """Verify Masscan and Nuclei binary availability and execution permissions."""
+    masscan_runner = MasscanRunner()
+    nuclei_runner = NucleiRunner()
+    return {
+        "masscan": masscan_runner.check_permissions(),
+        "nuclei": nuclei_runner.check_permissions(),
+        "available": masscan_runner.is_available(),
+    }
 
 
 @router.post("/scan/active")
@@ -380,74 +414,78 @@ async def start_active_scan(
     request: Request,
     db: Optional[DatabaseManager] = Depends(get_db_manager),
 ) -> Dict:
-    """Start asynchronous Masscan port scan on designated targets or all marked targets."""
+    """Trigger background active port scan with Masscan against marked targets."""
     runner = MasscanRunner()
-    perm = runner.check_permissions()
-    if not perm["available"]:
+    if not runner.is_available():
         raise HTTPException(
-            status_code=400,
-            detail="Masscan executable not found on server. Install Masscan to run active scans.",
+            status_code=503,
+            detail="Masscan binary not found on server. Install masscan and grant raw packet capabilities.",
         )
 
     # Determine targets to scan
     target_ips = req.targets if req.targets else list(_target_registry.keys())
     if not target_ips:
-        raise HTTPException(status_code=400, detail="No targets selected for active scan.")
+        raise HTTPException(status_code=400, detail="No IP targets selected or marked for scanning.")
 
-    # Ensure all targets exist in registry
+    ports_arg = req.ports or "--top-ports 100"
+    rate_arg = req.rate or 1000
+    pn_arg = req.disable_ping if req.disable_ping is not None else True
+    banners_arg = req.banners if req.banners is not None else True
+    flags_arg = req.custom_flags
+
+    # Auto-register IPs if not yet marked
     for ip in target_ips:
         if ip not in _target_registry:
             _target_registry[ip] = {
                 "ip": ip,
                 "status": "idle",
+                "nuclei_status": "idle",
                 "ports_count": 0,
                 "ports": [],
+                "vulns_count": 0,
                 "error": None,
                 "added_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "last_scan": None,
+                "last_nuclei_scan": None,
             }
 
-    # Resolve port parameters based on preset
-    ports_arg = req.ports
-    if req.preset == "top100":
-        ports_arg = "--top-ports 100"
-    elif req.preset == "all":
-        ports_arg = "-p0-65535"
-    elif req.preset == "web":
-        ports_arg = "-p80,443,8080,8443,8000,8888,9000,9443"
-
     async def _run_single_target_scan(ip_to_scan: str):
-        _target_registry[ip_to_scan]["status"] = "scanning"
-        _target_registry[ip_to_scan]["error"] = None
-        _append_scan_log("info", f"Starting active scan on {ip_to_scan} ({ports_arg}, rate={req.rate})...", target=ip_to_scan)
-
         try:
+            _target_registry[ip_to_scan]["status"] = "scanning"
+            _target_registry[ip_to_scan]["error"] = None
+            _append_scan_log("info", f"Starting active scan on {ip_to_scan} ({ports_arg}, {rate_arg} pps)...", target=ip_to_scan)
+
             scan_res = await runner.scan_target(
                 target_ip=ip_to_scan,
                 ports=ports_arg,
-                rate=req.rate or 1000,
-                disable_ping=req.disable_ping if req.disable_ping is not None else True,
-                banners=req.banners if req.banners is not None else True,
-                custom_flags=req.custom_flags,
+                rate=rate_arg,
+                disable_ping=pn_arg,
+                banners=banners_arg,
+                custom_flags=flags_arg,
+                timeout=180.0,
             )
 
             if scan_res.get("success"):
-                open_ports = scan_res.get("ports", [])
+                open_ports = scan_res.get("open_ports", [])
                 _target_registry[ip_to_scan]["status"] = "completed"
                 _target_registry[ip_to_scan]["ports_count"] = len(open_ports)
                 _target_registry[ip_to_scan]["ports"] = open_ports
                 _target_registry[ip_to_scan]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                # Resolve active database manager dynamically and persist discovered services
-                active_db = getattr(request.app.state, "db_manager", None) or db
+                active_db = db
                 if not active_db or not Path(active_db.db_path).exists():
-                    dbs_dir = Path.cwd() / "data" / "dbs"
-                    if dbs_dir.exists():
-                        existing_dbs = sorted(list(dbs_dir.glob("*.sqlite")))
-                        if existing_dbs:
-                            active_db = DatabaseManager(existing_dbs[0])
-                            request.app.state.db_manager = active_db
-                            request.app.state.db_path = str(existing_dbs[0].resolve())
+                    current_db_path = getattr(request.app.state, "db_path", None)
+                    if current_db_path and Path(current_db_path).exists():
+                        active_db = DatabaseManager(Path(current_db_path))
+                        request.app.state.db_manager = active_db
+                    else:
+                        dbs_dir = Path.cwd() / "data" / "dbs"
+                        if dbs_dir.exists():
+                            existing_dbs = list(dbs_dir.glob("*.sqlite"))
+                            if existing_dbs:
+                                active_db = DatabaseManager(existing_dbs[0])
+                                request.app.state.db_manager = active_db
+                                request.app.state.db_path = str(existing_dbs[0].resolve())
 
                 if active_db and Path(active_db.db_path).exists():
                     merge_info = active_db.merge_active_scan_services(ip_to_scan, open_ports)
@@ -495,30 +533,310 @@ async def start_active_scan(
     }
 
 
+# ----------------------------------------------------------------------
+# Nuclei Vulnerability Scan Endpoints
+# ----------------------------------------------------------------------
+
+def _get_verified_active_services_for_ip(ip: str, db: Optional[DatabaseManager]) -> List[Dict[str, Any]]:
+    """Retrieve only verified active services (discovered/validated by active scan or containing active sources) for a given IP."""
+    active_services = []
+    if db and Path(db.db_path).exists():
+        import sqlite3
+        with sqlite3.connect(db.db_path) as conn:
+            ip_row = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (ip,)).fetchone()
+            if ip_row:
+                ip_id = ip_row[0]
+                services = conn.execute(
+                    "SELECT port, protocol, service_name, url, ssl, sources, banner FROM services WHERE ip_id = ?",
+                    (ip_id,)
+                ).fetchall()
+                for port, proto, s_name, s_url, s_ssl, s_sources, s_banner in services:
+                    # Parse sources to verify active validation
+                    sources_list = []
+                    if s_sources:
+                        try:
+                            sources_list = json.loads(s_sources)
+                            if not isinstance(sources_list, list):
+                                sources_list = [str(sources_list)]
+                        except Exception:
+                            sources_list = [s_sources]
+
+                    is_verified_active = any(
+                        isinstance(s, str) and ("masscan" in s.lower() or "active" in s.lower() or "nuclei" in s.lower())
+                        for s in sources_list
+                    ) or bool(s_banner and s_banner.strip())
+
+                    if is_verified_active:
+                        active_services.append({
+                            "port": port,
+                            "protocol": proto or "tcp",
+                            "service_name": s_name,
+                            "url": s_url,
+                            "ssl": bool(s_ssl),
+                            "sources": sources_list,
+                            "banner": s_banner,
+                        })
+    return active_services
+
+
+def _format_nuclei_targets_from_services(ip: str, services: List[Dict[str, Any]]) -> List[str]:
+    """Format verified active services into Nuclei endpoint URLs/host-ports."""
+    formatted_targets: List[str] = []
+    for svc in services:
+        port = svc["port"]
+        s_url = svc.get("url")
+        s_ssl = svc.get("ssl", False)
+        if s_url and str(s_url).startswith("http"):
+            formatted_targets.append(str(s_url).strip())
+        elif s_ssl or port in [443, 8443, 9443]:
+            formatted_targets.append(f"https://{ip}:{port}")
+        elif port in [80, 8080, 8000, 8888]:
+            formatted_targets.append(f"http://{ip}:{port}")
+        else:
+            formatted_targets.append(f"{ip}:{port}")
+
+    return list(dict.fromkeys(formatted_targets))
+
+
+def _format_nuclei_targets_for_ip(ip: str, db: Optional[DatabaseManager]) -> List[str]:
+    """Format an IP and its verified active services into Nuclei scan targets."""
+    active_services = _get_verified_active_services_for_ip(ip, db)
+    return _format_nuclei_targets_from_services(ip, active_services)
+
+
+@router.post("/scan/nuclei")
+async def start_nuclei_scan(
+    req: NucleiScanRequest,
+    request: Request,
+    db: Optional[DatabaseManager] = Depends(get_db_manager),
+) -> Dict:
+    """Trigger asynchronous Nuclei vulnerability scan against marked targets/services."""
+    runner = NucleiRunner()
+    if not runner.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Nuclei binary not found on server. Ensure nuclei is installed in PATH.",
+        )
+
+    target_ips = req.targets if req.targets else list(_target_registry.keys())
+    if not target_ips:
+        raise HTTPException(status_code=400, detail="No IP targets selected or marked for Nuclei scan.")
+
+    # Resolve active database
+    active_db = db
+    if not active_db or not Path(active_db.db_path).exists():
+        current_db_path = getattr(request.app.state, "db_path", None)
+        if current_db_path and Path(current_db_path).exists():
+            active_db = DatabaseManager(Path(current_db_path))
+            request.app.state.db_manager = active_db
+        else:
+            dbs_dir = Path.cwd() / "data" / "dbs"
+            if dbs_dir.exists():
+                existing_dbs = list(dbs_dir.glob("*.sqlite"))
+                if existing_dbs:
+                    active_db = DatabaseManager(existing_dbs[0])
+                    request.app.state.db_manager = active_db
+                    request.app.state.db_path = str(existing_dbs[0].resolve())
+
+    async def _run_single_nuclei_scan(ip_to_scan: str):
+        try:
+            if ip_to_scan in _target_registry:
+                _target_registry[ip_to_scan]["nuclei_status"] = "scanning"
+
+            # Check if there are verified active services discovered by Masscan / active scan
+            active_services = _get_verified_active_services_for_ip(ip_to_scan, active_db)
+
+            if not active_services:
+                _append_scan_log(
+                    "info",
+                    f"[Pre-Scan Rule] No verified active ports found for {ip_to_scan}. Running Masscan active verification first...",
+                    target=ip_to_scan
+                )
+                
+                # Execute Masscan runner to verify active ports
+                masscan_runner = MasscanRunner()
+                if masscan_runner.is_available():
+                    if ip_to_scan in _target_registry:
+                        _target_registry[ip_to_scan]["status"] = "scanning"
+                    
+                    def _masscan_log_cb(lvl: str, m: str):
+                        _append_scan_log(lvl, f"[Masscan Pre-Scan] {m}", target=ip_to_scan)
+
+                    m_res = await masscan_runner.scan_target(
+                        target=ip_to_scan,
+                        ports="--top-ports 100",
+                        rate=1000,
+                        disable_ping=True,
+                        banners=True,
+                        log_callback=_masscan_log_cb
+                    )
+
+                    if m_res.get("success"):
+                        open_ports = m_res.get("open_ports", [])
+                        if ip_to_scan in _target_registry:
+                            _target_registry[ip_to_scan]["status"] = "completed"
+                            _target_registry[ip_to_scan]["ports_count"] = len(open_ports)
+                            _target_registry[ip_to_scan]["ports"] = open_ports
+                            _target_registry[ip_to_scan]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                        if active_db and Path(active_db.db_path).exists() and open_ports:
+                            active_db.merge_active_scan_services(ip_to_scan, open_ports)
+                        
+                        _append_scan_log(
+                            "success",
+                            f"[Masscan Pre-Scan] Verification completed for {ip_to_scan}: {len(open_ports)} active port(s) verified.",
+                            target=ip_to_scan
+                        )
+                    else:
+                        if ip_to_scan in _target_registry:
+                            _target_registry[ip_to_scan]["status"] = "failed"
+                        _append_scan_log(
+                            "warning",
+                            f"[Masscan Pre-Scan] Masscan verification returned no open ports or error: {m_res.get('error', 'No open ports')}",
+                            target=ip_to_scan
+                        )
+                else:
+                    _append_scan_log(
+                        "warning",
+                        f"[Pre-Scan Rule] Masscan binary not available to verify active ports for {ip_to_scan}.",
+                        target=ip_to_scan
+                    )
+
+                # Re-query verified active services after Masscan execution
+                active_services = _get_verified_active_services_for_ip(ip_to_scan, active_db)
+
+            if not active_services:
+                if ip_to_scan in _target_registry:
+                    _target_registry[ip_to_scan]["nuclei_status"] = "completed"
+                    _target_registry[ip_to_scan]["vulns_count"] = 0
+                _append_scan_log(
+                    "warning",
+                    f"[Nuclei] Skipping Nuclei scan for {ip_to_scan}: No 'Verified Active' ports identified after pre-scan verification.",
+                    target=ip_to_scan
+                )
+                return
+
+            formatted_endpoints = _format_nuclei_targets_from_services(ip_to_scan, active_services)
+            _append_scan_log(
+                "info",
+                f"[Nuclei] Dispatching scan on {ip_to_scan} ({len(formatted_endpoints)} verified active endpoint(s): {', '.join(formatted_endpoints[:3])})...",
+                target=ip_to_scan
+            )
+
+            def _log_stream(level: str, msg: str):
+                _append_scan_log(level, f"[Nuclei] {msg}", target=ip_to_scan)
+
+            scan_res = await runner.scan_targets(
+                targets=formatted_endpoints,
+                severities=req.severities,
+                tags=req.tags,
+                custom_tags=req.custom_tags,
+                rate_limit=req.rate_limit or 150,
+                concurrency=req.concurrency or 25,
+                custom_flags=req.custom_flags,
+                timeout=600.0,
+                log_callback=_log_stream,
+            )
+
+            if scan_res.get("success"):
+                findings = scan_res.get("findings", [])
+                if ip_to_scan in _target_registry:
+                    _target_registry[ip_to_scan]["nuclei_status"] = "completed"
+                    _target_registry[ip_to_scan]["vulns_count"] = len(findings)
+                    _target_registry[ip_to_scan]["last_nuclei_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                if active_db and Path(active_db.db_path).exists() and findings:
+                    merge_info = active_db.merge_nuclei_findings(findings, fallback_ip=ip_to_scan)
+                    _append_scan_log(
+                        "success",
+                        f"[Nuclei] Scan on {ip_to_scan} completed: {len(findings)} vulnerability issue(s) discovered. ({merge_info.get('added_vulnerabilities', 0)} new, {merge_info.get('updated_vulnerabilities', 0)} updated in graph).",
+                        target=ip_to_scan
+                    )
+                else:
+                    _append_scan_log(
+                        "success",
+                        f"[Nuclei] Scan on {ip_to_scan} completed. {len(findings)} vulnerability issue(s) identified.",
+                        target=ip_to_scan
+                    )
+            else:
+                err_msg = scan_res.get("error", "Unknown Nuclei execution error")
+                if ip_to_scan in _target_registry:
+                    _target_registry[ip_to_scan]["nuclei_status"] = "failed"
+                _append_scan_log("error", f"[Nuclei] Scan on {ip_to_scan} failed: {err_msg}", target=ip_to_scan)
+
+        except asyncio.CancelledError:
+            if ip_to_scan in _target_registry:
+                _target_registry[ip_to_scan]["nuclei_status"] = "idle"
+            _append_scan_log("warning", f"[Nuclei] Scan on {ip_to_scan} cancelled.", target=ip_to_scan)
+        except Exception as ex:
+            if ip_to_scan in _target_registry:
+                _target_registry[ip_to_scan]["nuclei_status"] = "failed"
+            _append_scan_log("error", f"[Nuclei] Unexpected error scanning {ip_to_scan}: {str(ex)}", target=ip_to_scan)
+        finally:
+            _running_nuclei_tasks.pop(ip_to_scan, None)
+
+    for ip in target_ips:
+        if ip in _running_nuclei_tasks and not _running_nuclei_tasks[ip].done():
+            _running_nuclei_tasks[ip].cancel()
+
+        task = asyncio.create_task(_run_single_nuclei_scan(ip))
+        _running_nuclei_tasks[ip] = task
+
+    return {
+        "success": True,
+        "message": f"Nuclei vulnerability scan dispatched for {len(target_ips)} target(s).",
+        "targets": target_ips,
+        "severities": req.severities,
+    }
+
+
 @router.post("/scan/cancel")
 async def cancel_active_scan(req: CancelScanRequest) -> Dict:
-    """Cancel running active scan for a specific target or all targets."""
+    """Cancel running active scan or Nuclei scan for a specific target or all targets."""
     cancelled = []
+    scan_type = req.scan_type or "all"
+
     if req.all or not req.target:
-        for ip, task in list(_running_scan_tasks.items()):
-            if not task.done():
-                task.cancel()
-                cancelled.append(ip)
-                if ip in _target_registry:
-                    _target_registry[ip]["status"] = "idle"
-        _running_scan_tasks.clear()
-        _append_scan_log("info", "All active scans cancelled.")
+        if scan_type in ["all", "masscan"]:
+            for ip, task in list(_running_scan_tasks.items()):
+                if not task.done():
+                    task.cancel()
+                    cancelled.append(f"masscan:{ip}")
+                    if ip in _target_registry:
+                        _target_registry[ip]["status"] = "idle"
+            _running_scan_tasks.clear()
+
+        if scan_type in ["all", "nuclei"]:
+            for ip, task in list(_running_nuclei_tasks.items()):
+                if not task.done():
+                    task.cancel()
+                    cancelled.append(f"nuclei:{ip}")
+                    if ip in _target_registry:
+                        _target_registry[ip]["nuclei_status"] = "idle"
+            _running_nuclei_tasks.clear()
+
+        _append_scan_log("info", "All running scans cancelled.")
     else:
         ip = req.target.strip()
-        if ip in _running_scan_tasks:
+        if scan_type in ["all", "masscan"] and ip in _running_scan_tasks:
             task = _running_scan_tasks[ip]
             if not task.done():
                 task.cancel()
-                cancelled.append(ip)
+                cancelled.append(f"masscan:{ip}")
             _running_scan_tasks.pop(ip, None)
             if ip in _target_registry:
                 _target_registry[ip]["status"] = "idle"
-            _append_scan_log("info", f"Active scan on {ip} cancelled.", target=ip)
+            _append_scan_log("info", f"Active port scan on {ip} cancelled.", target=ip)
+
+        if scan_type in ["all", "nuclei"] and ip in _running_nuclei_tasks:
+            task = _running_nuclei_tasks[ip]
+            if not task.done():
+                task.cancel()
+                cancelled.append(f"nuclei:{ip}")
+            _running_nuclei_tasks.pop(ip, None)
+            if ip in _target_registry:
+                _target_registry[ip]["nuclei_status"] = "idle"
+            _append_scan_log("info", f"Nuclei scan on {ip} cancelled.", target=ip)
 
     return {
         "success": True,
@@ -529,13 +847,13 @@ async def cancel_active_scan(req: CancelScanRequest) -> Dict:
 @router.get("/scan/status")
 async def get_scan_status() -> Dict:
     """Get real-time scan status, target registry, and recent activity logs."""
-    running_count = sum(1 for t in _target_registry.values() if t.get("status") == "scanning")
+    running_masscan = sum(1 for t in _target_registry.values() if t.get("status") == "scanning")
+    running_nuclei = sum(1 for t in _target_registry.values() if t.get("nuclei_status") == "scanning")
     return {
-        "running_scans": running_count,
+        "running_scans": running_masscan + running_nuclei,
+        "running_masscan": running_masscan,
+        "running_nuclei": running_nuclei,
         "targets": list(_target_registry.values()),
         "total_targets": len(_target_registry),
-        "recent_logs": _scan_log_history[-30:],
+        "recent_logs": _scan_log_history[-40:],
     }
-
-
-

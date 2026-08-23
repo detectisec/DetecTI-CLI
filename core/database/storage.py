@@ -32,9 +32,18 @@ class DatabaseManager:
         self._init_database()
 
     def _init_database(self) -> None:
-        """Initialize database schema if it doesn't exist."""
+        """Initialize database schema if it doesn't exist and run schema migrations."""
         with sqlite3.connect(self.db_path) as conn:
             conn.executescript(SCHEMA_SQL)
+            
+            # Auto-migrate: ensure source column exists in vulnerabilities table
+            try:
+                cols = [row[1] for row in conn.execute("PRAGMA table_info(vulnerabilities)").fetchall()]
+                if "source" not in cols:
+                    conn.execute("ALTER TABLE vulnerabilities ADD COLUMN source TEXT")
+            except Exception:
+                pass
+                
             conn.commit()
 
     def _get_or_create_domain(self, conn: sqlite3.Connection, domain_name: str) -> str:
@@ -186,13 +195,13 @@ class DatabaseManager:
             conn.execute("""
                 INSERT INTO vulnerabilities (
                     id, ip_id, service_id, cve_id, severity, cvss_score, cvss_version, description,
-                    cwe_id, cwe_name, epss_score, epss_percentile, is_cisa_kev, cisa_kev_data
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cwe_id, cwe_name, epss_score, epss_percentile, is_cisa_kev, cisa_kev_data, source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 vuln_id, ip_id, service_id, vuln.cve_id, vuln.cvss_severity.value,
                 vuln.cvss_score, vuln.cvss_version, vuln.description,
                 vuln.cwe_id, vuln.cwe_name, epss_score, epss_percentile,
-                vuln.in_cisa_kev, cisa_kev_json
+                vuln.in_cisa_kev, cisa_kev_json, getattr(vuln, "source", None) or "NVD"
             ))
             
             # Store exploits
@@ -599,6 +608,117 @@ class DatabaseManager:
             "added_services": added_services,
             "updated_services": updated_services,
             "total_open": len(open_ports),
+        }
+
+    def merge_nuclei_findings(
+        self,
+        findings: List[Dict[str, Any]],
+        fallback_ip: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Atomically persist or update Nuclei vulnerability findings into SQLite.
+        
+        - Matches findings with existing IP and Service nodes in database.
+        - Updates timestamp / description if vulnerability node already exists (deduplication).
+        - Inserts new vulnerability records with correct severity, CVSS, and EPSS metrics.
+        - Inserts PoC/references into exploits table.
+        """
+        if not self.db_path.exists():
+            raise FileNotFoundError(f"Database {self.db_path} does not exist.")
+
+        added_vulns = 0
+        updated_vulns = 0
+
+        with sqlite3.connect(self.db_path) as conn:
+            # Map IPs to ip_id
+            ip_row_map = {row[1]: row[0] for row in conn.execute("SELECT id, ip FROM ip_addresses").fetchall()}
+            
+            # Map (ip_id, port) to service_id
+            service_row_map = {}
+            for sid, iid, port, proto in conn.execute("SELECT id, ip_id, port, protocol FROM services").fetchall():
+                service_row_map[(iid, port)] = sid
+                service_row_map[(iid, f"{port}/{proto}")] = sid
+
+            for f in findings:
+                raw_ip = f.get("ip") or fallback_ip or ""
+                host = f.get("host") or ""
+                port = f.get("port")
+                
+                # If raw_ip is hostname/url, extract clean IP or try matching
+                ip_id = None
+                if raw_ip and raw_ip in ip_row_map:
+                    ip_id = ip_row_map[raw_ip]
+                elif fallback_ip and fallback_ip in ip_row_map:
+                    ip_id = ip_row_map[fallback_ip]
+                elif len(ip_row_map) == 1:
+                    ip_id = list(ip_row_map.values())[0]
+
+                # Match service_id if port is known
+                service_id = None
+                if ip_id and port:
+                    service_id = service_row_map.get((ip_id, port))
+
+                cve_id = (f.get("cve_id") or f.get("template_id") or "UNKNOWN").strip()
+                severity = (f.get("severity") or "INFO").upper()
+                description = f.get("description") or f.get("name") or ""
+                cwe_id = f.get("cwe_id")
+                cwe_name = f.get("cwe_name")
+                cvss_score = f.get("cvss_score")
+                epss_score = f.get("epss_score")
+                
+                # Check if this vulnerability record already exists for this service/ip
+                query = "SELECT id, description, created_at FROM vulnerabilities WHERE cve_id = ?"
+                params: List[Any] = [cve_id]
+                if service_id:
+                    query += " AND service_id = ?"
+                    params.append(service_id)
+                elif ip_id:
+                    query += " AND ip_id = ?"
+                    params.append(ip_id)
+
+                existing_vuln = conn.execute(query, params).fetchone()
+
+                if existing_vuln:
+                    vuln_id = existing_vuln[0]
+                    # Update timestamp and description if new one has more details
+                    new_desc = description if len(description) > len(existing_vuln[1] or "") else existing_vuln[1]
+                    conn.execute("""
+                        UPDATE vulnerabilities
+                        SET severity = ?, cvss_score = COALESCE(?, cvss_score), description = ?, source = COALESCE(source, 'Nuclei'), created_at = ?
+                        WHERE id = ?
+                    """, (severity, cvss_score, new_desc, datetime.now(timezone.utc).isoformat(), vuln_id))
+                    updated_vulns += 1
+                else:
+                    vuln_id = str(uuid.uuid4())
+                    conn.execute("""
+                        INSERT INTO vulnerabilities (
+                            id, ip_id, service_id, cve_id, severity, cvss_score, cvss_version,
+                            description, cwe_id, cwe_name, epss_score, epss_percentile, is_cisa_kev, source, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        vuln_id, ip_id, service_id, cve_id, severity, cvss_score, "3.1" if cvss_score else None,
+                        description, cwe_id, cwe_name, epss_score, None, 0, "Nuclei", datetime.now(timezone.utc).isoformat()
+                    ))
+                    added_vulns += 1
+
+                # Insert references/exploits if provided
+                for ref_url in f.get("references", []):
+                    if ref_url and isinstance(ref_url, str):
+                        exploit_exists = conn.execute("SELECT id FROM exploits WHERE vulnerability_id = ? AND url = ?", (vuln_id, ref_url)).fetchone()
+                        if not exploit_exists:
+                            conn.execute("""
+                                INSERT INTO exploits (id, vulnerability_id, title, source, url, verified, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                str(uuid.uuid4()), vuln_id, f.get("name") or cve_id, "Nuclei",
+                                ref_url, 1, datetime.now(timezone.utc).isoformat()
+                            ))
+
+            conn.commit()
+
+        return {
+            "added_vulnerabilities": added_vulns,
+            "updated_vulnerabilities": updated_vulns,
+            "total_processed": len(findings),
         }
 
     @staticmethod

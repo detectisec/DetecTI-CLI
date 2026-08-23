@@ -435,9 +435,18 @@ class GraphBuilder:
         seen_edge_ids = set()
         
         try:
-            cursor = conn.execute("""
+            # Ensure source column exists
+            try:
+                cols = [r[1] for r in conn.execute("PRAGMA table_info(vulnerabilities)").fetchall()]
+                has_source_col = "source" in cols
+            except Exception:
+                has_source_col = False
+
+            source_select = "v.source" if has_source_col else "'NVD' as source"
+
+            cursor = conn.execute(f"""
                 SELECT v.id, v.ip_id, v.service_id, v.cve_id, v.severity, v.cvss_score, 
-                       v.epss_score, v.is_cisa_kev, v.description,
+                       v.epss_score, v.is_cisa_kev, v.description, {source_select},
                        COUNT(e.id) as exploit_count,
                        ip.id as resolved_ip_id, ip.ip, ip.org, ip.country, ip.asn,
                        s.port, s.protocol, s.service_name, s.product, s.version, s.url, s.ssl
@@ -446,14 +455,14 @@ class GraphBuilder:
                 LEFT JOIN services s ON v.service_id = s.id
                 LEFT JOIN ip_addresses ip ON COALESCE(v.ip_id, s.ip_id) = ip.id
                 GROUP BY v.id, v.ip_id, v.service_id, v.cve_id, v.severity, v.cvss_score, 
-                         v.epss_score, v.is_cisa_kev, v.description,
+                         v.epss_score, v.is_cisa_kev, v.description, {source_select},
                          ip.id, ip.ip, ip.org, ip.country, ip.asn,
                          s.port, s.protocol, s.service_name, s.product, s.version, s.url, s.ssl
             """)
             
             for row in cursor.fetchall():
                 (vuln_id, ip_id, service_id, cve_id, severity, cvss_score, epss_score, 
-                 is_cisa_kev, description, exploit_count, resolved_ip_id, ip_address, 
+                 is_cisa_kev, description, vuln_source, exploit_count, resolved_ip_id, ip_address, 
                  org, country, asn, port, protocol, service_name, product, version, url, ssl) = row
                 
                 # Build vulnerability label - keep it simple with just CVE ID
@@ -506,6 +515,7 @@ class GraphBuilder:
                             "epss_score": epss_score or 0,
                             "is_cisa_kev": bool(is_cisa_kev),
                             "risk_level": risk_level,
+                            "source": vuln_source or ("Nuclei" if not clean_cve.startswith("CVE-") else "NVD"),
                             "description": description or "",
                             "exploit_count": exploit_count,
                             "exploits": exploits,
@@ -527,6 +537,7 @@ class GraphBuilder:
                     })
                 
                 # Create HAS_VULN edge from Service or IP to the deduplicated Vulnerability node
+                vuln_sev = (severity or "UNKNOWN").upper()
                 if service_id:
                     edge_id = f"e_srv_vuln_{service_id}_{node_id}"
                     if edge_id not in seen_edge_ids:
@@ -536,7 +547,8 @@ class GraphBuilder:
                                 "id": edge_id,
                                 "source": f"srv_{service_id}",
                                 "target": node_id,
-                                "label": "HAS_VULN"
+                                "label": "HAS_VULN",
+                                "vuln_severity": vuln_sev,
                             }
                         })
                 elif ip_id:
@@ -548,7 +560,8 @@ class GraphBuilder:
                                 "id": edge_id,
                                 "source": f"ip_{ip_id}",
                                 "target": node_id,
-                                "label": "HAS_VULN"
+                                "label": "HAS_VULN",
+                                "vuln_severity": vuln_sev,
                             }
                         })
         except Exception as e:

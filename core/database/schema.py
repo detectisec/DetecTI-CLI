@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS vulnerabilities (
     epss_percentile REAL,
     is_cisa_kev BOOLEAN DEFAULT 0,
     cisa_kev_data TEXT,
+    source TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (service_id) REFERENCES services(id),
     FOREIGN KEY (ip_id) REFERENCES ip_addresses(id)
