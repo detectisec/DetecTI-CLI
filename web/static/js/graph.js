@@ -1573,17 +1573,23 @@ class EASMDashboard {
                     }
                 },
 
-                // Marked Target IP Nodes (Discreet Crosshair Badge in Corner)
+                // Marked Target IP Nodes (High-Visibility Crosshair Badge in Corner & Cyan Glow)
                 {
-                    selector: 'node[type="ip"].is-target, node.is-target',
+                    selector: 'node[type="ip"].is-target, node.is-target, node[is_target="true"]',
                     style: {
-                        'background-image': 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%2300f0ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>',
+                        'border-color': '#00f0ff',
+                        'border-width': '3px',
+                        'border-style': 'solid',
+                        'background-image': 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIiBmaWxsPSJub25lIj48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSIxNCIgZmlsbD0iIzBiMGYxOSIgc3Ryb2tlPSIjMDBmMGZmIiBzdHJva2Utd2lkdGg9IjIiLz48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSI3IiBzdHJva2U9IiMwMGYwZmYiIHN0cm9rZS13aWR0aD0iMS41Ii8+PGxpbmUgeDE9IjE2IiB5MT0iMiIgeDI9IjE2IiB5Mj0iNyIgc3Ryb2tlPSIjMDBmMGZmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxsaW5lIHgxPSIxNiIgeTE9IjI1IiB4Mj0iMTYiIHkyPSIzMCIgc3Ryb2tlPSIjMDBmMGZmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxsaW5lIHgxPSIyIiB5MT0iMTYiIHgyPSI3IiB5Mj0iMTYiIHN0cm9rZT0iIzAwZjBmZiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz48bGluZSB4MT0iMjUiIHkxPSIxNiIgeDI9IjMwIiB5Mj0iMTYiIHN0cm9rZT0iIzAwZjBmZiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSIyIiBmaWxsPSIjMDBmMGZmIi8+PC9zdmc+',
                         'background-image-opacity': 1,
-                        'background-width': '20px',
-                        'background-height': '20px',
-                        'background-position-x': '88%',
-                        'background-position-y': '12%',
-                        'background-clip': 'none'
+                        'background-width': '22px',
+                        'background-height': '22px',
+                        'background-position-x': '92%',
+                        'background-position-y': '8%',
+                        'background-clip': 'none',
+                        'background-fit': 'none',
+                        'background-repeat': 'no-repeat',
+                        'box-shadow': '0 0 16px rgba(0, 240, 255, 0.85)'
                     }
                 },
                 
@@ -1853,6 +1859,7 @@ class EASMDashboard {
                 console.log('Populating lead selector...');
                 this.populateLeadSelector(this.graphData.elements);
                 this.applyLeadFilter({ relayout: true });
+                this.syncTargetNodesStyling();
                 
                 console.log('Graph rendered successfully');
             } else {
@@ -4192,12 +4199,21 @@ class EASMDashboard {
     syncTargetNodesStyling() {
         if (!this.cy) return;
         this.cy.batch(() => {
-            this.cy.nodes('[type="ip"]').forEach(node => {
-                const nodeIp = node.data('ip') || node.data('name') || node.data('label');
-                if (nodeIp && this.markedTargets.has(nodeIp.trim())) {
-                    node.addClass('is-target');
-                } else {
-                    node.removeClass('is-target');
+            this.cy.nodes().forEach(node => {
+                const nodeType = node.data('type');
+                if (nodeType === 'ip') {
+                    const rawIp = node.data('ip') || node.data('label') || node.data('name') || node.id();
+                    const cleanIp = String(rawIp || '').replace(/^ip_/, '').trim();
+                    const isTarget = this.markedTargets.has(cleanIp) || 
+                                     (node.data('ip') && this.markedTargets.has(node.data('ip').trim())) || 
+                                     (node.data('label') && this.markedTargets.has(node.data('label').trim()));
+                    if (isTarget) {
+                        node.addClass('is-target');
+                        node.data('is_target', 'true');
+                    } else {
+                        node.removeClass('is-target');
+                        node.data('is_target', 'false');
+                    }
                 }
             });
         });
@@ -4205,7 +4221,7 @@ class EASMDashboard {
 
     async setTarget(ip, node = null) {
         try {
-            ip = ip.trim();
+            ip = String(ip || '').replace(/^ip_/, '').trim();
             this.markedTargets.add(ip);
             if (!this.targetStatuses[ip]) {
                 this.targetStatuses[ip] = {
@@ -4215,10 +4231,9 @@ class EASMDashboard {
                     ports: []
                 };
             }
+            this.syncTargetNodesStyling();
             if (node) {
-                node.addClass('is-target');
-            } else {
-                this.syncTargetNodesStyling();
+                node.flashClass('cy-selected', 400);
             }
             this.updateTargetBadgeCount();
             this.renderTargetsList();
@@ -4230,14 +4245,10 @@ class EASMDashboard {
 
     async removeTarget(ip, node = null) {
         try {
-            ip = ip.trim();
+            ip = String(ip || '').replace(/^ip_/, '').trim();
             this.markedTargets.delete(ip);
             delete this.targetStatuses[ip];
-            if (node) {
-                node.removeClass('is-target');
-            } else {
-                this.syncTargetNodesStyling();
-            }
+            this.syncTargetNodesStyling();
             this.updateTargetBadgeCount();
             this.renderTargetsList();
             await window.api.removeTarget(ip);
