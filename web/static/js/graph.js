@@ -4360,6 +4360,9 @@ class EASMDashboard {
 
         const targetsHtml = Array.from(this.markedTargets).map(ip => {
             const statusObj = this.targetStatuses[ip] || { status: 'idle', ports_count: 0 };
+            const status = statusObj.status || 'idle';
+            const portsCount = statusObj.ports_count || (Array.isArray(statusObj.ports) ? statusObj.ports.length : 0);
+            const isScanning = status === 'scanning' || status === 'running';
             const portsList = Array.isArray(statusObj.ports) ? statusObj.ports : [];
             const portsTagsHtml = portsList.length > 0 ? `
                 <div class="target-card-ports-chips" style="display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem;">
