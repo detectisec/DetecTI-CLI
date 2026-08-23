@@ -17,6 +17,9 @@ logger = logging.getLogger("detecti.nuclei")
 class NucleiRunner:
     """Async Nuclei execution engine for vulnerability scanning."""
 
+    _update_lock: asyncio.Lock = asyncio.Lock()
+    _last_templates_update: float = 0.0
+
     def __init__(self, binary_path: Optional[str] = None):
         self.binary_path = binary_path or shutil.which("nuclei") or "/usr/bin/nuclei"
 
@@ -40,6 +43,68 @@ class NucleiRunner:
                 else "Nuclei binary not found on system (install with: go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest or download from GitHub releases)"
             ),
         }
+
+    async def update_templates(
+        self,
+        force: bool = False,
+        cooldown_seconds: float = 3600.0,
+        log_callback: Optional[Callable[[str, str], Any]] = None,
+    ) -> Dict[str, Any]:
+        """Update nuclei-templates to the latest release safely with lock and cooldown."""
+        if not self.is_available():
+            return {"success": False, "error": "Nuclei binary not found"}
+
+        import time
+        now = time.time()
+        
+        async with NucleiRunner._update_lock:
+            # Check if updated recently unless forced
+            if not force and (now - NucleiRunner._last_templates_update) < cooldown_seconds:
+                msg = "Nuclei templates are already up to date (cached within cooldown)."
+                logger.info(msg)
+                if log_callback:
+                    log_callback("info", msg)
+                return {"success": True, "updated": False, "message": msg}
+
+            logger.info("Executing Nuclei templates update (-update-templates)...")
+            if log_callback:
+                log_callback("info", "Checking and updating Nuclei community templates...")
+
+            try:
+                cmd = [self.binary_path, "-update-templates", "-duc"]
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=60.0)
+                out_str = stdout_bytes.decode("utf-8", errors="replace") + stderr_bytes.decode("utf-8", errors="replace")
+                
+                NucleiRunner._last_templates_update = time.time()
+                success = (proc.returncode == 0)
+                
+                log_msg = f"Nuclei templates update finished: {out_str.strip().splitlines()[-1] if out_str.strip() else 'OK'}"
+                logger.info(log_msg)
+                if log_callback:
+                    log_callback("success" if success else "warning", log_msg)
+
+                return {
+                    "success": success,
+                    "updated": True,
+                    "output": out_str.strip(),
+                }
+            except asyncio.TimeoutError:
+                msg = "Nuclei templates update timed out after 60s (proceeding with existing templates)."
+                logger.warning(msg)
+                if log_callback:
+                    log_callback("warning", msg)
+                return {"success": False, "error": msg}
+            except Exception as e:
+                msg = f"Error updating Nuclei templates: {e}"
+                logger.warning(msg)
+                if log_callback:
+                    log_callback("warning", msg)
+                return {"success": False, "error": msg}
 
     async def scan_targets(
         self,

@@ -796,6 +796,12 @@ async def start_nuclei_scan(
         finally:
             _running_nuclei_tasks.pop(ip_to_scan, None)
 
+    # Ensure Nuclei community templates are updated safely (once with mutex lock + cooldown)
+    if runner.is_available():
+        def _tpl_log(lvl: str, m: str):
+            _append_scan_log(lvl, f"[Nuclei Engine] {m}")
+        await runner.update_templates(cooldown_seconds=3600.0, log_callback=_tpl_log)
+
     for ip in target_ips:
         if ip in _running_nuclei_tasks and not _running_nuclei_tasks[ip].done():
             _running_nuclei_tasks[ip].cancel()
