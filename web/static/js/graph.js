@@ -1037,7 +1037,7 @@ class EASMDashboard {
             const isExpanded = this.expandedClusters.has(clusterId);
             const shouldCollapse = (isManuallyCollapsed || serviceOutgoers.length > CLUSTER_THRESHOLD) && !isExpanded;
 
-            if (serviceOutgoers.length >= 1 && shouldCollapse) {
+            if (serviceOutgoers.length > 1 && shouldCollapse) {
                 // Collapse services into a cluster node
                 const clusterLabel = `+ ${serviceOutgoers.length} ${serviceOutgoers.length === 1 ? 'Service' : 'Services'}`;
 
@@ -1094,7 +1094,7 @@ class EASMDashboard {
                     });
                 });
             } else if (existingCluster.length > 0) {
-                // Remove cluster if condition no longer met or expanded
+                // Remove cluster if condition no longer met or expanded or single item
                 existingCluster.remove();
             }
         });
@@ -1118,7 +1118,7 @@ class EASMDashboard {
             const isExpanded = this.expandedClusters.has(clusterId);
             const shouldCollapse = (isManuallyCollapsed || directVulnOutgoers.length > CLUSTER_THRESHOLD) && !isExpanded;
 
-            if (directVulnOutgoers.length >= 1 && shouldCollapse) {
+            if (directVulnOutgoers.length > 1 && shouldCollapse) {
                 const clusterLabel = `+ ${directVulnOutgoers.length} ${directVulnOutgoers.length === 1 ? 'Vuln' : 'Vulns'}`;
 
                 if (existingCluster.length === 0) {
@@ -1195,7 +1195,7 @@ class EASMDashboard {
             const isExpanded = this.expandedClusters.has(clusterId);
             const shouldCollapse = (isManuallyCollapsed || vulnOutgoers.length > CLUSTER_THRESHOLD) && !isExpanded;
 
-            if (vulnOutgoers.length >= 1 && shouldCollapse) {
+            if (vulnOutgoers.length > 1 && shouldCollapse) {
                 const clusterLabel = `+ ${vulnOutgoers.length} ${vulnOutgoers.length === 1 ? 'Vuln' : 'Vulns'}`;
 
                 if (existingCluster.length === 0) {
@@ -3744,7 +3744,7 @@ class EASMDashboard {
             let directVulnsCount = isVulnsCollapsed ? (clusterVuln.data('count') || 0) : node.outgoers('node[type="vulnerability"]').filter(v => !v.hidden()).length;
             if (directVulnsCount === 0 && isVulnsCollapsed) directVulnsCount = clusterVuln.data('count') || 0;
 
-            if (servicesCount > 0 || isServicesCollapsed) {
+            if (servicesCount > 1 || isServicesCollapsed) {
                 collapseActions.push({
                     id: 'ctx-action-collapse-srv',
                     label: isServicesCollapsed ? `Uncollapse Services (${servicesCount})` : `Collapse Services (${servicesCount})`,
@@ -3756,7 +3756,7 @@ class EASMDashboard {
                 });
             }
 
-            if (directVulnsCount > 0 || isVulnsCollapsed) {
+            if (directVulnsCount > 1 || isVulnsCollapsed) {
                 collapseActions.push({
                     id: 'ctx-action-collapse-vuln',
                     label: isVulnsCollapsed ? `Uncollapse Direct Vulnerabilities (${directVulnsCount})` : `Collapse Direct Vulnerabilities (${directVulnsCount})`,
@@ -3771,7 +3771,7 @@ class EASMDashboard {
             if (collapseActions.length === 0) {
                 collapseActions.push({
                     id: 'ctx-action-collapse-none',
-                    label: 'Collapse / Uncollapse (No children)',
+                    label: 'Collapse / Uncollapse (Not enough children)',
                     icon: 'minimize-2',
                     disabled: true,
                     action: () => {}
@@ -3783,7 +3783,7 @@ class EASMDashboard {
             let vulnsCount = isVulnsCollapsed ? (clusterVuln.data('count') || 0) : node.outgoers('node[type="vulnerability"]').filter(v => !v.hidden()).length;
             if (vulnsCount === 0 && isVulnsCollapsed) vulnsCount = clusterVuln.data('count') || 0;
 
-            if (vulnsCount > 0 || isVulnsCollapsed) {
+            if (vulnsCount > 1 || isVulnsCollapsed) {
                 collapseActions.push({
                     id: 'ctx-action-collapse-srv-vuln',
                     label: isVulnsCollapsed ? `Uncollapse Vulnerabilities (${vulnsCount})` : `Collapse Vulnerabilities (${vulnsCount})`,
@@ -3796,7 +3796,7 @@ class EASMDashboard {
             } else {
                 collapseActions.push({
                     id: 'ctx-action-collapse-none',
-                    label: 'Collapse / Uncollapse (No vulnerabilities)',
+                    label: 'Collapse / Uncollapse (Not enough vulnerabilities)',
                     icon: 'minimize-2',
                     disabled: true,
                     action: () => {}
