@@ -3367,11 +3367,14 @@ class EASMDashboard {
             `;
         } else if (data.type === 'ip') {
             const riskMetricsHtml = this.renderRiskMetricsAccordion(data, elements);
+            const ipVal = String(data.ip || data.label || data.name || data.id || '').replace(/^ip_/, '').trim();
+            const isMarked = this.isTargetMarked(ipVal);
+
             html = `
                 <h4>IP Address Information</h4>
                 <div class="property">
                     <span class="key">IP Address:</span>
-                    <span class="value">${data.ip}</span>
+                    <span class="value">${data.ip || ipVal}</span>
                 </div>
                 <div class="property">
                     <span class="key">Organization:</span>
@@ -3384,6 +3387,12 @@ class EASMDashboard {
                 <div class="property">
                     <span class="key">ASN:</span>
                     <span class="value">${data.asn || 'Unknown'}</span>
+                </div>
+                <div class="property" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
+                    <button type="button" class="btn-primary-action" id="inspector-toggle-target-btn" style="width: 100%; font-size: 0.82rem; padding: 0.5rem 0.8rem; background: ${isMarked ? 'rgba(239, 68, 68, 0.2)' : 'linear-gradient(135deg, #00f0ff 0%, #0284c7 100%)'}; border-color: ${isMarked ? '#ef4444' : '#00f0ff'}; color: ${isMarked ? '#ef4444' : '#fff'};">
+                        <i data-lucide="crosshair" style="width: 14px; height: 14px;"></i>
+                        <span>${isMarked ? 'Remove from Scan Targets' : 'Add to Scan Targets'}</span>
+                    </button>
                 </div>
                 ${riskMetricsHtml}
             `;
@@ -3730,6 +3739,19 @@ class EASMDashboard {
         }
 
         content.innerHTML = html;
+
+        // Wire Inspector Target Button if present on IP node
+        const inspectorTargetBtn = content.querySelector('#inspector-toggle-target-btn');
+        if (inspectorTargetBtn && data.type === 'ip') {
+            const ipVal = String(data.ip || data.label || data.name || data.id || '').replace(/^ip_/, '').trim();
+            inspectorTargetBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await this.toggleTargetMark(ipVal, node);
+                // Re-render inspector to update button state
+                this.showNodeInspector(node);
+            });
+        }
+
         drawer.classList.add('open');
         const inspectorBackdrop = document.getElementById('inspector-backdrop');
         if (inspectorBackdrop && window.innerWidth <= 992) {
@@ -4583,6 +4605,16 @@ class EASMDashboard {
 
         consoleEl.appendChild(line);
         consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
+
+    escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
 
     updateLayoutSelector() {
