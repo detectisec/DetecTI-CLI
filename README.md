@@ -163,6 +163,7 @@ flowchart TD
     - Services discovered passively and verified actively receive a **Cyan highlight border** and **`[Verified Active]`** badge.
     - Active scan service connections render as **dashed relationship edges** (`line-style: dashed`).
   - **Atomic Database Persistence**: Automatic deduplication and SQLite persistence for newly discovered or verified services and banners directly into `./data/dbs/`.
+  - **System Binary & Permissions**: Requires `masscan` installed on the host with non-root Linux raw packet capabilities (`sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip $(which masscan)`).
 - **🔐 Pre-Flight API Verification & Sanity Checking**:
   - Built-in sanity layer (`config-check` and engine pre-flight) that filters dummy placeholder keys and verifies valid authentication before running scans, preventing silent 401/403 authorization errors.
 - **📊 Executive & Structured Reporting**:
@@ -178,7 +179,22 @@ flowchart TD
 ## 📦 Installation
 
 ### Prerequisites
-- Python 3.11 or higher
+- **Python**: 3.11 or higher
+- **Masscan** (Required for WebUI Active Port Scanning):
+  - Masscan must be installed on your operating system and configured with appropriate Linux capabilities so the WebUI background workers can transmit raw network packets without requiring the web server to run as root.
+  ```bash
+  # Debian / Ubuntu / Kali Linux
+  sudo apt install -y masscan
+
+  # Arch Linux / Manjaro
+  sudo pacman -S masscan
+
+  # Fedora / RHEL
+  sudo dnf install -y masscan
+
+  # Grant non-root raw socket capabilities to allow WebUI execution:
+  sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip $(which masscan)
+  ```
 
 ### Install with pip or editable mode
 ```bash
