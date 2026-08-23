@@ -647,11 +647,31 @@ async def start_nuclei_scan(
             active_services = _get_verified_active_services_for_ip(ip_to_scan, active_db)
 
             if not active_services:
-                _append_scan_log(
-                    "info",
-                    f"[Pre-Scan Rule] No verified active ports found for {ip_to_scan}. Running Masscan active verification first...",
-                    target=ip_to_scan
-                )
+                # Query all mapped ports from passive sources (Shodan, Censys, etc.) for this IP
+                existing_mapped_ports: List[int] = []
+                if active_db and Path(active_db.db_path).exists():
+                    import sqlite3
+                    with sqlite3.connect(active_db.db_path) as conn:
+                        ip_row = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (ip_to_scan,)).fetchone()
+                        if ip_row:
+                            p_rows = conn.execute("SELECT DISTINCT port FROM services WHERE ip_id = ? AND port IS NOT NULL", (ip_row[0],)).fetchall()
+                            existing_mapped_ports = [r[0] for r in p_rows if r[0]]
+
+                # Build optimized port target: test specific mapped ports first if available
+                if existing_mapped_ports:
+                    ports_to_verify = f"-p{','.join(str(p) for p in sorted(set(existing_mapped_ports)))}"
+                    _append_scan_log(
+                        "info",
+                        f"[Pre-Scan Rule] Verifying {len(existing_mapped_ports)} mapped passive port(s) ({ports_to_verify}) on {ip_to_scan} via Masscan...",
+                        target=ip_to_scan
+                    )
+                else:
+                    ports_to_verify = "--top-ports 100"
+                    _append_scan_log(
+                        "info",
+                        f"[Pre-Scan Rule] No prior services mapped for {ip_to_scan}. Running Masscan Top 100 active port verification...",
+                        target=ip_to_scan
+                    )
                 
                 # Execute Masscan runner to verify active ports
                 masscan_runner = MasscanRunner()
@@ -664,15 +684,14 @@ async def start_nuclei_scan(
 
                     m_res = await masscan_runner.scan_target(
                         target=ip_to_scan,
-                        ports="--top-ports 100",
+                        ports=ports_to_verify,
                         rate=1000,
                         disable_ping=True,
                         banners=True,
-                        log_callback=_masscan_log_cb
                     )
 
                     if m_res.get("success"):
-                        open_ports = m_res.get("open_ports", [])
+                        open_ports = m_res.get("ports", [])
                         if ip_to_scan in _target_registry:
                             _target_registry[ip_to_scan]["status"] = "completed"
                             _target_registry[ip_to_scan]["ports_count"] = len(open_ports)
@@ -689,7 +708,7 @@ async def start_nuclei_scan(
                         )
                     else:
                         if ip_to_scan in _target_registry:
-                            _target_registry[ip_to_scan]["status"] = "failed"
+                            _target_registry[ip_to_scan]["status"] = "idle"
                         _append_scan_log(
                             "warning",
                             f"[Masscan Pre-Scan] Masscan verification returned no open ports or error: {m_res.get('error', 'No open ports')}",
