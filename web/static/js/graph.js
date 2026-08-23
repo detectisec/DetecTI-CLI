@@ -1337,7 +1337,13 @@ class EASMDashboard {
                 const visibleElements = this.cy.elements(':visible');
                 if (visibleElements.length === 0) return;
                 
-                const shouldRelayout = options.relayout === true || !this._hasRunInitialLayout;
+                // Determine if any visible node has zero or uninitialized position
+                const hasUnpositionedNodes = visibleElements.nodes().some(n => {
+                    const pos = n.position();
+                    return !pos || (pos.x === 0 && pos.y === 0);
+                });
+
+                const shouldRelayout = options.relayout === true || !this._hasRunInitialLayout || hasUnpositionedNodes;
                 if (shouldRelayout) {
                     this._hasRunInitialLayout = true;
                     const layoutSelect = document.getElementById('layout-select');
@@ -1350,32 +1356,36 @@ class EASMDashboard {
                         name: layoutName,
                         ...layoutOptions,
                         animate: true,
-                        animationDuration: 700,
-                        animationEasing: 'ease-in-out'
-                    });
-                    
-                    layout.on('layoutstop', () => {
-                        if (this.cy) {
-                            this.cy.animate({
-                                fit: {
-                                    eles: visibleElements,
-                                    padding: 50
-                                },
-                                duration: 350,
-                                easing: 'ease-out'
-                            });
+                        animationDuration: 500,
+                        animationEasing: 'ease-in-out',
+                        stop: () => {
+                            if (this.cy) {
+                                this.cy.resize();
+                                const currentVisible = this.cy.elements(':visible');
+                                if (currentVisible.length > 0) {
+                                    this.cy.animate({
+                                        fit: {
+                                            eles: currentVisible,
+                                            padding: 50
+                                        },
+                                        duration: 300,
+                                        easing: 'ease-out'
+                                    });
+                                }
+                            }
                         }
                     });
 
                     layout.run();
                 } else if (options.fitView !== false) {
                     // Frame the visible elements smoothly without moving any nodes
+                    this.cy.resize();
                     this.cy.animate({
                         fit: {
                             eles: visibleElements,
                             padding: 50
                         },
-                        duration: 350,
+                        duration: 300,
                         easing: 'ease-out'
                     });
                 }
@@ -2431,13 +2441,19 @@ class EASMDashboard {
                 if (p) p.textContent = `Switching database to ${dbName}...`;
             }
 
-            // Reset current graph UI state
+            // Reset current graph UI and filtering state
             this.selectedLeads.clear();
             this.expandedClusters.clear();
+            this.manualCollapsedClusters.clear();
             this._hasRunInitialLayout = false;
+            this.searchTerm = '';
+            const searchInput = document.getElementById('search-input');
+            if (searchInput) searchInput.value = '';
             this.closeInspector();
+
             if (this.cy) {
                 this.cy.elements().remove();
+                this.cy.resize();
             }
 
             await window.api.selectDatabase(dbName);
