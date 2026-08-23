@@ -123,6 +123,7 @@
                 <!-- Metrics Panel -->
                 <div class="panel metrics-panel">
                     <h3><i data-lucide="bar-chart-3" class="ui-icon panel-title-icon"></i> Attack Surface Metrics</h3>
+                    <!-- Attack Surface Metrics: Organized in 2-Column Pairs -->
                     <div class="metric-grid">
                         <div class="metric-item">
                             <span class="metric-value" id="domains-count">-</span>
@@ -151,6 +152,10 @@
                         <div class="metric-item critical">
                             <span class="metric-value" id="kev-count">-</span>
                             <span class="metric-label">CISA KEV</span>
+                        </div>
+                        <div class="metric-item epss-highlight">
+                            <span class="metric-value" id="epss-count">-</span>
+                            <span class="metric-label">High EPSS (&gt;50%)</span>
                         </div>
                     </div>
                 </div>

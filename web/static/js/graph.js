@@ -227,6 +227,7 @@ class EASMDashboard {
             updateMetric('verified-services-count', summary.verified_services !== undefined ? summary.verified_services : 0);
             updateMetric('vulns-count', summary.total_vulnerabilities);
             updateMetric('kev-count', summary.cisa_kev_count);
+            updateMetric('epss-count', summary.high_epss_count !== undefined ? summary.high_epss_count : 0);
             
             console.log('Summary data loaded successfully');
             
