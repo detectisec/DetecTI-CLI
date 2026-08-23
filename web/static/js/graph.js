@@ -3351,6 +3351,25 @@ class EASMDashboard {
                 }
             }
 
+            const associatedIps = this.getAssociatedIpNodes(node);
+            let rootTargetBtnHtml = '';
+            if (associatedIps.length > 0) {
+                const totalCount = associatedIps.length;
+                const markedCount = associatedIps.filter(ipN => {
+                    const rawIp = ipN.data('ip') || ipN.data('label') || ipN.data('name') || ipN.id();
+                    return this.isTargetMarked(rawIp);
+                }).length;
+                const allMarked = markedCount === totalCount;
+                rootTargetBtnHtml = `
+                    <div class="property" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
+                        <button type="button" class="btn-primary-action" id="inspector-toggle-root-targets-btn" style="width: 100%; font-size: 0.82rem; padding: 0.5rem 0.8rem; background: ${allMarked ? 'rgba(239, 68, 68, 0.2)' : 'linear-gradient(135deg, #00f0ff 0%, #0284c7 100%)'}; border-color: ${allMarked ? '#ef4444' : '#00f0ff'}; color: ${allMarked ? '#ef4444' : '#fff'};">
+                            <i data-lucide="crosshair" style="width: 14px; height: 14px;"></i>
+                            <span>${allMarked ? `Remove all ${totalCount} IPs from Targets` : `Add all ${totalCount} IPs to Targets (${markedCount}/${totalCount})`}</span>
+                        </button>
+                    </div>
+                `;
+            }
+
             html = `
                 <h4>${sectionTitle}</h4>
                 <div class="property">
@@ -3361,6 +3380,7 @@ class EASMDashboard {
                     <span class="key">Type:</span>
                     <span class="value">${data.target_type ? `${data.type.toUpperCase()} (${data.target_type.toUpperCase()})` : data.type.toUpperCase()}</span>
                 </div>
+                ${rootTargetBtnHtml}
                 ${fileTargetsHtml}
                 ${subdomainsAccordionHtml}
                 ${riskMetricsHtml}
@@ -3752,6 +3772,28 @@ class EASMDashboard {
             });
         }
 
+        // Wire Inspector Target Button for Root / Org / Domain nodes with associated IPs
+        const inspectorRootTargetBtn = content.querySelector('#inspector-toggle-root-targets-btn');
+        if (inspectorRootTargetBtn) {
+            inspectorRootTargetBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const associatedIps = this.getAssociatedIpNodes(node);
+                const ipStrings = associatedIps.map(ipN => {
+                    const rawIp = ipN.data('ip') || ipN.data('label') || ipN.data('name') || ipN.id();
+                    return String(rawIp || '').replace(/^ip_/, '').trim();
+                }).filter(Boolean);
+
+                const markedCount = ipStrings.filter(ip => this.isTargetMarked(ip)).length;
+                if (markedCount === ipStrings.length) {
+                    await this.removeTargetsBulk(ipStrings);
+                } else {
+                    await this.setTargetsBulk(ipStrings, associatedIps);
+                }
+                // Re-render inspector to update button state
+                this.showNodeInspector(node);
+            });
+        }
+
         drawer.classList.add('open');
         const inspectorBackdrop = document.getElementById('inspector-backdrop');
         if (inspectorBackdrop && window.innerWidth <= 992) {
@@ -3951,9 +3993,11 @@ class EASMDashboard {
 
         const displayName = data.label || data.name || data.ip || data.cve_id || nodeId;
 
-        // 3. Target Management Action for IP Nodes
+        // 3. Target Management Action for IP Nodes and Root/Org/Domain Nodes
         let targetBtnHtml = '';
         let ipTargetValue = null;
+        let rootAssociatedIps = [];
+
         if (nodeType === 'ip') {
             ipTargetValue = data.ip || data.name || data.label || nodeId;
             const isMarked = this.isTargetMarked(ipTargetValue);
@@ -3963,6 +4007,22 @@ class EASMDashboard {
                     <span>${isMarked ? 'Remove Target' : 'Set as Target'}</span>
                 </button>
             `;
+        } else {
+            rootAssociatedIps = this.getAssociatedIpNodes(node);
+            if (rootAssociatedIps.length > 0) {
+                const totalCount = rootAssociatedIps.length;
+                const markedCount = rootAssociatedIps.filter(ipN => {
+                    const rawIp = ipN.data('ip') || ipN.data('label') || ipN.data('name') || ipN.id();
+                    return this.isTargetMarked(rawIp);
+                }).length;
+                const allMarked = markedCount === totalCount;
+                targetBtnHtml = `
+                    <button type="button" class="cy-context-menu-item" id="ctx-action-root-target" style="color: ${allMarked ? '#ef4444' : '#00f0ff'};">
+                        <i data-lucide="crosshair" class="ui-icon" style="color: ${allMarked ? '#ef4444' : '#00f0ff'};"></i>
+                        <span>${allMarked ? `Remove all ${totalCount} IPs from Targets` : `Set all ${totalCount} IPs as Targets (${markedCount}/${totalCount})`}</span>
+                    </button>
+                `;
+            }
         }
 
         const collapseButtonsHtml = collapseActions.map(act => `
@@ -4009,13 +4069,33 @@ class EASMDashboard {
             }
         });
 
-        // Wire target button action
+        // Wire single IP target button action
         const targetBtn = menu.querySelector('#ctx-action-target');
         if (targetBtn && ipTargetValue) {
             targetBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 this.hideContextMenu();
                 await this.toggleTargetMark(ipTargetValue, node);
+            });
+        }
+
+        // Wire root / org / domain target button action for all associated IPs
+        const rootTargetBtn = menu.querySelector('#ctx-action-root-target');
+        if (rootTargetBtn && rootAssociatedIps.length > 0) {
+            rootTargetBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                this.hideContextMenu();
+                const ipStrings = rootAssociatedIps.map(ipN => {
+                    const rawIp = ipN.data('ip') || ipN.data('label') || ipN.data('name') || ipN.id();
+                    return String(rawIp || '').replace(/^ip_/, '').trim();
+                }).filter(Boolean);
+
+                const markedCount = ipStrings.filter(ip => this.isTargetMarked(ip)).length;
+                if (markedCount === ipStrings.length) {
+                    await this.removeTargetsBulk(ipStrings);
+                } else {
+                    await this.setTargetsBulk(ipStrings, rootAssociatedIps);
+                }
             });
         }
 
@@ -4245,6 +4325,90 @@ class EASMDashboard {
                 }
             });
         });
+    }
+
+    getAssociatedIpNodes(node) {
+        if (!node || !this.cy) return [];
+        const nodeType = node.data('type');
+        if (nodeType === 'ip') return [node];
+
+        const ipNodes = [];
+        const visited = new Set();
+        const queue = [node];
+
+        while (queue.length > 0) {
+            const curr = queue.shift();
+            if (!curr || visited.has(curr.id())) continue;
+            visited.add(curr.id());
+
+            const outgoers = curr.outgoers('node');
+            outgoers.forEach(child => {
+                if (child.data('type') === 'ip') {
+                    ipNodes.push(child);
+                }
+                // Continue traverse through structural hierarchy
+                if (child.data('type') === 'domain' || child.data('type') === 'subdomain' || child.data('type') === 'target' || child.data('type') === 'network') {
+                    if (!visited.has(child.id())) {
+                        queue.push(child);
+                    }
+                }
+            });
+        }
+        return ipNodes;
+    }
+
+    async setTargetsBulk(ips, nodes = []) {
+        if (!Array.isArray(ips) || ips.length === 0) return;
+        try {
+            const cleanIps = [];
+            for (const rawIp of ips) {
+                const cleanIp = String(rawIp || '').replace(/^ip_/, '').trim();
+                if (cleanIp) {
+                    this.markedTargets.add(cleanIp);
+                    if (!this.targetStatuses[cleanIp]) {
+                        this.targetStatuses[cleanIp] = {
+                            ip: cleanIp,
+                            status: 'idle',
+                            ports_count: 0,
+                            ports: []
+                        };
+                    }
+                    cleanIps.push(cleanIp);
+                }
+            }
+            this.syncTargetNodesStyling();
+            if (Array.isArray(nodes)) {
+                nodes.forEach(n => {
+                    if (n && typeof n.flashClass === 'function') n.flashClass('cy-selected', 400);
+                });
+            }
+            this.updateTargetBadgeCount();
+            this.renderTargetsList();
+            await Promise.all(cleanIps.map(ip => window.api.setTarget(ip)));
+        } catch (err) {
+            console.error('Failed to set targets bulk:', err);
+        }
+    }
+
+    async removeTargetsBulk(ips) {
+        if (!Array.isArray(ips) || ips.length === 0) return;
+        try {
+            const cleanIps = [];
+            for (const rawIp of ips) {
+                const cleanIp = String(rawIp || '').replace(/^ip_/, '').trim();
+                if (cleanIp) {
+                    this.markedTargets.delete(cleanIp);
+                    delete this.targetStatuses[cleanIp];
+                    cleanIps.push(cleanIp);
+                }
+            }
+            this.syncTargetNodesStyling();
+            this.updateTargetBadgeCount();
+            this.renderTargetsList();
+            await Promise.all(cleanIps.map(ip => window.api.removeTarget(ip)));
+        } catch (err) {
+            console.error('Failed to remove targets bulk:', err);
+        }
     }
 
     async setTarget(ip, node = null) {
