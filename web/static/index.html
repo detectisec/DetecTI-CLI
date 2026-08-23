@@ -49,7 +49,7 @@
                     </a>
                 </div>
 
-                <!-- Right: Database Selector, Export Actions & Target Info -->
+                <!-- Right: Database Selector, Export Actions & Targets Button -->
                 <div class="header-right">
                     <!-- Database Selector Control -->
                     <div class="header-control-group">
@@ -91,9 +91,13 @@
                         </div>
                     </div>
 
-                    <div class="target-info">
-                        <span id="target-name" class="target-name" title="Target">Loading...</span>
-                        <span class="db-info" id="db-info"></span>
+                    <!-- Target Management Drawer Trigger Button (At the far right corner) -->
+                    <div class="header-control-group">
+                        <button id="btn-toggle-targets" class="action-btn targets-drawer-trigger-btn" aria-label="Toggle Target Management" title="Target Management & Active Scan">
+                            <i data-lucide="crosshair" class="ui-icon"></i>
+                            <span>Targets</span>
+                            <span id="target-badge-count" class="target-count-badge" style="display: none;">0</span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -264,6 +268,123 @@
             </div>
             <div class="inspector-content" id="inspector-content">
                 <p>Click on any node in the graph to inspect its properties...</p>
+            </div>
+        </div>
+
+        <!-- Targets Drawer Backdrop for Mobile/Tablet -->
+        <div id="targets-backdrop" class="drawer-backdrop"></div>
+
+        <!-- Target Management Drawer (Right) -->
+        <div class="targets-drawer" id="targets-drawer">
+            <div class="targets-drawer-header">
+                <div class="targets-header-title">
+                    <i data-lucide="crosshair" class="ui-icon targets-header-icon"></i>
+                    <h3>Target Management</h3>
+                    <span class="targets-counter" id="targets-header-count">0 Targets</span>
+                </div>
+                <button class="close-btn" id="close-targets-drawer" aria-label="Close Targets Panel"><i data-lucide="x" class="ui-icon"></i></button>
+            </div>
+
+            <div class="targets-drawer-content">
+                <!-- Global Actions -->
+                <div class="targets-global-actions">
+                    <button id="btn-scan-all-targets" class="btn-primary-action scan-all-btn" title="Run active scan on all marked targets">
+                        <i data-lucide="play" class="ui-icon"></i>
+                        <span>Scan All Targets</span>
+                    </button>
+                    <button id="btn-clear-all-targets" class="btn-secondary-action clear-all-targets-btn" title="Remove all targets from list">
+                        <i data-lucide="trash-2" class="ui-icon"></i>
+                        <span>Clear All</span>
+                    </button>
+                </div>
+
+                <!-- Target List Section -->
+                <div class="targets-section">
+                    <div class="targets-section-title">
+                        <i data-lucide="server" class="ui-icon"></i>
+                        <span>Marked Targets</span>
+                    </div>
+                    <div id="targets-list-container" class="targets-list-container">
+                        <div class="targets-empty-state" id="targets-empty-state">
+                            <i data-lucide="crosshair" class="empty-icon"></i>
+                            <p>No IP targets marked yet.</p>
+                            <span class="empty-hint">Right-click any IP Address node on the graph and select <strong>"Set as Target"</strong> to add.</span>
+                        </div>
+                        <div id="targets-items-list" class="targets-items-list"></div>
+                    </div>
+                </div>
+
+                <!-- Scan Configuration Section (Masscan Flags) -->
+                <div class="targets-section config-section">
+                    <div class="targets-section-title">
+                        <i data-lucide="sliders" class="ui-icon"></i>
+                        <span>Scan Configuration</span>
+                    </div>
+
+                    <!-- Presets -->
+                    <div class="form-group">
+                        <label class="form-label">Port Preset:</label>
+                        <div class="preset-buttons-group">
+                            <button type="button" class="preset-btn active" data-preset="top100">Top 100</button>
+                            <button type="button" class="preset-btn" data-preset="web">Web Ports</button>
+                            <button type="button" class="preset-btn" data-preset="all">All Ports (0-65535)</button>
+                            <button type="button" class="preset-btn" data-preset="custom">Custom</button>
+                        </div>
+                    </div>
+
+                    <!-- Custom Ports Input (shown when custom selected or editable) -->
+                    <div class="form-group" id="custom-ports-group" style="display: none;">
+                        <label for="input-custom-ports" class="form-label">Custom Ports Specification:</label>
+                        <input type="text" id="input-custom-ports" class="drawer-text-input" placeholder="e.g. -p21-25,80,443,3306,8080 or --top-ports 50" value="--top-ports 100">
+                    </div>
+
+                    <!-- Performance / Rate Slider -->
+                    <div class="form-group">
+                        <div class="slider-header">
+                            <label for="input-scan-rate" class="form-label">Scan Rate (Packets/sec):</label>
+                            <span id="scan-rate-display" class="rate-value-badge">1000 pps</span>
+                        </div>
+                        <input type="range" id="input-scan-rate" min="100" max="10000" step="100" value="1000" class="drawer-range-slider">
+                        <div class="slider-ticks">
+                            <span>100</span>
+                            <span>1000</span>
+                            <span>5000</span>
+                            <span>10000</span>
+                        </div>
+                    </div>
+
+                    <!-- Checkboxes -->
+                    <div class="form-group checkboxes-group">
+                        <label class="drawer-checkbox-label">
+                            <input type="checkbox" id="chk-scan-pn" checked>
+                            <span class="custom-checkbox"></span>
+                            <span>-Pn (Disable ping / host discovery)</span>
+                        </label>
+                        <label class="drawer-checkbox-label">
+                            <input type="checkbox" id="chk-scan-banners" checked>
+                            <span class="custom-checkbox"></span>
+                            <span>--banners (Banner grabbing)</span>
+                        </label>
+                    </div>
+
+                    <!-- Extra Parameters -->
+                    <div class="form-group">
+                        <label for="input-extra-flags" class="form-label">Custom Flags / Extra Parameters:</label>
+                        <input type="text" id="input-extra-flags" class="drawer-text-input" placeholder="e.g. --adapter-ip 192.168.1.50">
+                    </div>
+                </div>
+
+                <!-- Scan Status Logs / Console -->
+                <div class="targets-section logs-section" id="scan-live-console-section" style="display: none;">
+                    <div class="targets-section-title">
+                        <i data-lucide="terminal" class="ui-icon"></i>
+                        <span>Active Scan Status</span>
+                    </div>
+                    <div class="scan-live-console" id="scan-live-console">
+                        <div class="console-line info">[System] Ready to scan targets.</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Custom Node Right-Click Context Menu -->
@@ -285,7 +406,7 @@
             }
 
             const requiredElements = [
-                'target-name', 'domains-count', 'subdomains-count', 
+                'btn-toggle-targets', 'domains-count', 'subdomains-count', 
                 'ips-count', 'services-count', 'vulns-count', 'kev-count',
                 'cy', 'graph-loading'
             ];

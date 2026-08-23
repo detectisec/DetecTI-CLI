@@ -357,19 +357,35 @@ class GraphBuilder:
         return nodes, edges
     
     def _build_service_nodes(self, conn: sqlite3.Connection) -> tuple[List[Dict], List[Dict]]:
-        """Build service/port nodes."""
+        """Build service/port nodes with active scan differentiation."""
+        import json
         nodes = []
         edges = []
         
         cursor = conn.execute("""
-            SELECT id, ip_id, port, protocol, service_name, product, version, banner, ssl, url
+            SELECT id, ip_id, port, protocol, service_name, product, version, banner, ssl, url, sources
             FROM services
         """)
         
-        for service_id, ip_id, port, protocol, service_name, product, version, banner, ssl, url in cursor.fetchall():
+        for service_id, ip_id, port, protocol, service_name, product, version, banner, ssl, url, sources_raw in cursor.fetchall():
             # Build clean service label: e.g. 80/tcp, 443/tcp, 53/udp
             proto_str = (protocol or "tcp").lower()
             label = f"{port}/{proto_str}"
+            
+            # Parse sources
+            sources_list = []
+            if sources_raw:
+                try:
+                    parsed = json.loads(sources_raw)
+                    if isinstance(parsed, list):
+                        sources_list = parsed
+                    else:
+                        sources_list = [str(parsed)]
+                except Exception:
+                    sources_list = [sources_raw]
+            
+            has_masscan = any("masscan" in str(s).lower() for s in sources_list)
+            is_active_only = has_masscan and len(sources_list) == 1
             
             service_type = "https" if ssl else "http" if port in [80, 8080, 8000] else "service"
             
@@ -385,17 +401,22 @@ class GraphBuilder:
                     "version": version or "",
                     "banner": banner or "",
                     "ssl": bool(ssl),
-                    "url": url or ""
+                    "url": url or "",
+                    "sources": sources_list,
+                    "is_active_scan": has_masscan,
+                    "is_active_only": is_active_only,
+                    "verified_active": has_masscan,
                 }
             })
             
-            # Edge from IP to service
+            # Edge from IP to service (dashed if active scan only, solid if passive or mixed)
             edges.append({
                 "data": {
                     "id": f"e_ip_srv_{ip_id}_{service_id}",
                     "source": f"ip_{ip_id}",
                     "target": f"srv_{service_id}",
-                    "label": "EXPOSES"
+                    "label": "EXPOSES",
+                    "is_active_scan": is_active_only or (has_masscan and len(sources_list) == 1)
                 }
             })
         

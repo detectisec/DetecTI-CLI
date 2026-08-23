@@ -21,6 +21,12 @@ class EASMDashboard {
         this.manualCollapsedClusters = new Set();
         this._hasRunInitialLayout = false;
         
+        // Target Management & Active Scan State
+        this.markedTargets = new Set();
+        this.targetStatuses = {};
+        this.scanPollingInterval = null;
+        this.currentPortPreset = 'top100';
+        
         // Don't auto-initialize, wait for DOM
     }
 
@@ -155,6 +161,11 @@ class EASMDashboard {
             // Setup event listeners
             console.log('Setting up event listeners...');
             this.setupEventListeners();
+
+            // Setup Target Management & Load Targets
+            console.log('Setting up Target Management...');
+            this.setupTargetManagement();
+            await this.loadTargets();
             
             // Set the correct default layout in the selector
             this.updateLayoutSelector();
@@ -1514,7 +1525,7 @@ class EASMDashboard {
                     }
                 },
                 
-                // Service nodes
+                // Service nodes (Passive Recon: default orange/green)
                 {
                     selector: 'node[type="service"], node[type="http"], node[type="https"]',
                     style: {
@@ -1539,6 +1550,40 @@ class EASMDashboard {
                         'background-color': '#27ae60',
                         'border-color': '#229954',
                         'border-width': '2px'
+                    }
+                },
+
+                // Active Scan (Masscan) Services - Secondary High-Contrast Neon Violet / Purple (#a855f7)
+                {
+                    selector: 'node[?is_active_only], node[is_active_only="true"]',
+                    style: {
+                        'background-color': '#a855f7',
+                        'border-color': '#c084fc',
+                        'border-width': '2.5px',
+                        'box-shadow': '0 0 14px rgba(168, 85, 247, 0.7)'
+                    }
+                },
+                
+                // Verified Active Services (Discovered passively & verified actively by Masscan)
+                {
+                    selector: 'node[?verified_active], node[verified_active="true"]',
+                    style: {
+                        'border-color': '#00f0ff',
+                        'border-width': '2.5px'
+                    }
+                },
+
+                // Marked Target IP Nodes (Discreet Crosshair Badge in Corner)
+                {
+                    selector: 'node[type="ip"].is-target, node.is-target',
+                    style: {
+                        'background-image': 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%2300f0ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>',
+                        'background-image-opacity': 1,
+                        'background-width': '20px',
+                        'background-height': '20px',
+                        'background-position-x': '88%',
+                        'background-position-y': '12%',
+                        'background-clip': 'none'
                     }
                 },
                 
@@ -1691,6 +1736,18 @@ class EASMDashboard {
                     style: {
                         'line-color': '#8c52ff',
                         'target-arrow-color': '#8c52ff',
+                        'width': '2px'
+                    }
+                },
+
+                // Active Scan Edges (Dashed line connecting IP -> Active Service)
+                {
+                    selector: 'edge[?is_active_scan], edge[is_active_scan="true"], edge.active-scan-edge',
+                    style: {
+                        'line-style': 'dashed',
+                        'line-dash-pattern': [6, 4],
+                        'line-color': '#a855f7',
+                        'target-arrow-color': '#a855f7',
                         'width': '2px'
                     }
                 },
@@ -3400,6 +3457,23 @@ class EASMDashboard {
                     <span class="key">SSL/TLS:</span>
                     <span class="value">${data.ssl ? 'Yes' : 'No'}</span>
                 </div>
+                ${data.is_active_only ? `
+                <div class="property">
+                    <span class="key">Discovery:</span>
+                    <span class="value"><span class="badge-active-scan"><i data-lucide="crosshair" style="width: 12px; height: 12px;"></i> Active Scan</span></span>
+                </div>
+                ` : (data.verified_active ? `
+                <div class="property">
+                    <span class="key">Discovery:</span>
+                    <span class="value"><span class="badge-verified-active"><i data-lucide="check-circle" style="width: 12px; height: 12px;"></i> Verified Active</span></span>
+                </div>
+                ` : '')}
+                ${Array.isArray(data.sources) && data.sources.length > 0 ? `
+                <div class="property">
+                    <span class="key">Sources:</span>
+                    <span class="value">${data.sources.join(', ')}</span>
+                </div>
+                ` : ''}
                 ${riskMetricsHtml}
             `;
         } else if (data.type === 'vulnerability') {
@@ -3842,6 +3916,20 @@ class EASMDashboard {
 
         const displayName = data.label || data.name || data.ip || data.cve_id || nodeId;
 
+        // 3. Target Management Action for IP Nodes
+        let targetBtnHtml = '';
+        let ipTargetValue = null;
+        if (nodeType === 'ip') {
+            ipTargetValue = data.ip || data.name || data.label || nodeId;
+            const isMarked = this.isTargetMarked(ipTargetValue);
+            targetBtnHtml = `
+                <button type="button" class="cy-context-menu-item" id="ctx-action-target" style="color: ${isMarked ? '#ef4444' : '#00f0ff'};">
+                    <i data-lucide="crosshair" class="ui-icon" style="color: ${isMarked ? '#ef4444' : '#00f0ff'};"></i>
+                    <span>${isMarked ? 'Remove Target' : 'Set as Target'}</span>
+                </button>
+            `;
+        }
+
         const collapseButtonsHtml = collapseActions.map(act => `
             <button type="button" class="cy-context-menu-item primary ctx-collapse-btn" data-action-id="${act.id}" ${act.disabled ? 'disabled' : ''}>
                 <i data-lucide="${act.icon}" class="ui-icon"></i>
@@ -3856,6 +3944,7 @@ class EASMDashboard {
             </div>
             ${collapseButtonsHtml}
             <div class="cy-context-menu-divider"></div>
+            ${targetBtnHtml}
             <button type="button" class="cy-context-menu-item" id="ctx-action-inspect">
                 <i data-lucide="info" class="ui-icon"></i>
                 <span>Inspect Details</span>
@@ -3884,6 +3973,16 @@ class EASMDashboard {
                 });
             }
         });
+
+        // Wire target button action
+        const targetBtn = menu.querySelector('#ctx-action-target');
+        if (targetBtn && ipTargetValue) {
+            targetBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                this.hideContextMenu();
+                await this.toggleTargetMark(ipTargetValue, node);
+            });
+        }
 
         const inspectBtn = menu.querySelector('#ctx-action-inspect');
         if (inspectBtn) {
@@ -4050,6 +4149,412 @@ class EASMDashboard {
         } catch (error) {
             console.error('Error in forcePopulateFromCytoscape:', error);
         }
+    }
+
+    // =========================================================================
+    // Target Management & Active Scan (Masscan) Implementation
+    // =========================================================================
+
+    isTargetMarked(ip) {
+        if (!ip) return false;
+        return this.markedTargets.has(ip.trim());
+    }
+
+    async toggleTargetMark(ip, node = null) {
+        if (!ip) return;
+        ip = ip.trim();
+        if (this.isTargetMarked(ip)) {
+            await this.removeTarget(ip, node);
+        } else {
+            await this.setTarget(ip, node);
+        }
+    }
+
+    async loadTargets() {
+        try {
+            const res = await window.api.getTargets();
+            if (res && Array.isArray(res.targets)) {
+                this.markedTargets.clear();
+                this.targetStatuses = {};
+                res.targets.forEach(t => {
+                    this.markedTargets.add(t.ip);
+                    this.targetStatuses[t.ip] = t;
+                });
+                this.syncTargetNodesStyling();
+                this.updateTargetBadgeCount();
+                this.renderTargetsList();
+            }
+        } catch (err) {
+            console.error('Failed to load targets from API:', err);
+        }
+    }
+
+    syncTargetNodesStyling() {
+        if (!this.cy) return;
+        this.cy.batch(() => {
+            this.cy.nodes('[type="ip"]').forEach(node => {
+                const nodeIp = node.data('ip') || node.data('name') || node.data('label');
+                if (nodeIp && this.markedTargets.has(nodeIp.trim())) {
+                    node.addClass('is-target');
+                } else {
+                    node.removeClass('is-target');
+                }
+            });
+        });
+    }
+
+    async setTarget(ip, node = null) {
+        try {
+            ip = ip.trim();
+            this.markedTargets.add(ip);
+            if (!this.targetStatuses[ip]) {
+                this.targetStatuses[ip] = {
+                    ip: ip,
+                    status: 'idle',
+                    ports_count: 0,
+                    ports: []
+                };
+            }
+            if (node) {
+                node.addClass('is-target');
+            } else {
+                this.syncTargetNodesStyling();
+            }
+            this.updateTargetBadgeCount();
+            this.renderTargetsList();
+            await window.api.setTarget(ip);
+        } catch (err) {
+            console.error(`Failed to set target ${ip}:`, err);
+        }
+    }
+
+    async removeTarget(ip, node = null) {
+        try {
+            ip = ip.trim();
+            this.markedTargets.delete(ip);
+            delete this.targetStatuses[ip];
+            if (node) {
+                node.removeClass('is-target');
+            } else {
+                this.syncTargetNodesStyling();
+            }
+            this.updateTargetBadgeCount();
+            this.renderTargetsList();
+            await window.api.removeTarget(ip);
+        } catch (err) {
+            console.error(`Failed to remove target ${ip}:`, err);
+        }
+    }
+
+    async clearAllTargets() {
+        try {
+            this.markedTargets.clear();
+            this.targetStatuses = {};
+            if (this.cy) {
+                this.cy.nodes('.is-target').removeClass('is-target');
+            }
+            this.updateTargetBadgeCount();
+            this.renderTargetsList();
+            await window.api.clearTargets();
+            this.addScanLog('info', 'All targets cleared.');
+        } catch (err) {
+            console.error('Failed to clear all targets:', err);
+        }
+    }
+
+    updateTargetBadgeCount() {
+        const badge = document.getElementById('target-badge-count');
+        if (badge) {
+            const count = this.markedTargets.size;
+            badge.textContent = count;
+            badge.style.display = count > 0 ? 'inline-block' : 'none';
+        }
+        const counterHeader = document.getElementById('targets-header-count');
+        if (counterHeader) {
+            counterHeader.textContent = `${this.markedTargets.size} Targets`;
+        }
+    }
+
+    openTargetsDrawer() {
+        const drawer = document.getElementById('targets-drawer');
+        const backdrop = document.getElementById('targets-backdrop');
+        const btn = document.getElementById('btn-toggle-targets');
+        this.closeInspector();
+        if (drawer) drawer.classList.add('open');
+        if (backdrop) backdrop.classList.add('active');
+        if (btn) btn.classList.add('active');
+        this.renderTargetsList();
+    }
+
+    closeTargetsDrawer() {
+        const drawer = document.getElementById('targets-drawer');
+        const backdrop = document.getElementById('targets-backdrop');
+        const btn = document.getElementById('btn-toggle-targets');
+        if (drawer) drawer.classList.remove('open');
+        if (backdrop) backdrop.classList.remove('active');
+        if (btn) btn.classList.remove('active');
+    }
+
+    toggleTargetsDrawer() {
+        const drawer = document.getElementById('targets-drawer');
+        if (drawer && drawer.classList.contains('open')) {
+            this.closeTargetsDrawer();
+        } else {
+            this.openTargetsDrawer();
+        }
+    }
+
+    renderTargetsList() {
+        const emptyState = document.getElementById('targets-empty-state');
+        const itemsList = document.getElementById('targets-items-list');
+        if (!itemsList || !emptyState) return;
+
+        if (this.markedTargets.size === 0) {
+            emptyState.style.display = 'flex';
+            itemsList.style.display = 'none';
+            itemsList.innerHTML = '';
+            return;
+        }
+
+        emptyState.style.display = 'none';
+        itemsList.style.display = 'flex';
+
+        const targetsHtml = Array.from(this.markedTargets).map(ip => {
+            const statusObj = this.targetStatuses[ip] || { status: 'idle', ports_count: 0 };
+            const status = statusObj.status || 'idle';
+            const portsCount = statusObj.ports_count || (statusObj.ports ? statusObj.ports.length : 0);
+            const isScanning = status === 'scanning';
+
+            return `
+                <div class="target-card-item" data-ip="${ip}">
+                    <div class="target-card-left">
+                        <div class="target-card-ip-row">
+                            <span class="target-card-ip">${ip}</span>
+                            <span class="target-status-tag ${status}">${status}</span>
+                        </div>
+                        <div class="target-card-meta">
+                            <span>Discovered Ports: <strong style="color: #00f0ff;">${portsCount}</strong></span>
+                            ${statusObj.error ? `<span style="color: #ef4444;" title="${statusObj.error}">Error</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="target-card-actions">
+                        ${isScanning ? `
+                            <button type="button" class="target-item-btn" title="Cancel scan" onclick="window.dashboard.cancelActiveScan('${ip}')">
+                                <i data-lucide="square" class="ui-icon"></i>
+                            </button>
+                        ` : `
+                            <button type="button" class="target-item-btn" title="Scan this IP" onclick="window.dashboard.startActiveScan('${ip}')">
+                                <i data-lucide="play" class="ui-icon"></i>
+                            </button>
+                        `}
+                        <button type="button" class="target-item-btn btn-remove" title="Remove target" onclick="window.dashboard.removeTarget('${ip}')">
+                            <i data-lucide="trash-2" class="ui-icon"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        itemsList.innerHTML = targetsHtml;
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+    }
+
+    setupTargetManagement() {
+        const toggleBtn = document.getElementById('btn-toggle-targets');
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleTargetsDrawer();
+            });
+        }
+
+        const closeBtn = document.getElementById('close-targets-drawer');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                this.closeTargetsDrawer();
+            });
+        }
+
+        const backdrop = document.getElementById('targets-backdrop');
+        if (backdrop) {
+            backdrop.addEventListener('click', () => {
+                this.closeTargetsDrawer();
+            });
+        }
+
+        const scanAllBtn = document.getElementById('btn-scan-all-targets');
+        if (scanAllBtn) {
+            scanAllBtn.addEventListener('click', () => {
+                this.startActiveScan();
+            });
+        }
+
+        const clearAllBtn = document.getElementById('btn-clear-all-targets');
+        if (clearAllBtn) {
+            clearAllBtn.addEventListener('click', () => {
+                this.clearAllTargets();
+            });
+        }
+
+        // Preset buttons
+        const presetBtns = document.querySelectorAll('.preset-btn');
+        const customPortsGroup = document.getElementById('custom-ports-group');
+        presetBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                presetBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.currentPortPreset = btn.getAttribute('data-preset') || 'top100';
+                if (customPortsGroup) {
+                    customPortsGroup.style.display = this.currentPortPreset === 'custom' ? 'flex' : 'none';
+                }
+            });
+        });
+
+        // Rate slider
+        const rateSlider = document.getElementById('input-scan-rate');
+        const rateDisplay = document.getElementById('scan-rate-display');
+        if (rateSlider && rateDisplay) {
+            rateSlider.addEventListener('input', (e) => {
+                rateDisplay.textContent = `${e.target.value} pps`;
+            });
+        }
+    }
+
+    async startActiveScan(specificTarget = null) {
+        const targets = specificTarget ? [specificTarget] : Array.from(this.markedTargets);
+        if (targets.length === 0) {
+            this.addScanLog('warning', 'No targets marked for scanning.');
+            return;
+        }
+
+        const consoleSection = document.getElementById('scan-live-console-section');
+        if (consoleSection) consoleSection.style.display = 'flex';
+
+        // Check permissions first
+        try {
+            const perm = await window.api.checkScanPermissions();
+            if (!perm.available) {
+                this.addScanLog('error', 'Masscan executable not found on system. Please install masscan.');
+                return;
+            }
+        } catch (e) {
+            console.warn('Could not verify scan permissions:', e);
+        }
+
+        const customPortsInput = document.getElementById('input-custom-ports');
+        const rateSlider = document.getElementById('input-scan-rate');
+        const pnCheckbox = document.getElementById('chk-scan-pn');
+        const bannersCheckbox = document.getElementById('chk-scan-banners');
+        const extraFlagsInput = document.getElementById('input-extra-flags');
+
+        let portsValue = '--top-ports 100';
+        if (this.currentPortPreset === 'custom' && customPortsInput) {
+            portsValue = customPortsInput.value || '--top-ports 100';
+        }
+
+        const config = {
+            targets: targets,
+            preset: this.currentPortPreset,
+            ports: portsValue,
+            rate: rateSlider ? parseInt(rateSlider.value) : 1000,
+            disable_ping: pnCheckbox ? pnCheckbox.checked : true,
+            banners: bannersCheckbox ? bannersCheckbox.checked : true,
+            custom_flags: extraFlagsInput ? extraFlagsInput.value : ''
+        };
+
+        // Mark targets as scanning locally
+        targets.forEach(ip => {
+            if (!this.targetStatuses[ip]) {
+                this.targetStatuses[ip] = { ip: ip, status: 'scanning', ports_count: 0 };
+            } else {
+                this.targetStatuses[ip].status = 'scanning';
+            }
+        });
+        this.renderTargetsList();
+
+        this.addScanLog('info', `Dispatching Masscan active scan for ${targets.length} target(s) [${config.preset}]...`);
+
+        try {
+            const res = await window.api.startActiveScan(config);
+            if (res.success) {
+                this.addScanLog('success', res.message || 'Active scan running in background.');
+                this.startStatusPolling();
+            } else {
+                this.addScanLog('error', res.detail || 'Failed to start active scan.');
+            }
+        } catch (err) {
+            this.addScanLog('error', `Error starting active scan: ${err.message}`);
+        }
+    }
+
+    async cancelActiveScan(target = null) {
+        try {
+            await window.api.cancelActiveScan(target, target === null);
+            this.addScanLog('warning', target ? `Cancelled scan on ${target}` : 'Cancelled all active scans.');
+            if (target && this.targetStatuses[target]) {
+                this.targetStatuses[target].status = 'idle';
+            } else if (!target) {
+                Object.keys(this.targetStatuses).forEach(ip => {
+                    if (this.targetStatuses[ip].status === 'scanning') {
+                        this.targetStatuses[ip].status = 'idle';
+                    }
+                });
+            }
+            this.renderTargetsList();
+        } catch (err) {
+            console.error('Failed to cancel scan:', err);
+        }
+    }
+
+    startStatusPolling() {
+        if (this.scanPollingInterval) return;
+
+        this.scanPollingInterval = setInterval(async () => {
+            try {
+                const status = await window.api.getScanStatus();
+                if (status && Array.isArray(status.targets)) {
+                    status.targets.forEach(t => {
+                        this.targetStatuses[t.ip] = t;
+                    });
+                    this.renderTargetsList();
+
+                    if (Array.isArray(status.recent_logs) && status.recent_logs.length > 0) {
+                        const lastLog = status.recent_logs[status.recent_logs.length - 1];
+                        this.addScanLog(lastLog.level, `[${lastLog.timestamp}] ${lastLog.message}`, false);
+                    }
+
+                    // If no scans running, finish polling and refresh graph
+                    if (status.running_scans === 0) {
+                        clearInterval(this.scanPollingInterval);
+                        this.scanPollingInterval = null;
+                        this.addScanLog('success', 'All active scans finished. Refreshing attack surface graph...');
+                        await this.loadSummary();
+                        await this.loadGraph(true);
+                    }
+                }
+            } catch (e) {
+                console.warn('Status polling error:', e);
+            }
+        }, 1500);
+    }
+
+    addScanLog(level, message, dedupe = true) {
+        const consoleEl = document.getElementById('scan-live-console');
+        if (!consoleEl) return;
+
+        const timeStr = new Date().toLocaleTimeString();
+        const line = document.createElement('div');
+        line.className = `console-line ${level}`;
+        line.textContent = `[${timeStr}] ${message}`;
+
+        if (dedupe && consoleEl.lastElementChild && consoleEl.lastElementChild.textContent.includes(message)) {
+            return;
+        }
+
+        consoleEl.appendChild(line);
+        consoleEl.scrollTop = consoleEl.scrollHeight;
     }
 
     updateLayoutSelector() {

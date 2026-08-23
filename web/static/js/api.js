@@ -69,6 +69,65 @@ class APIClient {
     getExportUrl(format = 'json') {
         return `${this.baseURL}/export?format=${format}`;
     }
+
+    // Target Management & Active Scan APIs
+    async getTargets() {
+        return this.request('/targets');
+    }
+
+    async setTarget(ip) {
+        return this.request('/targets/set', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ ip: ip })
+        });
+    }
+
+    async removeTarget(ip) {
+        return this.request('/targets/remove', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ ip: ip })
+        });
+    }
+
+    async clearTargets() {
+        return this.request('/targets/clear', {
+            method: 'POST'
+        });
+    }
+
+    async checkScanPermissions() {
+        return this.request('/scan/check-permissions');
+    }
+
+    async startActiveScan(config = {}) {
+        return this.request('/scan/active', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(config)
+        });
+    }
+
+    async cancelActiveScan(target = null, all = false) {
+        return this.request('/scan/cancel', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ target: target, all: all })
+        });
+    }
+
+    async getScanStatus() {
+        return this.request('/scan/status');
+    }
 }
 
 // Global API client instance

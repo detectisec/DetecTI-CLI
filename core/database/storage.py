@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from core.models import (
     CISAKEVData,
@@ -473,6 +473,127 @@ class DatabaseManager:
             )
             result.calculate_summary()
             return result
+
+    def merge_active_scan_services(self, ip_address: str, open_ports: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Merge Masscan active scan results into the database with deduplication.
+        
+        - If service exists: updates sources (appends 'Masscan') and updates banner if empty.
+        - If service is new: creates new service entry with source 'Masscan'.
+        """
+        import uuid
+        import json
+        
+        added_services = 0
+        updated_services = 0
+        ip_address = ip_address.strip()
+        
+        with sqlite3.connect(self.db_path) as conn:
+            # 1. Ensure IP address exists in ip_addresses table
+            cursor = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (ip_address,))
+            row = cursor.fetchone()
+            if row:
+                ip_id = row[0]
+            else:
+                ip_id = str(uuid.uuid4())
+                conn.execute("""
+                    INSERT INTO ip_addresses (id, ip, org, country, asn)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (ip_id, ip_address, "Active Target", "Unknown", "Unknown"))
+            
+            # 2. Iterate through discovered ports
+            for p in open_ports:
+                port_num = int(p.get("port", 0))
+                if port_num <= 0:
+                    continue
+                proto = (p.get("protocol") or "tcp").lower()
+                service_name = p.get("service_name") or f"service-{port_num}"
+                banner = p.get("banner") or ""
+                ssl_flag = bool(p.get("ssl", False) or port_num == 443)
+                
+                # Check if this service already exists for this IP
+                s_cursor = conn.execute("""
+                    SELECT id, sources, banner, service_name, ssl 
+                    FROM services 
+                    WHERE ip_id = ? AND port = ? AND protocol = ?
+                """, (ip_id, port_num, proto))
+                existing_svc = s_cursor.fetchone()
+                
+                if existing_svc:
+                    svc_id, cur_sources_raw, cur_banner, cur_name, cur_ssl = existing_svc
+                    sources_list = []
+                    if cur_sources_raw:
+                        try:
+                            sources_list = json.loads(cur_sources_raw)
+                            if not isinstance(sources_list, list):
+                                sources_list = [str(sources_list)]
+                        except Exception:
+                            sources_list = [cur_sources_raw]
+                    
+                    if "Masscan" not in sources_list:
+                        sources_list.append("Masscan")
+                    
+                    new_banner = cur_banner or banner
+                    new_ssl = cur_ssl or (1 if ssl_flag else 0)
+                    
+                    conn.execute("""
+                        UPDATE services 
+                        SET sources = ?, banner = ?, ssl = ?
+                        WHERE id = ?
+                    """, (json.dumps(sources_list), new_banner, new_ssl, svc_id))
+                    updated_services += 1
+                else:
+                    # Insert new service
+                    new_svc_id = str(uuid.uuid4())
+                    sources_json = json.dumps(["Masscan"])
+                    conn.execute("""
+                        INSERT INTO services (id, ip_id, port, protocol, service_name, banner, ssl, sources)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (new_svc_id, ip_id, port_num, proto, service_name, banner, 1 if ssl_flag else 0, sources_json))
+                    added_services += 1
+            
+            # 3. Update scan_results metadata if present
+            try:
+                scan_row = conn.execute("SELECT id, modules_run FROM scan_results ORDER BY started_at DESC LIMIT 1").fetchone()
+                if scan_row:
+                    scan_id, cur_modules_raw = scan_row
+                    modules_list = []
+                    if cur_modules_raw:
+                        try:
+                            modules_list = json.loads(cur_modules_raw)
+                            if not isinstance(modules_list, list):
+                                modules_list = [str(modules_list)]
+                        except Exception:
+                            modules_list = [cur_modules_raw]
+                    
+                    if "masscan" not in modules_list and "Masscan" not in modules_list:
+                        modules_list.append("masscan")
+                    
+                    # Count total services as findings
+                    total_svc = conn.execute("SELECT COUNT(*) FROM services").fetchone()[0]
+                    total_hosts = conn.execute("SELECT COUNT(*) FROM ip_addresses").fetchone()[0]
+                    
+                    conn.execute("""
+                        UPDATE scan_results 
+                        SET modules_run = ?, total_findings = ?, total_hosts = ?, completed_at = ?
+                        WHERE id = ?
+                    """, (
+                        json.dumps(modules_list),
+                        total_svc,
+                        total_hosts,
+                        datetime.now(timezone.utc).isoformat(),
+                        scan_id
+                    ))
+            except Exception as e:
+                pass  # Non-fatal if scan_results doesn't exist yet
+
+            conn.commit()
+            
+        return {
+            "ip": ip_address,
+            "added_services": added_services,
+            "updated_services": updated_services,
+            "total_open": len(open_ports),
+        }
 
     @staticmethod
     def get_db_path_for_target(target: str, data_dir: Optional[Path] = None) -> Path:

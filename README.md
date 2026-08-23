@@ -153,6 +153,18 @@ flowchart TD
   - **Mobile & Tablet Optimized**: Responsive off-canvas navigation drawer with backdrop overlay, touch ergonomics, and debounced canvas resize.
   - **Scoped Lead Selector & Filters**: Visually isolate individual hosts and subtrees without pulling unrelated sibling branches; filter by CISA KEV, High EPSS probability, Critical CVSS, or public PoCs.
   - **Asset Inspector**: Deep-dive into technical properties, CWE descriptions, affected ports, associated domains, and weaponized exploit URLs.
+- **🎯 Target Management & High-Speed Active Port Scanning (Masscan)**:
+  - **Right-Click Target Marking**: Mark/unmark any `IP Address` node as a scan target directly from the Cytoscape graph context menu (**Set as Target** / **Remove Target**).
+  - **Dedicated Target Management Drawer**: Right-side sliding panel providing real-time target status (`Idle`, `Scanning`, `Completed`, `Failed`), discovered open port counts, individual or bulk scan execution, and a live console output stream.
+  - **Flexible Scan Presets & Rate Control**: Quick port profiles (*Top 100*, *Web Ports*, *All Ports 0-65535*, *Custom*), packet rate slider (100 to 10,000 pps), `-Pn` (disable ping), and `--banners` (banner grabbing).
+  - **Visual Topology Differentiation**:
+    - Marked IP nodes display a discreet **Crosshair badge overlay** in the upper-right corner.
+    - Exclusively active-scanned services render with a secondary high-contrast **Neon Violet / Purple (#a855f7)** color.
+    - Services discovered passively and verified actively receive a **Cyan highlight border** and **`[Verified Active]`** badge.
+    - Active scan service connections render as **dashed relationship edges** (`line-style: dashed`).
+  - **Atomic Database Persistence**: Automatic deduplication and SQLite persistence for newly discovered or verified services and banners directly into `./data/dbs/`.
+- **🔐 Pre-Flight API Verification & Sanity Checking**:
+  - Built-in sanity layer (`config-check` and engine pre-flight) that filters dummy placeholder keys and verifies valid authentication before running scans, preventing silent 401/403 authorization errors.
 - **📊 Executive & Structured Reporting**:
   - Automated local SQLite database persistence for mapped targets inside `./data/dbs/`.
   - Rich, interactive terminal tables with colored risk badges.
