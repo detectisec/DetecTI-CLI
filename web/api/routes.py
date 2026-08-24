@@ -467,13 +467,10 @@ async def start_active_scan(
                 timeout=180.0,
             )
 
-            if scan_res.get("success"):
-                open_ports = scan_res.get("open_ports", [])
-                _target_registry[ip_to_scan]["status"] = "completed"
-                _target_registry[ip_to_scan]["ports_count"] = len(open_ports)
-                _target_registry[ip_to_scan]["ports"] = open_ports
-                _target_registry[ip_to_scan]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
+            open_ports = scan_res.get("ports") or scan_res.get("open_ports") or []
+            
+            # Persist discovered ports to database if any were found (even on partial completion/timeout)
+            if open_ports:
                 active_db = db
                 if not active_db or not Path(active_db.db_path).exists():
                     current_db_path = getattr(request.app.state, "db_path", None)
@@ -493,20 +490,27 @@ async def start_active_scan(
                     merge_info = active_db.merge_active_scan_services(ip_to_scan, open_ports)
                     _append_scan_log(
                         "success",
-                        f"Scan on {ip_to_scan} completed: {len(open_ports)} port(s) found. Persisted to database ({merge_info.get('added_services', 0)} new, {merge_info.get('updated_services', 0)} verified).",
+                        f"Persisted {len(open_ports)} verified port(s) to database ({merge_info.get('added_services', 0)} new, {merge_info.get('updated_services', 0)} verified).",
                         target=ip_to_scan,
                     )
-                else:
-                    _append_scan_log(
-                        "success",
-                        f"Scan on {ip_to_scan} completed: {len(open_ports)} open port(s) discovered.",
-                        target=ip_to_scan,
-                    )
+
+            if scan_res.get("success"):
+                _target_registry[ip_to_scan]["status"] = "completed"
+                _target_registry[ip_to_scan]["ports_count"] = len(open_ports)
+                _target_registry[ip_to_scan]["ports"] = open_ports
+                _target_registry[ip_to_scan]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                _append_scan_log(
+                    "success",
+                    f"Scan on {ip_to_scan} completed: {len(open_ports)} open port(s) verified.",
+                    target=ip_to_scan,
+                )
             else:
                 err_msg = scan_res.get("error", "Unknown scan error")
                 _target_registry[ip_to_scan]["status"] = "failed"
+                _target_registry[ip_to_scan]["ports_count"] = len(open_ports)
+                _target_registry[ip_to_scan]["ports"] = open_ports
                 _target_registry[ip_to_scan]["error"] = err_msg
-                _append_scan_log("error", f"Scan on {ip_to_scan} failed: {err_msg}", target=ip_to_scan)
+                _append_scan_log("warning" if open_ports else "error", f"Scan on {ip_to_scan} ended with warning/timeout: {err_msg} ({len(open_ports)} ports preserved).", target=ip_to_scan)
 
         except asyncio.CancelledError:
             _target_registry[ip_to_scan]["status"] = "idle"
@@ -566,7 +570,7 @@ def _get_verified_active_services_for_ip(ip: str, db: Optional[DatabaseManager])
                     is_verified_active = any(
                         isinstance(s, str) and ("masscan" in s.lower() or "active" in s.lower() or "nuclei" in s.lower())
                         for s in sources_list
-                    ) or bool(s_banner and s_banner.strip())
+                    )
 
                     if is_verified_active:
                         active_services.append({

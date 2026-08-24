@@ -1547,51 +1547,45 @@ class EASMDashboard {
                     }
                 },
                 
-                // Service nodes (Passive Recon: default orange/green)
+                // 1. Service nodes - Awaiting Active Confirmation (Passive candidate awaiting validation)
                 {
                     selector: 'node[type="service"], node[type="http"], node[type="https"]',
                     style: {
-                        'background-color': '#f39c12',
+                        'background-color': '#1e293b',
+                        'label': 'data(label)',
+                        'color': '#cbd5e1',
+                        'text-valign': 'center',
+                        'text-halign': 'center',
+                        'font-size': '9px',
+                        'width': '44px',
+                        'height': '44px',
+                        'shape': 'hexagon',
+                        'border-width': '1.5px',
+                        'border-style': 'dashed',
+                        'border-color': '#f59e0b',
+                        'opacity': 0.85
+                    }
+                },
+                
+                // 2. Service nodes - Confirmed Active (Verified actively via Masscan / Active Scan) -> Emerald Green (#27ae60)
+                {
+                    selector: 'node[?verified_active], node[verified_active="true"], node[?is_active_only], node[is_active_only="true"], node[?is_active_scan], node[is_active_scan="true"]',
+                    style: {
+                        'background-color': '#27ae60',
                         'label': 'data(label)',
                         'color': '#ffffff',
                         'text-valign': 'center',
                         'text-halign': 'center',
                         'font-size': '9px',
+                        'font-weight': 'bold',
                         'width': '45px',
                         'height': '45px',
                         'shape': 'hexagon',
-                        'border-width': '1px',
-                        'border-color': '#e67e22'
-                    }
-                },
-                
-                // HTTPS services (special styling)
-                {
-                    selector: 'node[type="https"]',
-                    style: {
-                        'background-color': '#27ae60',
-                        'border-color': '#229954',
-                        'border-width': '2px'
-                    }
-                },
-
-                // Active Scan (Masscan) Services - Secondary High-Contrast Neon Violet / Purple (#a855f7)
-                {
-                    selector: 'node[?is_active_only], node[is_active_only="true"]',
-                    style: {
-                        'background-color': '#a855f7',
-                        'border-color': '#c084fc',
+                        'border-style': 'solid',
+                        'border-color': '#2ecc71',
                         'border-width': '2.5px',
-                        'box-shadow': '0 0 14px rgba(168, 85, 247, 0.7)'
-                    }
-                },
-                
-                // Verified Active Services (Discovered passively & verified actively by Masscan)
-                {
-                    selector: 'node[?verified_active], node[verified_active="true"]',
-                    style: {
-                        'border-color': '#00f0ff',
-                        'border-width': '2.5px'
+                        'opacity': 1,
+                        'box-shadow': '0 0 14px rgba(39, 174, 96, 0.65)'
                     }
                 },
 
@@ -1826,10 +1820,9 @@ class EASMDashboard {
                 {
                     selector: 'edge[?is_active_scan], edge[is_active_scan="true"], edge.active-scan-edge',
                     style: {
-                        'line-style': 'dashed',
-                        'line-dash-pattern': [6, 4],
-                        'line-color': '#a855f7',
-                        'target-arrow-color': '#a855f7',
+                        'line-style': 'solid',
+                        'line-color': '#2ecc71',
+                        'target-arrow-color': '#2ecc71',
                         'width': '2px'
                     }
                 },
@@ -3677,15 +3670,20 @@ class EASMDashboard {
                 ` : ''}
                 ${data.is_active_only ? `
                 <div class="property">
-                    <span class="key">Discovery:</span>
-                    <span class="value"><span class="badge-active-scan"><i data-lucide="crosshair" style="width: 12px; height: 12px;"></i> Active Scan</span></span>
+                    <span class="key">Verification Status:</span>
+                    <span class="value"><span class="badge-active-scan"><i data-lucide="crosshair" style="width: 12px; height: 12px;"></i> Active Scan Verified</span></span>
                 </div>
                 ` : (data.verified_active ? `
                 <div class="property">
-                    <span class="key">Discovery:</span>
-                    <span class="value"><span class="badge-verified-active"><i data-lucide="check-circle" style="width: 12px; height: 12px;"></i> Verified Active</span></span>
+                    <span class="key">Verification Status:</span>
+                    <span class="value"><span class="badge-verified-active"><i data-lucide="check-circle" style="width: 12px; height: 12px;"></i> Confirmed Active</span></span>
                 </div>
-                ` : '')}
+                ` : `
+                <div class="property">
+                    <span class="key">Verification Status:</span>
+                    <span class="value"><span class="badge-unverified" style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; background: rgba(245, 158, 11, 0.12); border: 1px dashed #f59e0b; color: #fbbf24; font-size: 0.75rem; font-weight: 600;"><i data-lucide="clock" style="width: 12px; height: 12px;"></i> Passive (Awaiting Active Confirmation)</span></span>
+                </div>
+                `)}
                 ${Array.isArray(data.sources) && data.sources.length > 0 ? `
                 <div class="property">
                     <span class="key">Sources:</span>

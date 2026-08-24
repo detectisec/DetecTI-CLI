@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import socket
 from pathlib import Path
 from typing import Any, List, Optional
 from rich.console import Console
@@ -246,6 +247,29 @@ def render_scan_output(result: ScanResult) -> None:
         print_warning("No findings were discovered for the specified target and filters.")
 
 
+def get_real_ip() -> str:
+    """Get the primary local network IPv4 address of this machine (not 0.0.0.0)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.5)
+        # Connect to public DNS IP to determine local routing interface IP
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        if ip and not ip.startswith("127."):
+            return ip
+    except Exception:
+        pass
+    try:
+        hostname = socket.gethostname()
+        ip = socket.gethostbyname(hostname)
+        if ip and not ip.startswith("127."):
+            return ip
+    except Exception:
+        pass
+    return "127.0.0.1"
+
+
 def render_summary_panel(summary: Any, elapsed: float) -> Panel:
     """Generate a clean executive summary panel."""
     lines = [
@@ -269,3 +293,80 @@ def render_summary_panel(summary: Any, elapsed: float) -> Panel:
         border_style="green",
         expand=False,
     )
+
+
+def render_executive_summary(result: ScanResult) -> None:
+    """Render high-impact executive summary focusing on key metrics, perimeter stats, and actionable dashboard access."""
+    is_cve = (result.target_type == "cve") or result.target.strip().upper().startswith("CVE-")
+
+    # 1. Executive Summary Panel
+    console.print("")
+    console.print(render_summary_panel(result.summary, result.elapsed_seconds))
+
+    # 2. Critical & High-Impact Vulnerabilities Table (Only for standalone CVE lookups)
+    if is_cve:
+        all_vulns: List[tuple[str, Any]] = []
+        for host in result.hosts:
+            for v in host.vulnerabilities:
+                all_vulns.append((host.ip, v))
+
+        for f in result.findings:
+            if f.type == FindingType.VULNERABILITY and f.vulnerability and not f.host_ip:
+                all_vulns.append((result.target, f.vulnerability))
+
+        seen_keys = set()
+        unique_vulns = []
+        for h_ip, v in all_vulns:
+            k = (h_ip, v.cve_id)
+            if k not in seen_keys:
+                seen_keys.add(k)
+                unique_vulns.append((h_ip, v))
+
+        if unique_vulns:
+            print_section_header(f"CVE Threat Intelligence ({len(unique_vulns)} Vulnerability Details)")
+            table = Table(show_header=True, header_style="bold red", show_lines=True)
+            table.add_column("CVE ID", style="bold white", width=16)
+            table.add_column("Affected Target", style="bold cyan", width=18)
+            table.add_column("Severity / CVSS", style="bold", width=16)
+            table.add_column("EPSS Risk", style="yellow", width=12)
+            table.add_column("CISA KEV", style="bold", width=12)
+            table.add_column("Public PoCs & Weaponization", style="white")
+
+            for h_ip, v in unique_vulns:
+                sev_str = v.cvss_severity.value if hasattr(v.cvss_severity, "value") else str(v.cvss_severity)
+                sev_style = "critical" if "CRIT" in sev_str.upper() else "high" if "HIGH" in sev_str.upper() else "medium"
+                cvss_cell = f"[{sev_style}]{v.cvss_score or 'N/A'} ({sev_str})[/{sev_style}]"
+                epss_cell = f"{v.epss.epss_score * 100:.1f}%" if v.epss else "N/A"
+                kev_cell = "[bold white on red] YES [/bold white on red]" if v.in_cisa_kev else "[dim]No[/dim]"
+
+                exploits_info = [f"[bold red]{exp.source}:[/bold red] {exp.url}" for exp in v.exploits]
+                exploit_cell = "\n".join(exploits_info) if exploits_info else "[dim]None[/dim]"
+
+                table.add_row(v.cve_id, h_ip, cvss_cell, epss_cell, kev_cell, exploit_cell)
+
+            console.print(table)
+
+    # 3. Discovered Perimeter Highlights (For direct target scans)
+    if not is_cve:
+        subdomains = [f for f in result.findings if f.type == FindingType.SUBDOMAIN and not f.host_ip]
+        assoc_domains = [f for f in result.findings if f.type == FindingType.ASSOCIATED_DOMAIN and not f.host_ip]
+        if subdomains or assoc_domains:
+            summary_parts = []
+            if subdomains:
+                summary_parts.append(f"[bold cyan]{len(subdomains)} Subdomains[/bold cyan] (via crt.sh / DNS)")
+            if assoc_domains:
+                summary_parts.append(f"[bold blue]{len(assoc_domains)} Associated Domains[/bold blue] (via Reverse WHOIS)")
+            console.print(f"\n 🌐 [bold]Perimeter Intelligence:[/bold] {' • '.join(summary_parts)}")
+
+        # 4. DetecTI Hound Web Dashboard Quick Access Callout (Only for asset/perimeter scans)
+        real_ip = get_real_ip()
+        port = 8000
+        console.print("")
+        dashboard_box = [
+            "[bold cyan]DetecTI Hound — Interactive Attack Surface Graph[/bold cyan]",
+            "Explore full relational topology, technical banners, and active scans:",
+            f"  👉 [bold white]Local Access:[/bold white]   [bold underline cyan]http://localhost:{port}[/bold underline cyan]",
+            f"  👉 [bold white]Network Access:[/bold white] [bold underline cyan]http://{real_ip}:{port}[/bold underline cyan]",
+        ]
+        console.print(Panel("\n".join(dashboard_box), border_style="cyan", expand=False))
+

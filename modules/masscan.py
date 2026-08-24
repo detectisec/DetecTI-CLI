@@ -75,8 +75,14 @@ class MasscanRunner:
         # Port specification
         if ports:
             p_clean = ports.strip()
-            if p_clean.startswith("-p"):
-                cmd.extend(["-p", p_clean[2:].strip()])
+            if p_clean in ("-p-", "-", "all", "0-65535", "1-65535", "-p0-65535", "-p1-65535"):
+                cmd.extend(["-p", "0-65535"])
+            elif p_clean.startswith("-p"):
+                val = p_clean[2:].strip()
+                if val in ("-", "all", "0-65535", "1-65535"):
+                    cmd.extend(["-p", "0-65535"])
+                else:
+                    cmd.extend(["-p", val])
             elif p_clean.startswith("--top-ports"):
                 parts = p_clean.split()
                 cmd.extend(["--top-ports", parts[1] if len(parts) > 1 else "100"])
@@ -129,17 +135,20 @@ class MasscanRunner:
                         proc.kill()
                     except Exception:
                         pass
+                # Parse all ports discovered by masscan before timeout occurred
+                discovered_ports = self._parse_json_file(temp_out_path, target_ip)
                 return {
-                    "success": False,
+                    "success": len(discovered_ports) > 0,
                     "target": target_ip,
                     "error": f"Masscan execution timed out after {timeout} seconds",
-                    "ports": [],
+                    "ports": discovered_ports,
+                    "open_ports": discovered_ports,
+                    "count": len(discovered_ports),
                 }
 
             stderr_text = stderr_bytes.decode("utf-8", errors="replace")
             
-            # Check exit code
-            # Note: Masscan may exit with code 0 or 1 on completion
+            # Check exit code and parse findings
             open_ports = self._parse_json_file(temp_out_path, target_ip)
 
             # Check if there was a permission error
@@ -149,23 +158,28 @@ class MasscanRunner:
                     "target": target_ip,
                     "error": "Masscan requires root or CAP_NET_RAW privileges to run raw packet scans",
                     "ports": [],
+                    "open_ports": [],
                 }
 
             return {
                 "success": True,
                 "target": target_ip,
                 "ports": open_ports,
+                "open_ports": open_ports,
                 "count": len(open_ports),
                 "command": " ".join(cmd),
             }
 
         except Exception as exc:
             logger.error(f"Error executing masscan on {target_ip}: {exc}")
+            discovered_ports = self._parse_json_file(temp_out_path, target_ip)
             return {
-                "success": False,
+                "success": len(discovered_ports) > 0,
                 "target": target_ip,
                 "error": str(exc),
-                "ports": [],
+                "ports": discovered_ports,
+                "open_ports": discovered_ports,
+                "count": len(discovered_ports),
             }
         finally:
             # Clean up temp file
@@ -187,14 +201,13 @@ class MasscanRunner:
             if not content:
                 return []
 
-            # Handle Masscan JSON quirks (e.g. trailing commas before closing bracket)
-            if content.endswith(",\n]"):
-                content = content[:-3] + "\n]"
-            elif content.endswith(",]"):
-                content = content[:-2] + "]"
-            elif not content.endswith("]") and not content.endswith("}"):
-                # If interrupted mid-output, attempt to close bracket
+            # Handle Masscan JSON quirks (trailing commas before closing bracket, mid-stream EOF)
+            import re
+            content = re.sub(r',\s*([\]\}])', r'\1', content)
+            if not content.endswith("]") and not content.endswith("}"):
                 content += "\n]"
+            if not content.startswith("[") and not content.startswith("{"):
+                content = "[" + content
 
             data = json.loads(content)
             # Use dictionary keyed by (ip, port, proto) to merge duplicate masscan records (status + banners)

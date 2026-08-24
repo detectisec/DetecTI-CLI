@@ -296,10 +296,10 @@ class DatabaseManager:
                 stats['open_services'] = 0
             
             try:
-                # Count verified active services (sources containing Masscan or active or having banners)
-                cursor = conn.execute("SELECT sources, banner FROM services")
+                # Count verified active services (strictly requiring active verification like Masscan/Nuclei/Active)
+                cursor = conn.execute("SELECT sources FROM services")
                 verified_count = 0
-                for s_raw, b_val in cursor.fetchall():
+                for (s_raw,) in cursor.fetchall():
                     s_list = []
                     if s_raw:
                         try:
@@ -311,7 +311,7 @@ class DatabaseManager:
                     is_active = any(
                         isinstance(s, str) and ("masscan" in s.lower() or "active" in s.lower() or "nuclei" in s.lower())
                         for s in s_list
-                    ) or bool(b_val and str(b_val).strip())
+                    )
                     if is_active:
                         verified_count += 1
                 stats['verified_services'] = verified_count

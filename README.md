@@ -308,7 +308,7 @@ You can pass custom Shodan search queries directly into the target `-t` paramete
 
 ```bash
 # Search by Organization Name
-./detecti-cli scan -t "org:'ACME LTDA'" -m all -f acme.md
+./detecti-cli scan -t "org:'ACME LTDA'" -f acme.md
 
 # Search by City and Open Service
 ./detecti-cli scan -t "city:'washington' port:8080" -o markdown -f washington.md
@@ -318,29 +318,24 @@ You can pass custom Shodan search queries directly into the target `-t` paramete
 ```
 > 💡 **Tip**: Explore all available search filters in the official [Shodan Search Filters Guide](https://www.shodan.io/search/filters).
 
-### 5. Select Specific Modules
-```bash
-./detecti-cli scan -t example.com -m crtsh,reverse_whois,shodan
-```
-
-### 6. Filter Vulnerabilities by CVSS Severity
+### 5. Filter Vulnerabilities by CVSS Severity
 ```bash
 ./detecti-cli scan -t 142.250.191.68 --cvss critical
 ```
 
-### 7. Save Scan Results to SQLite Database (EASM Persistence)
-To visualize and query the attack surface in the interactive Web Dashboard or preserve scans over time, use `--create-db` to store all correlated data in the central `./data/dbs/` directory:
+### 6. Automatic SQLite Database Persistence & DetecTI Hound Launch
+Target scans automatically save all correlated entities (Domains, IPs, Ports, Services, CVEs, PoCs) into `./data/dbs/{target_root}.sqlite` and automatically launch the **DetecTI Hound** WebGUI:
 
 ```bash
-# Scan a domain and save to a named database (creates ./data/dbs/spacex.sqlite)
-./detecti-cli scan -t spacex.com --create-db spacex
+# Scan a domain (automatically creates ./data/dbs/spacex.com.sqlite and starts Hound)
+./detecti-cli scan -t spacex.com
 
-# Scan an IP/network subnet and save to a specific database (creates ./data/dbs/google_net.sqlite)
+# Scan with custom database name
 ./detecti-cli scan -t 142.250.191.0/24 --create-db google_net
 ```
-> 💡 All scan databases are centralized in `./data/dbs/` so both the CLI and the Web UI can automatically discover, list, and switch between them.
+> 💡 All scan databases are centralized in `./data/dbs/` so both the CLI and DetecTI Hound can automatically discover, list, and switch between them. (Note: Standalone CVE lookups like `CVE-2021-44228` do not create databases).
 
-### 8. Export Reports (JSON, Markdown & HTML)
+### 7. Export Reports (JSON, Markdown & HTML)
 ```bash
 # Export Markdown executive report
 ./detecti-cli scan -t example.com -o markdown -f report.md
@@ -355,12 +350,12 @@ To visualize and query the attack surface in the interactive Web Dashboard or pr
 ./detecti-cli scan -t example.com -o all -d ./reports
 ```
 
-### 9. Update ExploitDB Database
+### 8. Update ExploitDB Database
 ```bash
 ./detecti-cli update-xdb
 ```
 
-### 10. Interactive EASM Web Dashboard (DetecTI Hound)
+### 9. Interactive EASM Web Dashboard (DetecTI Hound)
 Explore the mapped attack surface visually via the interactive web application from previously saved SQLite databases:
 
 ```bash
@@ -377,12 +372,15 @@ Explore the mapped attack surface visually via the interactive web application f
 ./detecti-cli hound stop
 ```
 
-#### 🌟 Web Dashboard Highlights:
+#### 🌟 Web Dashboard & Cytoscape Graph Highlights:
 - **Dynamic Database Switcher**: Switch between any saved SQLite database in `./data/dbs/` directly from the header dropdown without restarting the server.
+- **Strict 2-State Service Semantics**:
+  - `⚠️ Awaiting Active Confirmation`: Dark slate hexagon with dashed amber border for passive recon findings.
+  - `✅ Confirmed Active`: Canonical **Emerald Green** solid hexagon (`#27ae60`) once validated by Masscan active scan.
 - **Export Data Menu**: Instant one-click download of the active scan in **JSON**, **Markdown**, or standalone **HTML** format (with built-in print/PDF styling).
 - **Interactive Graph Visualization**: Full Cytoscape.js topology with multiple layout algorithms (`⚡ Force-Directed Adv`, `🌳 Hierarchical`, `🎯 Concentric`, `▦ Grid`).
-- **Target & Lead Filtering**: Scoped visibility, risk filters (CISA KEV, High EPSS, Critical CVSS, PoCs), and comprehensive technical node inspection.
-- **Official Documentation**: Direct integration to the official [DetecTI-CLI Documentation](https://detecti.com.br/docs/detecti-cli/en.html) from the header and sidebar for in-depth architecture guides and interactive visual topology reference.
+- **Target Management & Active Scans**: In-app Masscan port scanner and Nuclei vulnerability runner with live stream logs.
+- **Official Documentation**: Direct integration to the official [DetecTI-CLI Documentation](https://detecti.com.br/docs/detecti-cli/en.html) from the header and sidebar.
 
 
 ---
