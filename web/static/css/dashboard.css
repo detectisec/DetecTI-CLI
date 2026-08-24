@@ -2097,17 +2097,17 @@ html, body {
     }
 
     .metric-grid {
-        grid-template-columns: repeat(3, 1fr);
-        gap: 0.4rem;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.5rem;
     }
 
     .metric-item {
-        padding: 0.45rem 0.25rem;
-        min-height: 58px;
+        padding: 0.5rem 0.35rem;
+        min-height: 60px;
     }
 
     .metric-value {
-        font-size: 1.05rem;
+        font-size: 1.12rem;
     }
 }
 
