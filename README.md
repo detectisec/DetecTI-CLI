@@ -21,16 +21,18 @@
 
 > 📖 Complete guides, installation, CLI usage, architecture, and threat intelligence scoring are available in the [**DetecTI-CLI Official Documentation**](https://detecti.com.br/docs/detecti-cli/en.html).
 
-### 🛡️ About DetecTI-CLI
-**DetecTI-CLI** is an enterprise-grade cyber intelligence and External Attack Surface Management (EASM) platform engineered by [DetecTI Security](https://detecti.com.br). It empowers cybersecurity professionals, red teams, and security operations centers to dynamically map an organization's digital footprint, correlate internet-facing infrastructure across multiple intelligence feeds, perform high-speed active port and vulnerability validation, and prioritize risks using actionable weaponization intelligence.
+### 🛡️ About DetecTI - Cyber Lead Intelligence
+**DetecTI-CLI** (officially **DetecTI - Cyber Lead Intelligence**) is an enterprise-grade cyber intelligence and External Attack Surface Management (EASM) platform engineered by [DetecTI Security](https://detecti.com.br). It serves as the primary execution engine of the proprietary **R.A.D.A.R Framework** (*Reconnaissance, Risk Assessment, Disruption, Adversary Emulation, and Remediation*), materializing the organization's institutional pillars: *Open Source Collaboration*, *Technical Excellence*, *Ethical Hacking*, and *Pragmatism*.
+
+In cybersecurity operations, a **Cyber Lead** is an exposed asset or attack vector discovered, enriched with threat intelligence, actively validated, and qualified by its real-world exploitation risk. DetecTI-CLI transforms noisy internet telemetry into qualified, prioritized intelligence so security teams can focus on what matters most.
 
 ---
 
 ## 🚀 Overview
 
-**DetecTI-CLI** is a high-performance Python 3.11+ engine designed for **External Attack Surface Management (EASM)**, **Active & Passive Asset Reconnaissance**, and **Vulnerability Weaponization Intelligence**.
+**DetecTI - Cyber Lead Intelligence** is a high-performance Python 3.11+ engine designed for **External Attack Surface Management (EASM)**, **Active & Passive Asset Reconnaissance**, and **Vulnerability Weaponization Intelligence**.
 
-It maps exposed internet infrastructure (domains, subdomains, IPs, open services, and banners), correlates organizational relationships via **Reverse WHOIS** and **Certificate Transparency**, executes high-speed active verification with **Masscan**, performs targeted vulnerability validation with **Nuclei** strictly against verified active endpoints, and enriches identified CVEs with real-world exploitation risk data (**FIRST EPSS + CISA KEV**), weakness taxonomy (**CWE Name**), provenance tracking (**Vulnerability Source**), and public weaponization proofs (**ExploitDB + GitHub PoCs**).
+It maps exposed internet infrastructure (domains, subdomains, IPs, open services, and banners), correlates organizational relationships via **Reverse WHOIS** and **Certificate Transparency**, executes high-speed active verification with **Masscan**, performs targeted vulnerability validation with **Nuclei** strictly against verified active endpoints (*Verified Active Rule*), and enriches identified CVEs with real-world exploitation risk data (**FIRST EPSS + CISA KEV**), weakness taxonomy (**CWE Name**), provenance tracking (**Vulnerability Source**), and public weaponization proofs (**ExploitDB + GitHub PoCs**).
 
 ---
 
