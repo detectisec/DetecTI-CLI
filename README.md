@@ -22,7 +22,7 @@
 > 📖 Complete guides, installation, CLI usage, architecture, and threat intelligence scoring are available in the [**DetecTI-CLI Official Documentation**](https://detecti.com.br/docs/detecti-cli/en.html).
 
 ### 🛡️ About DetecTI - Cyber Lead Intelligence
-**DetecTI-CLI** (officially **DetecTI - Cyber Lead Intelligence**) is an enterprise-grade cyber intelligence and External Attack Surface Management (EASM) platform engineered by [DetecTI Security](https://detecti.com.br). It serves as the primary execution engine of the proprietary **R.A.D.A.R Framework** (*Reconnaissance, Risk Assessment, Disruption, Adversary Emulation, and Remediation*), materializing the organization's institutional pillars: *Open Source Collaboration*, *Technical Excellence*, *Ethical Hacking*, and *Pragmatism*.
+**DetecTI-CLI** (officially **DetecTI - Cyber Lead Intelligence**) is an enterprise-grade cyber intelligence and External Attack Surface Management (EASM) platform engineered by [DetecTI Security](https://detecti.com.br). It serves as the primary execution engine of the proprietary **R.A.D.A.R. Framework** (*Reconnaissance, Analysis, Diagnosis, Assessment, and Resolution*), materializing the organization's institutional pillars: *Open Source Collaboration*, *Technical Excellence*, *Ethical Hacking*, and *Pragmatism*.
 
 In cybersecurity operations, a **Cyber Lead** is an exposed asset or attack vector discovered, enriched with threat intelligence, actively validated, and qualified by its real-world exploitation risk. DetecTI-CLI transforms noisy internet telemetry into qualified, prioritized intelligence so security teams can focus on what matters most.
 
