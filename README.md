@@ -184,9 +184,9 @@ flowchart TD
   - **Flexible Scan Presets & Rate Control**: Quick port profiles (*Top 100*, *Web Ports*, *All Ports 0-65535*, *Custom*), packet rate slider (100 to 10,000 pps), `-Pn` (disable ping), and `--banners` (banner grabbing & service detection).
   - **Visual Topology Differentiation**:
     - Marked IP nodes display a discreet **Crosshair badge overlay** in the upper-right corner.
-    - Exclusively active-scanned services render with a secondary high-contrast **Neon Violet / Purple (#a855f7)** color.
-    - Services discovered passively and verified actively receive a **Cyan highlight border** and **`[Verified Active]`** badge.
-    - Active scan service connections render as **dashed relationship edges** (`line-style: dashed`).
+    - Services awaiting active verification render in dark slate with dashed amber borders (`#f59e0b`).
+    - Confirmed active services render in solid **Emerald Green (#27ae60)** with an emerald border and glow.
+    - Active scan service connections render as solid **Emerald Green relationship edges** (`#2ecc71`).
 - **🛡️ Active Vulnerability Scanning (Nuclei)**:
   - Integration with ProjectDiscovery's **Nuclei** engine for template-based vulnerability assessment.
   - **Mandatory "Verified Active" Enforcement**: Scans are strictly targeted at ports confirmed open and active via Masscan. Unverified targets trigger an automated pre-scan verification prior to template execution.
