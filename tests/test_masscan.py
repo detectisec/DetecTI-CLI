@@ -201,3 +201,47 @@ def test_target_ports_partition():
         assert verified == {80}
         assert unverified == {8080, 8443}
 
+
+def test_database_unverify_services():
+    """Test resetting services from Verified Active back to passive."""
+    from web.api.routes import _get_target_ports_partition
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test_unverify.sqlite"
+        db = DatabaseManager(db_path)
+
+        import sqlite3
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("INSERT INTO ip_addresses (id, ip) VALUES ('ip-1', '10.0.0.1')")
+            conn.execute(
+                "INSERT INTO services (id, ip_id, port, protocol, sources) VALUES ('s1', 'ip-1', 80, 'tcp', ?)",
+                (json.dumps(["Masscan", "Shodan"]),)
+            )
+            conn.execute(
+                "INSERT INTO services (id, ip_id, port, protocol, sources) VALUES ('s2', 'ip-1', 443, 'tcp', ?)",
+                (json.dumps(["Masscan"]),)
+            )
+
+        # Before unverify
+        verified, unverified = _get_target_ports_partition("10.0.0.1", db)
+        assert verified == {80, 443}
+        assert unverified == set()
+
+        # Unverify single service s1
+        res1 = db.unverify_services(service_ids=["s1"])
+        assert res1["success"] is True
+        assert res1["unverified_count"] == 1
+
+        verified, unverified = _get_target_ports_partition("10.0.0.1", db)
+        assert verified == {443}
+        assert unverified == {80}
+
+        # Unverify by IP
+        res2 = db.unverify_services(ip_addresses=["10.0.0.1"])
+        assert res2["success"] is True
+        assert res2["unverified_count"] == 1
+
+        verified, unverified = _get_target_ports_partition("10.0.0.1", db)
+        assert verified == set()
+        assert unverified == {80, 443}
+

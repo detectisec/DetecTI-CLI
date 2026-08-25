@@ -343,6 +343,12 @@ class CancelScanRequest(BaseModel):
     scan_type: Optional[str] = "all"  # 'masscan', 'nuclei', or 'all'
 
 
+class UnverifyServicesRequest(BaseModel):
+    service_ids: Optional[List[str]] = None
+    ip_addresses: Optional[List[str]] = None
+    all_services: Optional[bool] = False
+
+
 def _append_scan_log(level: str, message: str, target: Optional[str] = None):
     entry = {
         "timestamp": datetime.now().strftime("%H:%M:%S"),
@@ -440,6 +446,37 @@ async def clear_all_targets() -> Dict:
         "success": True,
         "cleared_count": count,
     }
+
+
+@router.post("/services/unverify")
+async def unverify_services_endpoint(
+    req: UnverifyServicesRequest,
+    target: Optional[str] = Query(None, description="Active target name"),
+    db: Optional[DatabaseManager] = Depends(get_db_manager),
+) -> Dict:
+    """Remove active verification status (Masscan source) from specified services, IPs, or root nodes.
+    
+    Allows analysts to reset services back to passive state for targeted re-validation without losing assets.
+    """
+    active_db = _get_active_db_manager(target) or db
+    if not active_db or not Path(active_db.db_path).exists():
+        raise HTTPException(status_code=404, detail="No active scan database found")
+
+    res = active_db.unverify_services(
+        service_ids=req.service_ids,
+        ip_addresses=req.ip_addresses,
+        all_services=bool(req.all_services)
+    )
+
+    # Log to live console
+    target_label = target or "Active Target"
+    _append_scan_log(
+        "info",
+        f"[Service Reset] Removed 'Confirmed Active' status from {res.get('unverified_count', 0)} service(s) to allow fresh re-validation.",
+        target=target_label
+    )
+
+    return res
 
 
 @router.get("/scan/check-permissions")

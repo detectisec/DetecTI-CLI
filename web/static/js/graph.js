@@ -4255,6 +4255,41 @@ class EASMDashboard {
             }
         }
 
+        // 4. Unverify Active Status Action (Single service node with Verified Active or Root/Parent with associated active services)
+        let unverifyBtnHtml = '';
+        let verifiedServicesToReset = [];
+
+        if (['service', 'http', 'https'].includes(nodeType)) {
+            const isVerified = data.verified_active === true || data.is_active_scan === true || 
+                (Array.isArray(data.sources) && data.sources.some(s => String(s).toLowerCase().includes('masscan') || String(s).toLowerCase().includes('active')));
+            if (isVerified) {
+                verifiedServicesToReset = [node];
+                unverifyBtnHtml = `
+                    <button type="button" class="cy-context-menu-item" id="ctx-action-unverify-service" style="color: #f59e0b;">
+                        <i data-lucide="shield-off" class="ui-icon" style="color: #f59e0b;"></i>
+                        <span>Remove Verified Active</span>
+                    </button>
+                `;
+            }
+        } else {
+            const allAssociatedServices = this.getAssociatedServiceNodes(node);
+            verifiedServicesToReset = allAssociatedServices.filter(sNode => {
+                const sData = sNode.data();
+                return sData.verified_active === true || sData.is_active_scan === true || 
+                    (Array.isArray(sData.sources) && sData.sources.some(s => String(s).toLowerCase().includes('masscan') || String(s).toLowerCase().includes('active')));
+            });
+
+            if (verifiedServicesToReset.length > 0) {
+                const vCount = verifiedServicesToReset.length;
+                unverifyBtnHtml = `
+                    <button type="button" class="cy-context-menu-item" id="ctx-action-unverify-all-services" style="color: #f59e0b;">
+                        <i data-lucide="shield-off" class="ui-icon" style="color: #f59e0b;"></i>
+                        <span>Remove Verified Active (${vCount} Service${vCount > 1 ? 's' : ''})</span>
+                    </button>
+                `;
+            }
+        }
+
         const collapseButtonsHtml = collapseActions.map(act => `
             <button type="button" class="cy-context-menu-item primary ctx-collapse-btn" data-action-id="${act.id}" ${act.disabled ? 'disabled' : ''}>
                 <i data-lucide="${act.icon}" class="ui-icon"></i>
@@ -4270,6 +4305,7 @@ class EASMDashboard {
             ${collapseButtonsHtml}
             <div class="cy-context-menu-divider"></div>
             ${targetBtnHtml}
+            ${unverifyBtnHtml}
             <button type="button" class="cy-context-menu-item" id="ctx-action-inspect">
                 <i data-lucide="info" class="ui-icon"></i>
                 <span>Inspect Details</span>
@@ -4326,6 +4362,25 @@ class EASMDashboard {
                 } else {
                     await this.setTargetsBulk(ipStrings, rootAssociatedIps);
                 }
+            });
+        }
+
+        // Wire unverify action for single service node or root / parent nodes
+        const unverifyServiceBtn = menu.querySelector('#ctx-action-unverify-service');
+        if (unverifyServiceBtn && verifiedServicesToReset.length === 1) {
+            unverifyServiceBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                this.hideContextMenu();
+                await this.unverifyServices(verifiedServicesToReset);
+            });
+        }
+
+        const unverifyAllBtn = menu.querySelector('#ctx-action-unverify-all-services');
+        if (unverifyAllBtn && verifiedServicesToReset.length > 0) {
+            unverifyAllBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                this.hideContextMenu();
+                await this.unverifyServices(verifiedServicesToReset);
             });
         }
 
@@ -4585,6 +4640,72 @@ class EASMDashboard {
             });
         }
         return ipNodes;
+    }
+
+    getAssociatedServiceNodes(node) {
+        if (!node || !this.cy) return [];
+        const nodeType = node.data('type');
+        if (['service', 'http', 'https'].includes(nodeType)) return [node];
+
+        const srvNodes = [];
+        const ipNodes = this.getAssociatedIpNodes(node);
+        const seenSrv = new Set();
+
+        ipNodes.forEach(ipNode => {
+            const outgoers = ipNode.outgoers('node[type="service"], node[type="http"], node[type="https"]');
+            outgoers.forEach(sNode => {
+                if (!seenSrv.has(sNode.id())) {
+                    seenSrv.add(sNode.id());
+                    srvNodes.push(sNode);
+                }
+            });
+        });
+
+        return srvNodes;
+    }
+
+    async unverifyServices(serviceNodes) {
+        if (!Array.isArray(serviceNodes) || serviceNodes.length === 0) return;
+        const sIds = serviceNodes.map(s => s.id());
+        try {
+            const targetParam = this.activeTarget ? `?target=${encodeURIComponent(this.activeTarget)}` : '';
+            const res = await fetch(`/api/services/unverify${targetParam}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ service_ids: sIds })
+            });
+            const data = await res.json();
+            if (data.success) {
+                // Update Cytoscape node and edge states locally
+                serviceNodes.forEach(sNode => {
+                    sNode.data('verified_active', false);
+                    sNode.data('is_active_scan', false);
+                    const curSources = sNode.data('sources') || [];
+                    const newSources = curSources.filter(s => !String(s).toLowerCase().includes('masscan') && !String(s).toLowerCase().includes('active'));
+                    if (newSources.length === 0) newSources.push('Passive');
+                    sNode.data('sources', newSources);
+
+                    // Update incoming EXPOSES edges
+                    sNode.incomers('edge[label="EXPOSES"]').forEach(edge => {
+                        edge.data('verified_active', false);
+                        edge.data('is_active_scan', false);
+                    });
+                });
+
+                const count = data.unverified_count || serviceNodes.length;
+                this.showToast('info', `Removed Verified Active from ${count} service(s). Services are now Passive and ready for re-validation.`);
+
+                // Re-render inspector if selected node is affected
+                if (this.selectedNode) {
+                    this.showNodeInspector(this.selectedNode);
+                }
+            } else {
+                this.showToast('error', data.error || 'Failed to remove Verified Active status.');
+            }
+        } catch (err) {
+            console.error('Error unverifying services:', err);
+            this.showToast('error', 'Error resetting verified active services');
+        }
     }
 
     async setTargetsBulk(ips, nodes = []) {

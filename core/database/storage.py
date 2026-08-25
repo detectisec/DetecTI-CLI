@@ -642,6 +642,78 @@ class DatabaseManager:
             "total_open": len(open_ports),
         }
 
+    def unverify_services(
+        self,
+        service_ids: Optional[List[str]] = None,
+        ip_addresses: Optional[List[str]] = None,
+        all_services: bool = False
+    ) -> Dict[str, Any]:
+        """Remove Masscan / active verification status from specified services or IPs.
+        
+        Preserves service metadata, ports, banners, and passive sources so they can be re-validated.
+        """
+        import json
+        unverified_count = 0
+        affected_ids = []
+
+        with sqlite3.connect(self.db_path) as conn:
+            query = "SELECT id, sources FROM services WHERE 1=1"
+            params = []
+
+            if not all_services:
+                conditions = []
+                if service_ids:
+                    clean_sids = [str(s).replace("srv_", "").strip() for s in service_ids if s]
+                    if clean_sids:
+                        placeholders = ",".join("?" for _ in clean_sids)
+                        conditions.append(f"id IN ({placeholders})")
+                        params.extend(clean_sids)
+                if ip_addresses:
+                    clean_ips = [str(ip).replace("ip_", "").strip() for ip in ip_addresses if ip]
+                    if clean_ips:
+                        ip_placeholders = ",".join("?" for _ in clean_ips)
+                        conditions.append(f"ip_id IN (SELECT id FROM ip_addresses WHERE ip IN ({ip_placeholders}) OR id IN ({ip_placeholders}))")
+                        params.extend(clean_ips)
+                        params.extend(clean_ips)
+                
+                if conditions:
+                    query += f" AND ({' OR '.join(conditions)})"
+                else:
+                    return {"success": True, "unverified_count": 0, "affected_service_ids": []}
+
+            cursor = conn.execute(query, params)
+            rows = cursor.fetchall()
+
+            for svc_id, cur_sources_raw in rows:
+                sources_list = []
+                if cur_sources_raw:
+                    try:
+                        parsed = json.loads(cur_sources_raw)
+                        if isinstance(parsed, list):
+                            sources_list = parsed
+                        else:
+                            sources_list = [str(parsed)]
+                    except Exception:
+                        sources_list = [cur_sources_raw]
+                
+                had_masscan = any("masscan" in str(s).lower() or "active" in str(s).lower() for s in sources_list)
+                if had_masscan or not sources_list:
+                    new_sources = [s for s in sources_list if "masscan" not in str(s).lower() and "active" not in str(s).lower()]
+                    if not new_sources:
+                        new_sources = ["Passive"]
+                    
+                    conn.execute("UPDATE services SET sources = ? WHERE id = ?", (json.dumps(new_sources), svc_id))
+                    unverified_count += 1
+                    affected_ids.append(f"srv_{svc_id}")
+
+            conn.commit()
+
+        return {
+            "success": True,
+            "unverified_count": unverified_count,
+            "affected_service_ids": affected_ids
+        }
+
     def merge_nuclei_findings(
         self,
         findings: List[Dict[str, Any]],
