@@ -897,12 +897,41 @@ html, body {
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+    transition: all 0.3s ease;
+}
+
+.panel.lead-selector-panel:has(#lead-selector-accordion[open]) {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+#lead-selector-accordion[open] {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+#lead-selector-accordion[open] > .accordion-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding-bottom: 0.75rem;
+}
+
+#lead-selector-container {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .lead-controls {
     display: flex;
     gap: 0.5rem;
     margin-bottom: 0.75rem;
+    flex-shrink: 0;
 }
 
 .lead-control-btn {
@@ -926,9 +955,11 @@ html, body {
 }
 
 .lead-list {
-    flex: 1;
+    flex: 1 1 auto;
     overflow-y: auto;
-    max-height: 11rem;
+    min-height: 180px;
+    max-height: calc(100vh - 280px);
+    max-height: calc(100dvh - 280px);
     padding-right: 0.25rem;
     background: transparent;
     border: none;
