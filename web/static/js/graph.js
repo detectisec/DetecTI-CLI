@@ -1068,35 +1068,28 @@ class EASMDashboard {
             
             if (this.filters.matrix3d) {
                 // Dimensão 1: Exposição e Validação Ativa (O Ativo)
-                // Deve haver pelo menos um serviço pai ativamente verificado (Masscan/Active), ou IP verificado
-                let hasActiveExposure = false;
+                // Regra Estrita: A vulnerabilidade DEVE ter rastreabilidade direta com um serviço confirmado ativo (Masscan/Active).
+                let hasDirectActiveService = false;
                 if (typeof vulnNode.incomers === 'function') {
                     const parentServices = vulnNode.incomers('node[type="service"], node[type="http"], node[type="https"]');
                     if (parentServices.length > 0) {
-                        hasActiveExposure = parentServices.some(srv => {
+                        hasDirectActiveService = parentServices.some(srv => {
                             const sData = srv.data();
                             if (sData.verified_active === true || sData.is_active_scan === true) return true;
                             const sSources = Array.isArray(sData.sources) ? sData.sources : (sData.sources ? [sData.sources] : []);
                             return sSources.some(s => typeof s === 'string' && (s.toLowerCase().includes('masscan') || s.toLowerCase().includes('active')));
                         });
-                    } else {
-                        const parentIps = vulnNode.incomers('node[type="ip"]');
-                        if (parentIps.length > 0) {
-                            const hasActiveSrvOnIp = parentIps.first().outgoers('node[type="service"], node[type="http"], node[type="https"]').some(s => s.data('verified_active') === true);
-                            hasActiveExposure = hasActiveSrvOnIp || data.verified_active === true || data.is_active_scan === true;
-                        }
                     }
                 } else if (data.service_id && this.cy) {
                     const srv = this.cy.getElementById(data.service_id);
                     if (srv.length > 0) {
                         const sData = srv.data();
-                        hasActiveExposure = sData.verified_active === true || sData.is_active_scan === true;
+                        hasDirectActiveService = sData.verified_active === true || sData.is_active_scan === true;
                     }
-                } else {
-                    hasActiveExposure = Boolean(data.verified_active === true || data.is_active_scan === true);
                 }
 
-                if (!hasActiveExposure) return false;
+                // Sem serviço ativo diretamente associado -> desqualificado
+                if (!hasDirectActiveService) return false;
 
                 // Dimensão 2: Gravidade Técnica (O Impacto: elimina ruído Low/Info/Unknown)
                 const cvss = parseFloat(data.cvss_score || 0);
@@ -2863,35 +2856,28 @@ class EASMDashboard {
 
             if (this.filters.matrix3d) {
                 // Dimensão 1: Exposição e Validação Ativa (O Ativo)
-                // Deve haver pelo menos um serviço pai ativamente verificado (Masscan/Active), ou IP verificado
-                let hasActiveExposure = false;
+                // Regra Estrita: A vulnerabilidade DEVE ter rastreabilidade direta com um serviço confirmado ativo (Masscan/Active).
+                let hasDirectActiveService = false;
                 if (typeof vulnNode.incomers === 'function') {
                     const parentServices = vulnNode.incomers('node[type="service"], node[type="http"], node[type="https"]');
                     if (parentServices.length > 0) {
-                        hasActiveExposure = parentServices.some(srv => {
+                        hasDirectActiveService = parentServices.some(srv => {
                             const sData = srv.data();
                             if (sData.verified_active === true || sData.is_active_scan === true) return true;
                             const sSources = Array.isArray(sData.sources) ? sData.sources : (sData.sources ? [sData.sources] : []);
                             return sSources.some(s => typeof s === 'string' && (s.toLowerCase().includes('masscan') || s.toLowerCase().includes('active')));
                         });
-                    } else {
-                        const parentIps = vulnNode.incomers('node[type="ip"]');
-                        if (parentIps.length > 0) {
-                            const hasActiveSrvOnIp = parentIps.first().outgoers('node[type="service"], node[type="http"], node[type="https"]').some(s => s.data('verified_active') === true);
-                            hasActiveExposure = hasActiveSrvOnIp || data.verified_active === true || data.is_active_scan === true;
-                        }
                     }
                 } else if (data.service_id && this.cy) {
                     const srv = this.cy.getElementById(data.service_id);
                     if (srv.length > 0) {
                         const sData = srv.data();
-                        hasActiveExposure = sData.verified_active === true || sData.is_active_scan === true;
+                        hasDirectActiveService = sData.verified_active === true || sData.is_active_scan === true;
                     }
-                } else {
-                    hasActiveExposure = Boolean(data.verified_active === true || data.is_active_scan === true);
                 }
 
-                if (!hasActiveExposure) return false;
+                // Sem serviço ativo diretamente associado -> desqualificado
+                if (!hasDirectActiveService) return false;
 
                 // Dimensão 2: Gravidade Técnica (O Impacto: elimina ruído Low/Info/Unknown)
                 const cvss = parseFloat(data.cvss_score || 0);
