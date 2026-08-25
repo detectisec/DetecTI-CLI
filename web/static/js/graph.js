@@ -1760,13 +1760,14 @@ class EASMDashboard {
                     }
                 },
                 
-                // Service exposure edges (orange)
+                // Service exposure edges (passive - dotted emerald green)
                 {
                     selector: 'edge[label="EXPOSES"]',
                     style: {
-                        'line-color': '#f39c12',
-                        'target-arrow-color': '#f39c12',
-                        'width': '2px'
+                        'line-color': '#2ecc71',
+                        'target-arrow-color': '#2ecc71',
+                        'width': '2px',
+                        'line-style': 'dotted'
                     }
                 },
                 
