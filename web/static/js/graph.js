@@ -2346,6 +2346,20 @@ class EASMDashboard {
             sidebarBackdrop.addEventListener('click', closeSidebar);
         }
 
+        // Mutually exclusive sidebar accordions: opening one collapses the others
+        const sidebarAccordions = document.querySelectorAll('.sidebar .sidebar-accordion');
+        sidebarAccordions.forEach(accordion => {
+            accordion.addEventListener('toggle', () => {
+                if (accordion.open) {
+                    sidebarAccordions.forEach(other => {
+                        if (other !== accordion && other.open) {
+                            other.open = false;
+                        }
+                    });
+                }
+            });
+        });
+
         // Inspector Backdrop
         const inspectorBackdrop = document.getElementById('inspector-backdrop');
         if (inspectorBackdrop) {
