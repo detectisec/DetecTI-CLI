@@ -3025,7 +3025,8 @@ html, body {
     border: 1px solid var(--border-color);
     border-radius: 6px;
     padding: 0.65rem;
-    max-height: 8rem;
+    max-height: 14rem;
+    min-height: 9rem;
     overflow-y: auto;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.72rem;

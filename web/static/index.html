@@ -318,39 +318,33 @@
             <!-- Drawer Navigation Tabs -->
             <div class="targets-drawer-tabs">
                 <button type="button" class="drawer-tab-btn active" data-tab="targets-tab">
+                    <i data-lucide="crosshair" class="tab-icon"></i>
+                    <span>Marked Targets</span>
+                </button>
+                <button type="button" class="drawer-tab-btn" data-tab="masscan-tab">
                     <i data-lucide="server" class="tab-icon"></i>
-                    <span>Targets & Masscan</span>
+                    <span>Masscan</span>
                 </button>
                 <button type="button" class="drawer-tab-btn" data-tab="nuclei-tab">
                     <i data-lucide="shield-alert" class="tab-icon"></i>
-                    <span>Vulnerability Scan (Nuclei)</span>
-                </button>
-                <button type="button" class="drawer-tab-btn" data-tab="logs-tab">
-                    <i data-lucide="terminal" class="tab-icon"></i>
-                    <span>Scan Execution Logs</span>
+                    <span>Nuclei</span>
                 </button>
             </div>
 
             <div class="targets-drawer-content">
-                <!-- TAB 1: Targets & Masscan -->
+                <!-- TAB 1: Marked Targets & Execution Logs -->
                 <div class="drawer-tab-pane active" id="tab-pane-targets">
-                    <!-- Global Actions -->
-                    <div class="targets-global-actions">
-                        <button id="btn-scan-all-targets" class="btn-primary-action scan-all-btn" title="Run active port scan on all marked targets">
-                            <i data-lucide="play" class="ui-icon"></i>
-                            <span>Scan All Ports</span>
-                        </button>
-                        <button id="btn-clear-all-targets" class="btn-secondary-action clear-all-targets-btn" title="Remove all targets from list">
-                            <i data-lucide="trash-2" class="ui-icon"></i>
-                            <span>Clear All</span>
-                        </button>
-                    </div>
-
-                    <!-- Target List Section -->
+                    <!-- Top: Marked Targets Section -->
                     <div class="targets-section">
-                        <div class="targets-section-title">
-                            <i data-lucide="server" class="ui-icon"></i>
-                            <span>Marked Targets</span>
+                        <div class="targets-section-title logs-header-row">
+                            <div class="logs-title-left">
+                                <i data-lucide="crosshair" class="ui-icon"></i>
+                                <span>Marked Targets</span>
+                            </div>
+                            <button id="btn-clear-all-targets" class="btn-clear-logs" title="Remove all targets from list">
+                                <i data-lucide="trash-2" class="ui-icon"></i>
+                                <span>Clear All</span>
+                            </button>
                         </div>
                         <div id="targets-list-container" class="targets-list-container">
                             <div class="targets-empty-state" id="targets-empty-state">
@@ -360,6 +354,34 @@
                             </div>
                             <div id="targets-items-list" class="targets-items-list"></div>
                         </div>
+                    </div>
+
+                    <!-- Bottom: Execution Stream Logs -->
+                    <div class="targets-section logs-section">
+                        <div class="targets-section-title logs-header-row">
+                            <div class="logs-title-left">
+                                <i data-lucide="terminal" class="ui-icon"></i>
+                                <span>Scan Execution Stream</span>
+                            </div>
+                            <button id="btn-clear-scan-logs" class="btn-clear-logs" title="Clear console logs">
+                                <i data-lucide="eraser" class="ui-icon"></i>
+                                <span>Clear</span>
+                            </button>
+                        </div>
+                        <div class="scan-live-console" id="scan-live-console">
+                            <div class="console-line info">[System] Ready to scan targets and vulnerabilities.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 2: Masscan Port Scanner -->
+                <div class="drawer-tab-pane" id="tab-pane-masscan" style="display: none;">
+                    <!-- Global Actions -->
+                    <div class="targets-global-actions">
+                        <button id="btn-scan-all-targets" class="btn-primary-action scan-all-btn" title="Run Masscan port scan on marked targets">
+                            <i data-lucide="play" class="ui-icon"></i>
+                            <span>Run Masscan on Targets</span>
+                        </button>
                     </div>
 
                     <!-- Scan Configuration Section (Masscan Flags) -->
@@ -423,7 +445,7 @@
                     </div>
                 </div>
 
-                <!-- TAB 2: Vulnerability Scan (Nuclei) -->
+                <!-- TAB 3: Vulnerability Scan (Nuclei) -->
                 <div class="drawer-tab-pane" id="tab-pane-nuclei" style="display: none;">
                     <div class="targets-global-actions">
                         <button id="btn-run-all-nuclei" class="btn-primary-action btn-nuclei-action" title="Run Nuclei vulnerability scan on all targets">
@@ -530,25 +552,6 @@
                         <div class="form-group">
                             <label for="input-nuclei-custom-flags" class="form-label">Extra Nuclei CLI Flags:</label>
                             <input type="text" id="input-nuclei-custom-flags" class="drawer-text-input" placeholder="e.g. -retries 2 -timeout 10">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- TAB 3: Execution Logs -->
-                <div class="drawer-tab-pane" id="tab-pane-logs" style="display: none;">
-                    <div class="targets-section logs-section">
-                        <div class="targets-section-title logs-header-row">
-                            <div class="logs-title-left">
-                                <i data-lucide="terminal" class="ui-icon"></i>
-                                <span>Scan Execution Stream</span>
-                            </div>
-                            <button id="btn-clear-scan-logs" class="btn-clear-logs" title="Clear console logs">
-                                <i data-lucide="eraser" class="ui-icon"></i>
-                                <span>Clear</span>
-                            </button>
-                        </div>
-                        <div class="scan-live-console full-height-console" id="scan-live-console">
-                            <div class="console-line info">[System] Ready to scan targets and vulnerabilities.</div>
                         </div>
                     </div>
                 </div>

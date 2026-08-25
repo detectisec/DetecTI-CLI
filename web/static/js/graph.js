@@ -4669,17 +4669,17 @@ class EASMDashboard {
             scanIndicator.style.display = isAnyScanning ? 'inline-flex' : 'none';
         }
 
-        // Update Masscan "Scan All Ports" / "Stop All Ports" button
+        // Update Masscan "Run Masscan on Targets" / "Stop Port Scan" button
         const scanAllBtn = document.getElementById('btn-scan-all-targets');
         if (scanAllBtn) {
             if (isAnyMasscanRunning) {
                 scanAllBtn.classList.add('btn-scan-stopping');
-                scanAllBtn.innerHTML = '<i data-lucide="square" class="ui-icon" style="width: 14px; height: 14px;"></i><span>Stop All Ports</span>';
-                scanAllBtn.title = 'Stop all running Masscan port scans';
+                scanAllBtn.innerHTML = '<i data-lucide="square" class="ui-icon" style="width: 14px; height: 14px;"></i><span>Stop Port Scan</span>';
+                scanAllBtn.title = 'Stop running Masscan port scans';
             } else {
                 scanAllBtn.classList.remove('btn-scan-stopping');
-                scanAllBtn.innerHTML = '<i data-lucide="play" class="ui-icon"></i><span>Scan All Ports</span>';
-                scanAllBtn.title = 'Run active port scan on all marked targets';
+                scanAllBtn.innerHTML = '<i data-lucide="play" class="ui-icon"></i><span>Run Masscan on Targets</span>';
+                scanAllBtn.title = 'Run Masscan port scan on marked targets';
             }
         }
 
@@ -4860,8 +4860,8 @@ class EASMDashboard {
         const tabBtns = document.querySelectorAll('.drawer-tab-btn');
         const tabPanes = {
             'targets-tab': document.getElementById('tab-pane-targets'),
+            'masscan-tab': document.getElementById('tab-pane-masscan'),
             'nuclei-tab': document.getElementById('tab-pane-nuclei'),
-            'logs-tab': document.getElementById('tab-pane-logs'),
         };
 
         tabBtns.forEach(btn => {
@@ -5094,9 +5094,13 @@ class EASMDashboard {
     }
 
     switchToLogsTab() {
-        const logsTabBtn = document.querySelector('.drawer-tab-btn[data-tab="logs-tab"]');
-        if (logsTabBtn) {
-            logsTabBtn.click();
+        const targetsTabBtn = document.querySelector('.drawer-tab-btn[data-tab="targets-tab"]');
+        if (targetsTabBtn) {
+            targetsTabBtn.click();
+        }
+        const consoleEl = document.getElementById('scan-live-console');
+        if (consoleEl) {
+            consoleEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     }
 
