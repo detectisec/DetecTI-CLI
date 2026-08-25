@@ -448,9 +448,31 @@ async def clear_all_targets() -> Dict:
     }
 
 
+def _resolve_db_manager(request: Request, db: Optional[DatabaseManager] = None, target: Optional[str] = None) -> Optional[DatabaseManager]:
+    if db and Path(db.db_path).exists():
+        return db
+    app_db = getattr(request.app.state, "db_manager", None)
+    if app_db and Path(app_db.db_path).exists():
+        return app_db
+    if target:
+        cand = Path.cwd() / "data" / "dbs" / f"{target}.sqlite"
+        if cand.exists():
+            return DatabaseManager(cand)
+        cand_raw = Path.cwd() / "data" / "dbs" / target
+        if cand_raw.exists():
+            return DatabaseManager(cand_raw)
+    dbs_dir = Path.cwd() / "data" / "dbs"
+    if dbs_dir.exists():
+        dbs = sorted(list(dbs_dir.glob("*.sqlite")))
+        if dbs:
+            return DatabaseManager(dbs[0])
+    return None
+
+
 @router.post("/services/unverify")
 async def unverify_services_endpoint(
     req: UnverifyServicesRequest,
+    request: Request,
     target: Optional[str] = Query(None, description="Active target name"),
     db: Optional[DatabaseManager] = Depends(get_db_manager),
 ) -> Dict:
@@ -458,7 +480,7 @@ async def unverify_services_endpoint(
     
     Allows analysts to reset services back to passive state for targeted re-validation without losing assets.
     """
-    active_db = _get_active_db_manager(target) or db
+    active_db = _resolve_db_manager(request, db, target)
     if not active_db or not Path(active_db.db_path).exists():
         raise HTTPException(status_code=404, detail="No active scan database found")
 

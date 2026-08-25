@@ -663,18 +663,35 @@ class DatabaseManager:
             if not all_services:
                 conditions = []
                 if service_ids:
-                    clean_sids = [str(s).replace("srv_", "").strip() for s in service_ids if s]
-                    if clean_sids:
-                        placeholders = ",".join("?" for _ in clean_sids)
+                    id_candidates = set()
+                    for s in service_ids:
+                        if s:
+                            s_str = str(s).strip()
+                            id_candidates.add(s_str)
+                            if s_str.startswith("srv_"):
+                                id_candidates.add(s_str[4:])
+                            else:
+                                id_candidates.add(f"srv_{s_str}")
+                    if id_candidates:
+                        placeholders = ",".join("?" for _ in id_candidates)
                         conditions.append(f"id IN ({placeholders})")
-                        params.extend(clean_sids)
+                        params.extend(list(id_candidates))
+
                 if ip_addresses:
-                    clean_ips = [str(ip).replace("ip_", "").strip() for ip in ip_addresses if ip]
-                    if clean_ips:
-                        ip_placeholders = ",".join("?" for _ in clean_ips)
+                    ip_candidates = set()
+                    for ip in ip_addresses:
+                        if ip:
+                            ip_str = str(ip).strip()
+                            ip_candidates.add(ip_str)
+                            if ip_str.startswith("ip_"):
+                                ip_candidates.add(ip_str[3:])
+                            else:
+                                ip_candidates.add(f"ip_{ip_str}")
+                    if ip_candidates:
+                        ip_placeholders = ",".join("?" for _ in ip_candidates)
                         conditions.append(f"ip_id IN (SELECT id FROM ip_addresses WHERE ip IN ({ip_placeholders}) OR id IN ({ip_placeholders}))")
-                        params.extend(clean_ips)
-                        params.extend(clean_ips)
+                        params.extend(list(ip_candidates))
+                        params.extend(list(ip_candidates))
                 
                 if conditions:
                     query += f" AND ({' OR '.join(conditions)})"
