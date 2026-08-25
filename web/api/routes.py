@@ -259,7 +259,12 @@ async def export_graph_data(
 # Target Management & Active Scan Endpoints
 # ----------------------------------------------------------------------
 
-from modules.masscan import MasscanRunner
+from modules.masscan import (
+    MasscanRunner,
+    build_port_ranges_excluding,
+    filter_ports_excluding,
+    parse_port_spec_to_set,
+)
 from modules.nuclei import NucleiRunner
 
 # In-memory target registry and running tasks tracking
@@ -267,6 +272,45 @@ _target_registry: Dict[str, Dict] = {}
 _running_scan_tasks: Dict[str, asyncio.Task] = {}
 _running_nuclei_tasks: Dict[str, asyncio.Task] = {}
 _scan_log_history: List[Dict] = []
+
+
+def _get_target_ports_partition(ip: str, db: Optional[DatabaseManager]) -> tuple[set[int], set[int]]:
+    """Retrieve verified active ports and unverified passive ports for an IP from database.
+    
+    Returns:
+        (verified_ports_set, unverified_passive_ports_set)
+    """
+    verified_ports: set[int] = set()
+    unverified_passive_ports: set[int] = set()
+    if db and Path(db.db_path).exists():
+        import sqlite3
+        with sqlite3.connect(db.db_path) as conn:
+            ip_row = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (ip,)).fetchone()
+            if ip_row:
+                services = conn.execute("SELECT port, sources FROM services WHERE ip_id = ?", (ip_row[0],)).fetchall()
+                for p_num, s_sources in services:
+                    try:
+                        p_val = int(p_num)
+                    except (ValueError, TypeError):
+                        continue
+                    sources_list = []
+                    if s_sources:
+                        try:
+                            sources_list = json.loads(s_sources)
+                            if not isinstance(sources_list, list):
+                                sources_list = [str(sources_list)]
+                        except Exception:
+                            sources_list = [s_sources]
+
+                    is_verified = any(
+                        isinstance(s, str) and ("masscan" in s.lower() or "active" in s.lower() or "nuclei" in s.lower())
+                        for s in sources_list
+                    )
+                    if is_verified:
+                        verified_ports.add(p_val)
+                    else:
+                        unverified_passive_ports.add(p_val)
+    return verified_ports, unverified_passive_ports
 
 
 class TargetActionRequest(BaseModel):
@@ -455,38 +499,173 @@ async def start_active_scan(
         try:
             _target_registry[ip_to_scan]["status"] = "scanning"
             _target_registry[ip_to_scan]["error"] = None
-            _append_scan_log("info", f"Starting active scan on {ip_to_scan} ({ports_arg}, {rate_arg} pps)...", target=ip_to_scan)
 
-            scan_res = await runner.scan_target(
-                target_ip=ip_to_scan,
-                ports=ports_arg,
-                rate=rate_arg,
-                disable_ping=pn_arg,
-                banners=banners_arg,
-                custom_flags=flags_arg,
-                timeout=180.0,
-            )
+            # Resolve active DB
+            active_db = db
+            if not active_db or not Path(active_db.db_path).exists():
+                current_db_path = getattr(request.app.state, "db_path", None)
+                if current_db_path and Path(current_db_path).exists():
+                    active_db = DatabaseManager(Path(current_db_path))
+                    request.app.state.db_manager = active_db
+                else:
+                    dbs_dir = Path.cwd() / "data" / "dbs"
+                    if dbs_dir.exists():
+                        existing_dbs = list(dbs_dir.glob("*.sqlite"))
+                        if existing_dbs:
+                            active_db = DatabaseManager(existing_dbs[0])
+                            request.app.state.db_manager = active_db
+                            request.app.state.db_path = str(existing_dbs[0].resolve())
 
-            open_ports = scan_res.get("ports") or scan_res.get("open_ports") or []
-            
-            # Persist discovered ports to database if any were found (even on partial completion/timeout)
-            if open_ports:
-                active_db = db
-                if not active_db or not Path(active_db.db_path).exists():
-                    current_db_path = getattr(request.app.state, "db_path", None)
-                    if current_db_path and Path(current_db_path).exists():
-                        active_db = DatabaseManager(Path(current_db_path))
-                        request.app.state.db_manager = active_db
-                    else:
-                        dbs_dir = Path.cwd() / "data" / "dbs"
-                        if dbs_dir.exists():
-                            existing_dbs = list(dbs_dir.glob("*.sqlite"))
-                            if existing_dbs:
-                                active_db = DatabaseManager(existing_dbs[0])
-                                request.app.state.db_manager = active_db
-                                request.app.state.db_path = str(existing_dbs[0].resolve())
+            # 1. Inspect existing ports for target in database
+            verified_ports, unverified_passive_ports = _get_target_ports_partition(ip_to_scan, active_db)
 
-                if active_db and Path(active_db.db_path).exists():
+            # Check if this is an "All Ports" (0-65535) scan
+            clean_ports_arg = (ports_arg or "").strip().lower()
+            if clean_ports_arg.startswith("-p"):
+                clean_ports_arg = clean_ports_arg[2:].strip()
+            is_all_ports = clean_ports_arg in ("-", "all", "0-65535", "1-65535", "-p0-65535", "-p1-65535")
+
+            accumulated_open_ports = []
+
+            if is_all_ports:
+                # -------------------------------------------------------------
+                # 2-PHASE PIPELINE FOR ALL PORTS (0-65535)
+                # -------------------------------------------------------------
+                # Phase 1: High-Priority Scan on Passive Unverified Ports
+                phase1_ports = unverified_passive_ports - verified_ports
+                if phase1_ports:
+                    p1_spec = ",".join(str(p) for p in sorted(phase1_ports))
+                    _append_scan_log(
+                        "info",
+                        f"[Masscan Priority Phase 1] Scanning {len(phase1_ports)} unverified passive port(s) [{p1_spec}] on {ip_to_scan}...",
+                        target=ip_to_scan
+                    )
+                    p1_res = await runner.scan_target(
+                        target_ip=ip_to_scan,
+                        ports=p1_spec,
+                        rate=rate_arg,
+                        disable_ping=pn_arg,
+                        banners=banners_arg,
+                        custom_flags=flags_arg,
+                        timeout=60.0,
+                    )
+                    p1_found = p1_res.get("ports") or p1_res.get("open_ports") or []
+                    if p1_found:
+                        accumulated_open_ports.extend(p1_found)
+                        if active_db and Path(active_db.db_path).exists():
+                            m_info = active_db.merge_active_scan_services(ip_to_scan, p1_found)
+                            _append_scan_log(
+                                "success",
+                                f"[Masscan Phase 1] Verified {len(p1_found)} port(s) on {ip_to_scan} ({m_info.get('added_services', 0)} new, {m_info.get('updated_services', 0)} confirmed active).",
+                                target=ip_to_scan
+                            )
+                        # Re-partition verified ports
+                        verified_ports, unverified_passive_ports = _get_target_ports_partition(ip_to_scan, active_db)
+
+                # Phase 2: Sweep remaining ports of the 0-65535 range
+                all_excluded = verified_ports | phase1_ports
+                p2_spec = build_port_ranges_excluding(0, 65535, all_excluded)
+                remaining_ports_count = max(0, 65536 - len(all_excluded))
+
+                _append_scan_log(
+                    "info",
+                    f"[Masscan Phase 2] Sweeping remaining {remaining_ports_count:,} port(s) on {ip_to_scan} (excluding {len(all_excluded)} already tested/confirmed)...",
+                    target=ip_to_scan
+                )
+
+                p2_res = await runner.scan_target(
+                    target_ip=ip_to_scan,
+                    ports=p2_spec,
+                    rate=rate_arg,
+                    disable_ping=pn_arg,
+                    banners=banners_arg,
+                    custom_flags=flags_arg,
+                    timeout=180.0,
+                )
+
+                p2_found = p2_res.get("ports") or p2_res.get("open_ports") or []
+                if p2_found:
+                    accumulated_open_ports.extend(p2_found)
+                    if active_db and Path(active_db.db_path).exists():
+                        m_info = active_db.merge_active_scan_services(ip_to_scan, p2_found)
+                        _append_scan_log(
+                            "success",
+                            f"[Masscan Phase 2] Discovered {len(p2_found)} additional open port(s) on {ip_to_scan}.",
+                            target=ip_to_scan
+                        )
+
+                # Deduplicate accumulated open ports by port and proto
+                unique_ports = {}
+                for p in accumulated_open_ports:
+                    k = (p.get("port"), (p.get("protocol") or "tcp").lower())
+                    unique_ports[k] = p
+                final_open_ports = list(unique_ports.values())
+
+                is_success = p2_res.get("success", False) or (len(final_open_ports) > 0)
+                if is_success:
+                    _target_registry[ip_to_scan]["status"] = "completed"
+                    _target_registry[ip_to_scan]["ports_count"] = len(final_open_ports)
+                    _target_registry[ip_to_scan]["ports"] = final_open_ports
+                    _target_registry[ip_to_scan]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    _append_scan_log(
+                        "success",
+                        f"[Masscan Full Sweep] Scan on {ip_to_scan} completed: {len(final_open_ports)} total verified open port(s).",
+                        target=ip_to_scan
+                    )
+                else:
+                    err_msg = p2_res.get("error", "Scan finished without open ports")
+                    _target_registry[ip_to_scan]["status"] = "completed" if len(final_open_ports) > 0 else "failed"
+                    _target_registry[ip_to_scan]["ports_count"] = len(final_open_ports)
+                    _target_registry[ip_to_scan]["ports"] = final_open_ports
+                    _target_registry[ip_to_scan]["error"] = err_msg if not final_open_ports else None
+                    _append_scan_log(
+                        "warning" if final_open_ports else "error",
+                        f"[Masscan] Sweep on {ip_to_scan} ended: {err_msg} ({len(final_open_ports)} ports preserved).",
+                        target=ip_to_scan
+                    )
+
+            else:
+                # -------------------------------------------------------------
+                # STANDARD SCAN WITH SMART VERIFIED PORT EXCLUSION
+                # -------------------------------------------------------------
+                filtered_ports, remaining_count, excluded_count = filter_ports_excluding(ports_arg, verified_ports)
+                
+                if not filtered_ports or remaining_count == 0:
+                    _target_registry[ip_to_scan]["status"] = "completed"
+                    _target_registry[ip_to_scan]["ports_count"] = len(verified_ports)
+                    _target_registry[ip_to_scan]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    _append_scan_log(
+                        "success",
+                        f"[Masscan] All requested ports on {ip_to_scan} are already Confirmed Active ({len(verified_ports)} port(s)). Skipping scan to reduce load.",
+                        target=ip_to_scan
+                    )
+                    return
+
+                if excluded_count > 0:
+                    _append_scan_log(
+                        "info",
+                        f"[Masscan Smart Filter] Excluded {excluded_count} already-confirmed port(s). Scanning {remaining_count} remaining port(s) on {ip_to_scan}...",
+                        target=ip_to_scan
+                    )
+                else:
+                    _append_scan_log(
+                        "info",
+                        f"Starting active scan on {ip_to_scan} ({filtered_ports}, {rate_arg} pps)...",
+                        target=ip_to_scan
+                    )
+
+                scan_res = await runner.scan_target(
+                    target_ip=ip_to_scan,
+                    ports=filtered_ports,
+                    rate=rate_arg,
+                    disable_ping=pn_arg,
+                    banners=banners_arg,
+                    custom_flags=flags_arg,
+                    timeout=180.0,
+                )
+
+                open_ports = scan_res.get("ports") or scan_res.get("open_ports") or []
+                if open_ports and active_db and Path(active_db.db_path).exists():
                     merge_info = active_db.merge_active_scan_services(ip_to_scan, open_ports)
                     _append_scan_log(
                         "success",
@@ -494,23 +673,31 @@ async def start_active_scan(
                         target=ip_to_scan,
                     )
 
-            if scan_res.get("success"):
-                _target_registry[ip_to_scan]["status"] = "completed"
-                _target_registry[ip_to_scan]["ports_count"] = len(open_ports)
-                _target_registry[ip_to_scan]["ports"] = open_ports
-                _target_registry[ip_to_scan]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                _append_scan_log(
-                    "success",
-                    f"Scan on {ip_to_scan} completed: {len(open_ports)} open port(s) verified.",
-                    target=ip_to_scan,
-                )
-            else:
-                err_msg = scan_res.get("error", "Unknown scan error")
-                _target_registry[ip_to_scan]["status"] = "failed"
-                _target_registry[ip_to_scan]["ports_count"] = len(open_ports)
-                _target_registry[ip_to_scan]["ports"] = open_ports
-                _target_registry[ip_to_scan]["error"] = err_msg
-                _append_scan_log("warning" if open_ports else "error", f"Scan on {ip_to_scan} ended with warning/timeout: {err_msg} ({len(open_ports)} ports preserved).", target=ip_to_scan)
+                # Re-query total verified ports count
+                v_ports, _ = _get_target_ports_partition(ip_to_scan, active_db)
+                total_verified_count = len(v_ports) if v_ports else len(open_ports)
+
+                if scan_res.get("success") or open_ports:
+                    _target_registry[ip_to_scan]["status"] = "completed"
+                    _target_registry[ip_to_scan]["ports_count"] = total_verified_count
+                    _target_registry[ip_to_scan]["ports"] = open_ports
+                    _target_registry[ip_to_scan]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    _append_scan_log(
+                        "success",
+                        f"Scan on {ip_to_scan} completed: {len(open_ports)} open port(s) newly verified ({total_verified_count} total active).",
+                        target=ip_to_scan
+                    )
+                else:
+                    err_msg = scan_res.get("error", "Unknown scan error")
+                    _target_registry[ip_to_scan]["status"] = "failed"
+                    _target_registry[ip_to_scan]["ports_count"] = total_verified_count
+                    _target_registry[ip_to_scan]["ports"] = open_ports
+                    _target_registry[ip_to_scan]["error"] = err_msg
+                    _append_scan_log(
+                        "warning" if open_ports else "error",
+                        f"Scan on {ip_to_scan} ended with warning/timeout: {err_msg} ({total_verified_count} ports preserved).",
+                        target=ip_to_scan
+                    )
 
         except asyncio.CancelledError:
             _target_registry[ip_to_scan]["status"] = "idle"
