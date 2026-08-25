@@ -527,6 +527,82 @@ class EASMDashboard {
         return ipNodes;
     }
 
+    filterVulnsByActiveFilters(vulnList) {
+        if (!Array.isArray(vulnList)) return [];
+        if (!this.filters) return vulnList;
+
+        const hasFilters = this.filters.matrix3d || this.filters.kev || this.filters.highEpss || 
+                           this.filters.critical || this.filters.hideLowInfo || this.filters.nucleiOnly || this.filters.withPocs;
+        if (!hasFilters) return vulnList;
+
+        return vulnList.filter(v => {
+            const severity = String(v.severity || '').toUpperCase();
+            const source = String(v.source || '').toLowerCase();
+
+            if (this.filters.matrix3d) {
+                // Dimensão 1: Direct Active Service Traceability
+                let hasActiveService = false;
+                if (this.inEdges && v.id) {
+                    const inEdges = this.inEdges.get(v.id) || [];
+                    hasActiveService = inEdges.some(e => {
+                        if (e.label === 'HAS_VULN') {
+                            const srv = this.nodeIndex ? this.nodeIndex.get(e.source) : null;
+                            if (srv && ['service', 'http', 'https'].includes(srv.type)) {
+                                return srv.verified_active === true || srv.is_active_scan === true;
+                            }
+                        }
+                        return false;
+                    });
+                }
+                if (!hasActiveService && this.cy && v.id) {
+                    const vNode = this.cy.getElementById(v.id);
+                    if (vNode.length > 0) {
+                        const parentServices = vNode.incomers('node[type="service"], node[type="http"], node[type="https"]');
+                        hasActiveService = parentServices.some(srv => {
+                            const sData = srv.data();
+                            return sData.verified_active === true || sData.is_active_scan === true;
+                        });
+                    }
+                }
+                if (!hasActiveService) return false;
+
+                // Dimensão 2: Technical Severity
+                const cvss = parseFloat(v.cvss_score || 0);
+                const hasTechImpact = severity === 'CRITICAL' || severity === 'HIGH' || (severity === 'MEDIUM' && cvss >= 5.0) || cvss >= 6.5;
+                if (!hasTechImpact) return false;
+
+                // Dimensão 3: Real-World Threat
+                const isKev = v.is_cisa_kev === true || v.is_cisa_kev === 'true' || v.is_cisa_kev === 1;
+                const epss = parseFloat(v.epss_score || 0);
+                const hasPocs = v.has_pocs === true || (Array.isArray(v.exploits) && v.exploits.length > 0) || (parseInt(v.exploit_count || 0) > 0);
+                const realWorldThreat = isKev || (epss >= 0.2) || hasPocs;
+                if (!realWorldThreat) return false;
+            }
+
+            if (this.filters.kev) {
+                if (v.is_cisa_kev !== true && v.is_cisa_kev !== 1) return false;
+            }
+            if (this.filters.highEpss) {
+                const epssScore = parseFloat(v.epss_score || 0);
+                if (epssScore <= 0.5) return false;
+            }
+            if (this.filters.critical) {
+                if (severity !== 'CRITICAL') return false;
+            }
+            if (this.filters.hideLowInfo) {
+                if (severity === 'LOW' || severity === 'INFO' || severity === 'UNKNOWN') return false;
+            }
+            if (this.filters.nucleiOnly) {
+                if (!source.includes('nuclei')) return false;
+            }
+            if (this.filters.withPocs) {
+                const hasPocs = v.has_pocs === true || (Array.isArray(v.exploits) && v.exploits.length > 0);
+                if (!hasPocs) return false;
+            }
+            return true;
+        });
+    }
+
     findDirectVulnerabilities(nodeId, elements) {
         if (!elements || !elements.edges) return [];
         if (!this.nodeIndex) this.buildGraphIndex(elements);
@@ -541,7 +617,8 @@ class EASMDashboard {
                 }
             }
         });
-        return this.sortVulnsBy3DRiskMatrix(vulnerabilities);
+        const filtered = this.filterVulnsByActiveFilters(vulnerabilities);
+        return this.sortVulnsBy3DRiskMatrix(filtered);
     }
 
     sortVulnsBy3DRiskMatrix(vulnList) {
@@ -603,7 +680,8 @@ class EASMDashboard {
         const vulnerabilities = [];
         const selfData = this.nodeIndex.get(nodeId);
         if (selfData && selfData.type === 'vulnerability') {
-            return [selfData];
+            const filtered = this.filterVulnsByActiveFilters([selfData]);
+            return filtered;
         }
 
         try {
@@ -661,7 +739,8 @@ class EASMDashboard {
                 }
             });
             
-            return this.sortVulnsBy3DRiskMatrix(uniqueVulns);
+            const filteredVulns = this.filterVulnsByActiveFilters(uniqueVulns);
+            return this.sortVulnsBy3DRiskMatrix(filteredVulns);
         } catch (error) {
             console.error('Error in findConnectedVulnerabilities:', error);
             return [];
@@ -3059,11 +3138,57 @@ class EASMDashboard {
             }
         }
 
-        // Invariant: Whenever a parent asset is kept on screen, all its active collapsed
-        // cluster indicator nodes (cluster_services, cluster_vulns) MUST ALWAYS be present on the UI
+        // Filter-Aware Cluster Retention:
+        // Only keep collapsed cluster indicator nodes if their parent is kept AND (when filters are active)
+        // the cluster actually contains matching items. If count drops to 0, hide the cluster.
         this.cy.nodes('[type="cluster_services"], [type="cluster_vulns"]').forEach(cNode => {
             const parentId = cNode.data('parent_ip') || cNode.data('parent_srv');
-            if (nodesToKeep.has(parentId)) {
+            if (!nodesToKeep.has(parentId)) {
+                nodesToKeep.delete(cNode.id());
+                return;
+            }
+            if (hasVulnFilters) {
+                const parentNode = this.cy.getElementById(parentId);
+                if (cNode.data('type') === 'cluster_vulns') {
+                    const childVulns = parentNode.outgoers('node[type="vulnerability"]');
+                    const matching = childVulns.filter(vulnMatchesFilter);
+                    if (matching.length === 0) {
+                        nodesToKeep.delete(cNode.id());
+                    } else {
+                        nodesToKeep.add(cNode.id());
+                        cNode.data('count', matching.length);
+                        cNode.data('label', `+ ${matching.length} ${matching.length === 1 ? 'Vuln' : 'Vulns'}`);
+                    }
+                } else if (cNode.data('type') === 'cluster_services') {
+                    const srvNodes = parentNode.outgoers('node[type="service"], node[type="http"], node[type="https"]');
+                    const matchingSrvs = srvNodes.filter(srv => srv.outgoers('node[type="vulnerability"]').some(vulnMatchesFilter));
+                    if (matchingSrvs.length === 0) {
+                        nodesToKeep.delete(cNode.id());
+                    } else {
+                        nodesToKeep.add(cNode.id());
+                        cNode.data('count', matchingSrvs.length);
+                        cNode.data('label', `+ ${matchingSrvs.length} ${matchingSrvs.length === 1 ? 'Service' : 'Services'}`);
+                    }
+                }
+            } else if (this.filters && this.filters.verifiedServicesOnly) {
+                const parentNode = this.cy.getElementById(parentId);
+                if (cNode.data('type') === 'cluster_services') {
+                    const srvNodes = parentNode.outgoers('node[type="service"], node[type="http"], node[type="https"]');
+                    const isVerifiedActiveSrv = (s) => {
+                        const d = s.data();
+                        return d.verified_active === true || d.is_active_scan === true;
+                    };
+                    const activeSrvs = srvNodes.filter(isVerifiedActiveSrv);
+                    if (activeSrvs.length === 0) {
+                        nodesToKeep.delete(cNode.id());
+                    } else {
+                        nodesToKeep.add(cNode.id());
+                        cNode.data('count', activeSrvs.length);
+                        cNode.data('label', `+ ${activeSrvs.length} Verified ${activeSrvs.length === 1 ? 'Service' : 'Services'}`);
+                    }
+                }
+            } else if (!hasVulnFilters && !(this.filters && (this.filters.vulnServicesOnly || this.filters.verifiedServicesOnly || this.filters.servicesOnly))) {
+                // No restrictive filter active: keep all cluster nodes for visible parents
                 nodesToKeep.add(cNode.id());
             }
         });
