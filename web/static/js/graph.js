@@ -3667,22 +3667,28 @@ class EASMDashboard {
     toggleRiskAccordion(headerEl) {
         if (!headerEl) return;
         const body = headerEl.nextElementSibling;
-        const chevron = headerEl.querySelector('.accordion-chevron');
         if (!body) return;
         
         const isHidden = body.style.display === 'none' || !body.style.display;
         if (isHidden) {
+            // Find parent inspector container and close all other risk accordions
+            const container = headerEl.closest('.inspector-content') || headerEl.closest('.inspector-drawer') || document.getElementById('inspector-content');
+            if (container) {
+                container.querySelectorAll('.risk-accordion-group').forEach(group => {
+                    const groupHeader = group.querySelector('.risk-accordion-header');
+                    const groupBody = group.querySelector('.risk-accordion-body');
+                    if (groupHeader && groupHeader !== headerEl) {
+                        groupHeader.classList.remove('open');
+                        if (groupBody) groupBody.style.display = 'none';
+                    }
+                });
+            }
+
             body.style.display = 'block';
             headerEl.classList.add('open');
-            if (chevron) {
-                chevron.textContent = '▲';
-            }
         } else {
             body.style.display = 'none';
             headerEl.classList.remove('open');
-            if (chevron) {
-                chevron.textContent = '▼';
-            }
         }
     }
 

@@ -1842,7 +1842,12 @@ html, body {
 .accordion-chevron {
     font-size: 0.7rem;
     color: var(--text-secondary);
-    transition: transform 0.2s ease;
+    transition: transform 0.25s ease;
+}
+
+.risk-accordion-header.open .accordion-chevron {
+    transform: rotate(180deg);
+    color: var(--purple-electric);
 }
 
 .risk-accordion-body {
