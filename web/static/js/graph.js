@@ -540,7 +540,59 @@ class EASMDashboard {
                 }
             }
         });
-        return vulnerabilities;
+        return this.sortVulnsBy3DRiskMatrix(vulnerabilities);
+    }
+
+    sortVulnsBy3DRiskMatrix(vulnList) {
+        if (!Array.isArray(vulnList)) return [];
+
+        const getSevWeight = (sev) => {
+            const s = String(sev || '').toUpperCase();
+            if (s === 'CRITICAL') return 50000;
+            if (s === 'HIGH') return 30000;
+            if (s === 'MEDIUM') return 15000;
+            if (s === 'LOW') return 5000;
+            return 1000;
+        };
+
+        const calculate3DScore = (v) => {
+            let score = 0;
+
+            // 1. CISA KEV (Known Exploited Vulnerability - Flag máxima de prioridade P1 / Weaponized in the Wild)
+            const isKev = v.is_cisa_kev === true || v.is_cisa_kev === 'true' || v.is_cisa_kev === 1;
+            if (isKev) {
+                score += 1000000;
+            }
+
+            // 2. PoC Weaponization Index (ExploitDB / GitHub Functional PoCs)
+            const expCount = (v.exploits && v.exploits.length) || v.exploit_count || 0;
+            if (expCount > 0) {
+                score += 200000 + Math.min(expCount, 5) * 10000;
+            }
+
+            // 3. FIRST EPSS Probability (0.0 to 1.0 -> 0% to 100%)
+            const epss = parseFloat(v.epss_score) || 0.0;
+            score += epss * 50000;
+
+            // 4. Nominal Severity & CVSS Score Base
+            score += getSevWeight(v.severity);
+            const cvss = parseFloat(v.cvss_score) || 0.0;
+            score += cvss * 1000;
+
+            return score;
+        };
+
+        return [...vulnList].sort((a, b) => {
+            const scoreB = calculate3DScore(b);
+            const scoreA = calculate3DScore(a);
+            if (scoreB !== scoreA) {
+                return scoreB - scoreA;
+            }
+            // Tie-breaker: Alphabetical CVE
+            const cveA = (a.cve_id || a.name || a.label || '').toUpperCase();
+            const cveB = (b.cve_id || b.name || b.label || '').toUpperCase();
+            return cveA.localeCompare(cveB);
+        });
     }
 
     findConnectedVulnerabilities(nodeId, elements) {
@@ -608,7 +660,7 @@ class EASMDashboard {
                 }
             });
             
-            return uniqueVulns;
+            return this.sortVulnsBy3DRiskMatrix(uniqueVulns);
         } catch (error) {
             console.error('Error in findConnectedVulnerabilities:', error);
             return [];
