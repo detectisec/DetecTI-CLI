@@ -140,29 +140,33 @@ def test_filter_ports_excluding():
     from modules.masscan import filter_ports_excluding, parse_port_spec_to_set
 
     # 1. Discrete port list
-    filtered, remaining, excluded = filter_ports_excluding("80,443,8080,8443", {80, 443})
+    filtered, remaining, excluded, actual_ex = filter_ports_excluding("80,443,8080,8443", {80, 443})
     assert filtered == "8080,8443"
     assert remaining == 2
     assert excluded == 2
+    assert actual_ex == {80, 443}
 
     # 2. All requested ports already confirmed active
-    filtered_all, rem_all, ex_all = filter_ports_excluding("80,443", {80, 443})
+    filtered_all, rem_all, ex_all, actual_ex_all = filter_ports_excluding("80,443", {80, 443})
     assert filtered_all is None
     assert rem_all == 0
     assert ex_all == 2
+    assert actual_ex_all == {80, 443}
 
     # 3. All ports 0-65535 with exclusions
-    filtered_65k, rem_65k, ex_65k = filter_ports_excluding("0-65535", {80, 443})
+    filtered_65k, rem_65k, ex_65k, actual_ex_65k = filter_ports_excluding("0-65535", {80, 443})
     assert filtered_65k == "0-79,81-442,444-65535"
     assert rem_65k == 65534
     assert ex_65k == 2
+    assert actual_ex_65k == {80, 443}
 
     # 4. Top 100 ports with exclusions
-    filtered_top, rem_top, ex_top = filter_ports_excluding("--top-ports 100", {80, 443})
+    filtered_top, rem_top, ex_top, actual_ex_top = filter_ports_excluding("--top-ports 100", {80, 443})
     assert rem_top == 98
     assert ex_top == 2
     assert "80" not in parse_port_spec_to_set(filtered_top)
     assert "443" not in parse_port_spec_to_set(filtered_top)
+    assert 80 in actual_ex_top and 443 in actual_ex_top
 
 
 def test_target_ports_partition():

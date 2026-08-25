@@ -104,11 +104,11 @@ def parse_port_spec_to_set(ports_spec: Optional[str]) -> set[int]:
 def filter_ports_excluding(
     ports_spec: Optional[str],
     excluded_ports: Optional[set[int] | list[int]] = None
-) -> tuple[Optional[str], int, int]:
+) -> tuple[Optional[str], int, int, set[int]]:
     """Filter out excluded ports from any port specification.
     
     Returns:
-        (filtered_ports_arg, remaining_count, excluded_count)
+        (filtered_ports_arg, remaining_count, excluded_count, actual_excluded_set)
     """
     excluded_set = {int(p) for p in (excluded_ports or set())}
     if not ports_spec:
@@ -122,23 +122,24 @@ def filter_ports_excluding(
     
     if is_all_ports:
         start_p = 1 if "1-65535" in clean_spec else 0
-        filtered_arg = build_port_ranges_excluding(start_p, 65535, excluded_set)
+        actual_ex = {p for p in excluded_set if start_p <= p <= 65535}
+        filtered_arg = build_port_ranges_excluding(start_p, 65535, actual_ex)
         total_p = (65535 - start_p + 1)
-        ex_count = len([p for p in excluded_set if start_p <= p <= 65535])
-        remaining = max(0, total_p - ex_count)
-        return filtered_arg, remaining, ex_count
+        remaining = max(0, total_p - len(actual_ex))
+        return filtered_arg, remaining, len(actual_ex), actual_ex
 
     target_ports = parse_port_spec_to_set(ports_spec)
     initial_count = len(target_ports)
+    actual_ex = target_ports & excluded_set
     remaining_ports = target_ports - excluded_set
-    excluded_count = initial_count - len(remaining_ports)
+    excluded_count = len(actual_ex)
 
     if not remaining_ports:
-        return None, 0, excluded_count
+        return None, 0, excluded_count, actual_ex
 
     # If top-ports was asked without any exclusions
     if ports_spec.strip().startswith("--top-ports") and excluded_count == 0:
-        return ports_spec.strip(), len(remaining_ports), 0
+        return ports_spec.strip(), len(remaining_ports), 0, set()
 
     sorted_rem = sorted(remaining_ports)
     ranges = []
@@ -160,7 +161,7 @@ def filter_ports_excluding(
     else:
         ranges.append(f"{r_start}-{r_prev}")
 
-    return ",".join(ranges), len(remaining_ports), excluded_count
+    return ",".join(ranges), len(remaining_ports), excluded_count, actual_ex
 
 
 class MasscanRunner:

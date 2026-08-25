@@ -537,7 +537,7 @@ async def start_active_scan(
                     p1_spec = ",".join(str(p) for p in sorted(phase1_ports))
                     _append_scan_log(
                         "info",
-                        f"[Masscan Priority Phase 1] Scanning {len(phase1_ports)} unverified passive port(s) [{p1_spec}] on {ip_to_scan}...",
+                        f"[Masscan Phase 1 (Priority)] Found {len(phase1_ports)} unverified passive port(s) [{p1_spec}] on {ip_to_scan}. Scanning immediately for fast active confirmation...",
                         target=ip_to_scan
                     )
                     p1_res = await runner.scan_target(
@@ -556,43 +556,57 @@ async def start_active_scan(
                             m_info = active_db.merge_active_scan_services(ip_to_scan, p1_found)
                             _append_scan_log(
                                 "success",
-                                f"[Masscan Phase 1] Verified {len(p1_found)} port(s) on {ip_to_scan} ({m_info.get('added_services', 0)} new, {m_info.get('updated_services', 0)} confirmed active).",
+                                f"[Masscan Phase 1 Complete] Verified {len(p1_found)} port(s) on {ip_to_scan} ({m_info.get('added_services', 0)} new, {m_info.get('updated_services', 0)} confirmed active).",
                                 target=ip_to_scan
                             )
                         # Re-partition verified ports
                         verified_ports, unverified_passive_ports = _get_target_ports_partition(ip_to_scan, active_db)
+                else:
+                    _append_scan_log(
+                        "info",
+                        f"[Masscan Phase 1 Skip] No unverified passive ports awaiting priority confirmation on {ip_to_scan}. Skipping Phase 1 and advancing to full range sweep.",
+                        target=ip_to_scan
+                    )
 
                 # Phase 2: Sweep remaining ports of the 0-65535 range
                 all_excluded = verified_ports | phase1_ports
                 p2_spec = build_port_ranges_excluding(0, 65535, all_excluded)
                 remaining_ports_count = max(0, 65536 - len(all_excluded))
 
-                _append_scan_log(
-                    "info",
-                    f"[Masscan Phase 2] Sweeping remaining {remaining_ports_count:,} port(s) on {ip_to_scan} (excluding {len(all_excluded)} already tested/confirmed)...",
-                    target=ip_to_scan
-                )
+                if remaining_ports_count == 0:
+                    _append_scan_log(
+                        "info",
+                        f"[Masscan Phase 2 Skip] All 65,536 ports on {ip_to_scan} have already been tested or confirmed active in database. Skipping Phase 2 sweep.",
+                        target=ip_to_scan
+                    )
+                else:
+                    ex_summary = ", ".join(str(p) for p in sorted(all_excluded)[:10]) + ("..." if len(all_excluded) > 10 else "")
+                    _append_scan_log(
+                        "info",
+                        f"[Masscan Phase 2 (Sweep)] Sweeping remaining {remaining_ports_count:,} ports on {ip_to_scan} (excluding {len(all_excluded)} already-tested/confirmed ports: [{ex_summary}] to avoid redundant network load)...",
+                        target=ip_to_scan
+                    )
 
-                p2_res = await runner.scan_target(
-                    target_ip=ip_to_scan,
-                    ports=p2_spec,
-                    rate=rate_arg,
-                    disable_ping=pn_arg,
-                    banners=banners_arg,
-                    custom_flags=flags_arg,
-                    timeout=180.0,
-                )
+                    p2_res = await runner.scan_target(
+                        target_ip=ip_to_scan,
+                        ports=p2_spec,
+                        rate=rate_arg,
+                        disable_ping=pn_arg,
+                        banners=banners_arg,
+                        custom_flags=flags_arg,
+                        timeout=180.0,
+                    )
 
-                p2_found = p2_res.get("ports") or p2_res.get("open_ports") or []
-                if p2_found:
-                    accumulated_open_ports.extend(p2_found)
-                    if active_db and Path(active_db.db_path).exists():
-                        m_info = active_db.merge_active_scan_services(ip_to_scan, p2_found)
-                        _append_scan_log(
-                            "success",
-                            f"[Masscan Phase 2] Discovered {len(p2_found)} additional open port(s) on {ip_to_scan}.",
-                            target=ip_to_scan
-                        )
+                    p2_found = p2_res.get("ports") or p2_res.get("open_ports") or []
+                    if p2_found:
+                        accumulated_open_ports.extend(p2_found)
+                        if active_db and Path(active_db.db_path).exists():
+                            m_info = active_db.merge_active_scan_services(ip_to_scan, p2_found)
+                            _append_scan_log(
+                                "success",
+                                f"[Masscan Phase 2] Discovered {len(p2_found)} additional open port(s) on {ip_to_scan}.",
+                                target=ip_to_scan
+                            )
 
                 # Deduplicate accumulated open ports by port and proto
                 unique_ports = {}
@@ -601,7 +615,7 @@ async def start_active_scan(
                     unique_ports[k] = p
                 final_open_ports = list(unique_ports.values())
 
-                is_success = p2_res.get("success", False) or (len(final_open_ports) > 0)
+                is_success = (len(final_open_ports) > 0) or (remaining_ports_count == 0) or p2_res.get("success", False)
                 if is_success:
                     _target_registry[ip_to_scan]["status"] = "completed"
                     _target_registry[ip_to_scan]["ports_count"] = len(final_open_ports)
@@ -609,7 +623,7 @@ async def start_active_scan(
                     _target_registry[ip_to_scan]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     _append_scan_log(
                         "success",
-                        f"[Masscan Full Sweep] Scan on {ip_to_scan} completed: {len(final_open_ports)} total verified open port(s).",
+                        f"[Masscan Full Sweep Complete] Scan on {ip_to_scan} completed: {len(final_open_ports)} total verified active port(s).",
                         target=ip_to_scan
                     )
                 else:
@@ -628,23 +642,25 @@ async def start_active_scan(
                 # -------------------------------------------------------------
                 # STANDARD SCAN WITH SMART VERIFIED PORT EXCLUSION
                 # -------------------------------------------------------------
-                filtered_ports, remaining_count, excluded_count = filter_ports_excluding(ports_arg, verified_ports)
+                filtered_ports, remaining_count, excluded_count, actual_ex = filter_ports_excluding(ports_arg, verified_ports)
                 
                 if not filtered_ports or remaining_count == 0:
+                    ex_list_str = ", ".join(str(p) for p in sorted(actual_ex)[:15]) + ("..." if len(actual_ex) > 15 else "")
                     _target_registry[ip_to_scan]["status"] = "completed"
                     _target_registry[ip_to_scan]["ports_count"] = len(verified_ports)
                     _target_registry[ip_to_scan]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     _append_scan_log(
                         "success",
-                        f"[Masscan] All requested ports on {ip_to_scan} are already Confirmed Active ({len(verified_ports)} port(s)). Skipping scan to reduce load.",
+                        f"[Masscan Smart Skip] Scan skipped on {ip_to_scan}: 100% of requested ports [{ports_arg}] ({len(actual_ex)} port(s): [{ex_list_str}]) are already verified as Confirmed Active in database. Redundant probing skipped to reduce target load.",
                         target=ip_to_scan
                     )
                     return
 
                 if excluded_count > 0:
+                    ex_list_str = ", ".join(str(p) for p in sorted(actual_ex)[:10]) + ("..." if len(actual_ex) > 10 else "")
                     _append_scan_log(
                         "info",
-                        f"[Masscan Smart Filter] Excluded {excluded_count} already-confirmed port(s). Scanning {remaining_count} remaining port(s) on {ip_to_scan}...",
+                        f"[Masscan Smart Filter] Excluded {excluded_count} port(s) [{ex_list_str}] because they are already Confirmed Active. Scanning {remaining_count} remaining unverified port(s) on {ip_to_scan} ({filtered_ports}, {rate_arg} pps)...",
                         target=ip_to_scan
                     )
                 else:
@@ -923,7 +939,7 @@ async def start_nuclei_scan(
                     _target_registry[ip_to_scan]["vulns_count"] = 0
                 _append_scan_log(
                     "warning",
-                    f"[Nuclei] Skipping Nuclei scan for {ip_to_scan}: No 'Verified Active' ports identified after pre-scan verification.",
+                    f"[Nuclei Smart Skip] Skipped vulnerability scan on {ip_to_scan}: No responsive 'Confirmed Active' ports/services were found in database or discovered during pre-scan verification. Nuclei requires live active services to prevent sending blind template requests.",
                     target=ip_to_scan
                 )
                 return
