@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/dashboard.css?v=17">
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=18">
     <script src="/static/js/cytoscape.min.js"></script>
     <script src="/static/js/cytoscape-cose-bilkent.js"></script>
     <script src="/static/js/lucide.min.js"></script>
@@ -46,7 +46,7 @@
                 <div class="header-right">
                     <!-- Database Selector Control -->
                     <div class="header-control-group">
-                        <label for="db-selector" class="control-label"><i data-lucide="database" class="ui-icon label-icon"></i> Database:</label>
+                        <label for="db-selector" class="control-label" title="Switch SQLite Database" aria-label="Database"><i data-lucide="database" class="ui-icon label-icon"></i></label>
                         <select id="db-selector" class="db-select-input" title="Switch SQLite Database">
                             <option value="">Loading databases...</option>
                         </select>

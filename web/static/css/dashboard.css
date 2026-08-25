@@ -298,12 +298,22 @@ html, body {
 }
 
 .control-label {
-    font-size: 0.76rem;
-    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     color: var(--text-secondary);
-    white-space: nowrap;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.control-label:hover {
+    color: var(--cyan-accent);
+}
+
+.control-label .label-icon {
+    width: 16px;
+    height: 16px;
+    stroke-width: 2.2px;
 }
 
 .db-select-input {
@@ -2155,7 +2165,7 @@ html, body {
     }
 
     .control-label {
-        display: none;
+        display: inline-flex;
     }
 
     .db-select-input {
