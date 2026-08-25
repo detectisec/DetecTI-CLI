@@ -207,47 +207,47 @@
                                 <label class="filter-checkbox">
                                     <input type="checkbox" id="filter-kev">
                                     <span class="checkmark"></span>
-                                    CISA KEV (Known Exploited)
+                                    <span style="color: #ff4757; font-weight: 600;">CISA KEV</span>&nbsp;<span style="color: var(--text-muted); font-size: 0.78rem;">(Known Exploited)</span>
                                 </label>
                                 <label class="filter-checkbox">
                                     <input type="checkbox" id="filter-high-epss">
                                     <span class="checkmark"></span>
-                                    High EPSS (&gt;50% Exploit Probability)
+                                    <span style="color: #ffa502; font-weight: 600;">High EPSS</span>&nbsp;<span style="color: var(--text-muted); font-size: 0.78rem;">(&gt;50% Probability)</span>
                                 </label>
                                 <label class="filter-checkbox">
                                     <input type="checkbox" id="filter-critical">
                                     <span class="checkmark"></span>
-                                    Critical Vulnerabilities (CVSS 9.0+)
+                                    <span style="color: #ff3838; font-weight: 600;">Critical Severity</span>&nbsp;<span style="color: var(--text-muted); font-size: 0.78rem;">(CVSS 9.0+)</span>
                                 </label>
                                 <label class="filter-checkbox">
                                     <input type="checkbox" id="filter-hide-low-info">
                                     <span class="checkmark"></span>
-                                    Hide Low & Info Findings
+                                    <span style="color: #70a1ff; font-weight: 600;">Hide Low &amp; Info</span>&nbsp;<span style="color: var(--text-muted); font-size: 0.78rem;">(Noise Reduction)</span>
                                 </label>
                                 <label class="filter-checkbox">
                                     <input type="checkbox" id="filter-nuclei-only">
                                     <span class="checkmark"></span>
-                                    Nuclei Scan Findings Only
+                                    <span style="color: #c084fc; font-weight: 600;">Nuclei Findings Only</span>&nbsp;<span style="color: var(--text-muted); font-size: 0.78rem;">(Templates)</span>
                                 </label>
                                 <label class="filter-checkbox">
                                     <input type="checkbox" id="filter-with-pocs">
                                     <span class="checkmark"></span>
-                                    Verified Public PoCs / Exploits
+                                    <span style="color: #00d2d3; font-weight: 600;">Verified Public PoCs</span>&nbsp;<span style="color: var(--text-muted); font-size: 0.78rem;">(ExploitDB / GitHub)</span>
                                 </label>
-                                <label class="filter-checkbox">
+                                <label class="filter-checkbox" style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 0.5rem; margin-top: 0.2rem;">
                                     <input type="checkbox" id="filter-services-only">
                                     <span class="checkmark"></span>
-                                    Exposed Services Branches
+                                    <span style="color: #2ed573; font-weight: 600;">Exposed Services</span>&nbsp;<span style="color: var(--text-muted); font-size: 0.78rem;">(All Branches)</span>
                                 </label>
                                 <label class="filter-checkbox">
                                     <input type="checkbox" id="filter-verified-services">
                                     <span class="checkmark"></span>
-                                    Verified Active Services Only
+                                    <span style="color: #26de81; font-weight: 600;">Verified Active Services</span>&nbsp;<span style="color: var(--text-muted); font-size: 0.78rem;">(Masscan / HTTP)</span>
                                 </label>
                                 <label class="filter-checkbox">
                                     <input type="checkbox" id="filter-vuln-services">
                                     <span class="checkmark"></span>
-                                    Vulnerable Services Only
+                                    <span style="color: #eb4d4b; font-weight: 600;">Vulnerable Services</span>&nbsp;<span style="color: var(--text-muted); font-size: 0.78rem;">(Direct Findings)</span>
                                 </label>
                             </div>
                         </div>
@@ -567,8 +567,8 @@
         <div id="cy-context-menu" class="cy-context-menu"></div>
     </div>
 
-    <script src="/static/js/api.js?v=7"></script>
-    <script src="/static/js/graph.js?v=35"></script>
+    <script src="/static/js/api.js?v=8"></script>
+    <script src="/static/js/graph.js?v=37"></script>
     
     <script>
         // Debug logging & icon initialization
