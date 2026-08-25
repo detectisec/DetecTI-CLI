@@ -385,7 +385,6 @@ class GraphBuilder:
                     sources_list = [sources_raw]
             
             has_masscan = any("masscan" in str(s).lower() for s in sources_list)
-            is_active_only = has_masscan and len(sources_list) == 1
             
             service_type = "https" if ssl else "http" if port in [80, 8080, 8000] else "service"
             
@@ -404,19 +403,19 @@ class GraphBuilder:
                     "url": url or "",
                     "sources": sources_list,
                     "is_active_scan": has_masscan,
-                    "is_active_only": is_active_only,
                     "verified_active": has_masscan,
                 }
             })
             
-            # Edge from IP to service (dashed if active scan only, solid if passive or mixed)
+            # Edge from IP to service (solid green if active scan / confirmed active, dotted green if passive / awaiting active confirmation)
             edges.append({
                 "data": {
                     "id": f"e_ip_srv_{ip_id}_{service_id}",
                     "source": f"ip_{ip_id}",
                     "target": f"srv_{service_id}",
                     "label": "EXPOSES",
-                    "is_active_scan": is_active_only or (has_masscan and len(sources_list) == 1)
+                    "is_active_scan": has_masscan,
+                    "verified_active": has_masscan
                 }
             })
         

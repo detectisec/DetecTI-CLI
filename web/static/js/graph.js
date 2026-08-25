@@ -1569,7 +1569,7 @@ class EASMDashboard {
                 
                 // 2. Service nodes - Confirmed Active (Verified actively via Masscan / Active Scan) -> Emerald Green (#27ae60)
                 {
-                    selector: 'node[?verified_active], node[verified_active="true"], node[?is_active_only], node[is_active_only="true"], node[?is_active_scan], node[is_active_scan="true"]',
+                    selector: 'node[?verified_active], node[verified_active="true"], node[?is_active_scan], node[is_active_scan="true"]',
                     style: {
                         'background-color': '#27ae60',
                         'label': 'data(label)',
@@ -1817,9 +1817,9 @@ class EASMDashboard {
                     }
                 },
 
-                // Active Scan Edges (Dashed line connecting IP -> Active Service)
+                // Confirmed Active Service Edges (Solid emerald green line connecting IP -> Confirmed Active Service)
                 {
-                    selector: 'edge[?is_active_scan], edge[is_active_scan="true"], edge.active-scan-edge',
+                    selector: 'edge[?is_active_scan], edge[is_active_scan="true"], edge[?verified_active], edge[verified_active="true"], edge.active-scan-edge',
                     style: {
                         'line-style': 'solid',
                         'line-color': '#2ecc71',
@@ -3669,12 +3669,7 @@ class EASMDashboard {
                     <pre class="service-banner-preview" style="background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 0.5rem 0.65rem; font-family: var(--font-mono, monospace); font-size: 0.76rem; color: #38bdf8; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; width: 100%; margin: 0;">${this.escapeHtml(data.banner)}</pre>
                 </div>
                 ` : ''}
-                ${data.is_active_only ? `
-                <div class="property">
-                    <span class="key">Verification Status:</span>
-                    <span class="value"><span class="badge-active-scan"><i data-lucide="crosshair" style="width: 12px; height: 12px;"></i> Active Scan Verified</span></span>
-                </div>
-                ` : (data.verified_active ? `
+                ${(data.verified_active || data.is_active_scan) ? `
                 <div class="property">
                     <span class="key">Verification Status:</span>
                     <span class="value"><span class="badge-verified-active"><i data-lucide="check-circle" style="width: 12px; height: 12px;"></i> Confirmed Active</span></span>
@@ -3682,9 +3677,9 @@ class EASMDashboard {
                 ` : `
                 <div class="property">
                     <span class="key">Verification Status:</span>
-                    <span class="value"><span class="badge-unverified" style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; background: rgba(245, 158, 11, 0.12); border: 1px dashed #f59e0b; color: #fbbf24; font-size: 0.75rem; font-weight: 600;"><i data-lucide="clock" style="width: 12px; height: 12px;"></i> Passive (Awaiting Active Confirmation)</span></span>
+                    <span class="value"><span class="badge-unverified"><i data-lucide="clock" style="width: 12px; height: 12px;"></i> Passive (Awaiting Active Confirmation)</span></span>
                 </div>
-                `)}
+                `}
                 ${Array.isArray(data.sources) && data.sources.length > 0 ? `
                 <div class="property">
                     <span class="key">Sources:</span>
