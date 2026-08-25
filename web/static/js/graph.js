@@ -9,6 +9,7 @@ class EASMDashboard {
         this.leads = [];
         this.selectedLeads = new Set();
         this.filters = {
+            matrix3d: false,
             kev: false,
             highEpss: false,
             critical: false,
@@ -1058,12 +1059,58 @@ class EASMDashboard {
         const CLUSTER_THRESHOLD = 15;
 
         // Vulnerability filter evaluator helper for clustering pass
-        const hasVulnFilters = this.filters.kev || this.filters.highEpss || this.filters.critical || this.filters.hideLowInfo || this.filters.nucleiOnly || this.filters.withPocs;
+        const hasVulnFilters = this.filters.matrix3d || this.filters.kev || this.filters.highEpss || this.filters.critical || this.filters.hideLowInfo || this.filters.nucleiOnly || this.filters.withPocs;
         const vulnMatchesActiveFilter = (vulnNode) => {
             if (!vulnNode) return false;
             const data = typeof vulnNode.data === 'function' ? vulnNode.data() : vulnNode;
             const severity = String(data.severity || '').toUpperCase();
             const source = String(data.source || '').toLowerCase();
+            
+            if (this.filters.matrix3d) {
+                // Dimensão 1: Exposição e Validação Ativa (O Ativo)
+                // Deve haver pelo menos um serviço pai ativamente verificado (Masscan/Active), ou IP verificado
+                let hasActiveExposure = false;
+                if (typeof vulnNode.incomers === 'function') {
+                    const parentServices = vulnNode.incomers('node[type="service"], node[type="http"], node[type="https"]');
+                    if (parentServices.length > 0) {
+                        hasActiveExposure = parentServices.some(srv => {
+                            const sData = srv.data();
+                            if (sData.verified_active === true || sData.is_active_scan === true) return true;
+                            const sSources = Array.isArray(sData.sources) ? sData.sources : (sData.sources ? [sData.sources] : []);
+                            return sSources.some(s => typeof s === 'string' && (s.toLowerCase().includes('masscan') || s.toLowerCase().includes('active')));
+                        });
+                    } else {
+                        const parentIps = vulnNode.incomers('node[type="ip"]');
+                        if (parentIps.length > 0) {
+                            const hasActiveSrvOnIp = parentIps.first().outgoers('node[type="service"], node[type="http"], node[type="https"]').some(s => s.data('verified_active') === true);
+                            hasActiveExposure = hasActiveSrvOnIp || data.verified_active === true || data.is_active_scan === true;
+                        }
+                    }
+                } else if (data.service_id && this.cy) {
+                    const srv = this.cy.getElementById(data.service_id);
+                    if (srv.length > 0) {
+                        const sData = srv.data();
+                        hasActiveExposure = sData.verified_active === true || sData.is_active_scan === true;
+                    }
+                } else {
+                    hasActiveExposure = Boolean(data.verified_active === true || data.is_active_scan === true);
+                }
+
+                if (!hasActiveExposure) return false;
+
+                // Dimensão 2: Gravidade Técnica (O Impacto: elimina ruído Low/Info/Unknown)
+                const cvss = parseFloat(data.cvss_score || 0);
+                const hasTechImpact = severity === 'CRITICAL' || severity === 'HIGH' || (severity === 'MEDIUM' && cvss >= 5.0) || cvss >= 6.5;
+                if (!hasTechImpact) return false;
+
+                // Dimensão 3: Armamento no Mundo Real (A Ameaça Ativa: CISA KEV, Alto EPSS ou PoCs)
+                const isKev = data.is_cisa_kev === true || data.is_cisa_kev === 'true' || data.is_cisa_kev === 1;
+                const epss = parseFloat(data.epss_score || 0);
+                const hasPocs = data.has_pocs === true || (Array.isArray(data.exploits) && data.exploits.length > 0) || (parseInt(data.exploit_count || 0) > 0);
+                const realWorldThreat = isKev || (epss >= 0.2) || hasPocs;
+                if (!realWorldThreat) return false;
+            }
+
             if (this.filters.kev) {
                 if (data.is_cisa_kev !== true && data.is_cisa_kev !== 1) return false;
             }
@@ -2478,6 +2525,14 @@ class EASMDashboard {
         };
 
         // Filter checkboxes
+        const filter3dMatrix = document.getElementById('filter-3d-matrix');
+        if (filter3dMatrix) {
+            filter3dMatrix.addEventListener('change', (e) => {
+                this.filters.matrix3d = e.target.checked;
+                this.applyLeadFilter({ relayout: false });
+            });
+        }
+
         const filterKev = document.getElementById('filter-kev');
         if (filterKev) {
             filterKev.addEventListener('change', (e) => {
@@ -2724,6 +2779,20 @@ class EASMDashboard {
             targetSet.add(nodeId);
             startNode.incomers('node').forEach(parent => {
                 const pId = parent.id();
+                const pType = parent.data('type');
+                
+                // When 3D Risk Matrix or Verified Services filter is active, do NOT trace through unverified/passive services!
+                if (this.filters.matrix3d || this.filters.verifiedServicesOnly) {
+                    if (pType === 'service' || pType === 'http' || pType === 'https') {
+                        const sData = parent.data();
+                        const isSrvActive = sData.verified_active === true || sData.is_active_scan === true ||
+                            (Array.isArray(sData.sources) && sData.sources.some(s => typeof s === 'string' && (s.toLowerCase().includes('masscan') || s.toLowerCase().includes('active'))));
+                        if (!isSrvActive) {
+                            return; // Skip tracing into unverified / passive service
+                        }
+                    }
+                }
+                
                 if (!this.visibleLeadNodes || this.visibleLeadNodes.has(pId)) {
                     addAllAncestors(parent, targetSet, visited);
                 }
@@ -2785,12 +2854,58 @@ class EASMDashboard {
         }
 
         // 2. Vulnerability filter evaluator
-        const hasVulnFilters = this.filters.kev || this.filters.highEpss || this.filters.critical || this.filters.hideLowInfo || this.filters.nucleiOnly || this.filters.withPocs;
+        const hasVulnFilters = this.filters.matrix3d || this.filters.kev || this.filters.highEpss || this.filters.critical || this.filters.hideLowInfo || this.filters.nucleiOnly || this.filters.withPocs;
         const vulnMatchesFilter = (vulnNode) => {
             if (!vulnNode) return false;
             const data = typeof vulnNode.data === 'function' ? vulnNode.data() : vulnNode;
             const severity = String(data.severity || '').toUpperCase();
             const source = String(data.source || '').toLowerCase();
+
+            if (this.filters.matrix3d) {
+                // Dimensão 1: Exposição e Validação Ativa (O Ativo)
+                // Deve haver pelo menos um serviço pai ativamente verificado (Masscan/Active), ou IP verificado
+                let hasActiveExposure = false;
+                if (typeof vulnNode.incomers === 'function') {
+                    const parentServices = vulnNode.incomers('node[type="service"], node[type="http"], node[type="https"]');
+                    if (parentServices.length > 0) {
+                        hasActiveExposure = parentServices.some(srv => {
+                            const sData = srv.data();
+                            if (sData.verified_active === true || sData.is_active_scan === true) return true;
+                            const sSources = Array.isArray(sData.sources) ? sData.sources : (sData.sources ? [sData.sources] : []);
+                            return sSources.some(s => typeof s === 'string' && (s.toLowerCase().includes('masscan') || s.toLowerCase().includes('active')));
+                        });
+                    } else {
+                        const parentIps = vulnNode.incomers('node[type="ip"]');
+                        if (parentIps.length > 0) {
+                            const hasActiveSrvOnIp = parentIps.first().outgoers('node[type="service"], node[type="http"], node[type="https"]').some(s => s.data('verified_active') === true);
+                            hasActiveExposure = hasActiveSrvOnIp || data.verified_active === true || data.is_active_scan === true;
+                        }
+                    }
+                } else if (data.service_id && this.cy) {
+                    const srv = this.cy.getElementById(data.service_id);
+                    if (srv.length > 0) {
+                        const sData = srv.data();
+                        hasActiveExposure = sData.verified_active === true || sData.is_active_scan === true;
+                    }
+                } else {
+                    hasActiveExposure = Boolean(data.verified_active === true || data.is_active_scan === true);
+                }
+
+                if (!hasActiveExposure) return false;
+
+                // Dimensão 2: Gravidade Técnica (O Impacto: elimina ruído Low/Info/Unknown)
+                const cvss = parseFloat(data.cvss_score || 0);
+                const hasTechImpact = severity === 'CRITICAL' || severity === 'HIGH' || (severity === 'MEDIUM' && cvss >= 5.0) || cvss >= 6.5;
+                if (!hasTechImpact) return false;
+
+                // Dimensão 3: Armamento no Mundo Real (A Ameaça Ativa: CISA KEV, Alto EPSS ou PoCs)
+                const isKev = data.is_cisa_kev === true || data.is_cisa_kev === 'true' || data.is_cisa_kev === 1;
+                const epss = parseFloat(data.epss_score || 0);
+                const hasPocs = data.has_pocs === true || (Array.isArray(data.exploits) && data.exploits.length > 0) || (parseInt(data.exploit_count || 0) > 0);
+                const realWorldThreat = isKev || (epss >= 0.2) || hasPocs;
+                if (!realWorldThreat) return false;
+            }
+
             if (this.filters.kev) {
                 if (data.is_cisa_kev !== true && data.is_cisa_kev !== 1) return false;
             }
@@ -4711,9 +4826,10 @@ class EASMDashboard {
                     });
                 }
 
-                // Force Cytoscape style update
+                // Force Cytoscape style update and re-evaluate active filters in real-time
                 if (this.cy) {
                     this.cy.style().update();
+                    this.applyLeadFilter({ relayout: false });
                 }
 
                 const count = data.unverified_count || serviceNodes.length;
