@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/dashboard.css?v=18">
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=19">
     <script src="/static/js/cytoscape.min.js"></script>
     <script src="/static/js/cytoscape-cose-bilkent.js"></script>
     <script src="/static/js/lucide.min.js"></script>
@@ -113,44 +113,51 @@
                     <button id="close-sidebar" class="sidebar-close-btn" aria-label="Close Sidebar"><i data-lucide="x" class="ui-icon"></i></button>
                 </div>
 
-                <!-- Metrics Panel -->
-                <div class="panel metrics-panel">
-                    <h3><i data-lucide="bar-chart-3" class="ui-icon panel-title-icon"></i> Attack Surface Metrics</h3>
-                    <!-- Attack Surface Metrics: Organized in 2-Column Pairs -->
-                    <div class="metric-grid">
-                        <div class="metric-item">
-                            <span class="metric-value" id="domains-count">-</span>
-                            <span class="metric-label">Domains</span>
+                <!-- Metrics Accordion Panel -->
+                <div class="panel metrics-panel lead-accordion-panel">
+                    <details class="sidebar-accordion" id="metrics-accordion" open>
+                        <summary class="accordion-header">
+                            <span class="accordion-title"><i data-lucide="bar-chart-3" class="ui-icon panel-title-icon"></i> Attack Surface Metrics</span>
+                            <i data-lucide="chevron-down" class="ui-icon accordion-icon"></i>
+                        </summary>
+                        <div class="accordion-body">
+                            <!-- Attack Surface Metrics: Organized in 2-Column Pairs -->
+                            <div class="metric-grid">
+                                <div class="metric-item">
+                                    <span class="metric-value" id="domains-count">-</span>
+                                    <span class="metric-label">Domains</span>
+                                </div>
+                                <div class="metric-item">
+                                    <span class="metric-value" id="subdomains-count">-</span>
+                                    <span class="metric-label">Subdomains</span>
+                                </div>
+                                <div class="metric-item">
+                                    <span class="metric-value" id="ips-count">-</span>
+                                    <span class="metric-label">IP Addresses</span>
+                                </div>
+                                <div class="metric-item">
+                                    <span class="metric-value" id="services-count">-</span>
+                                    <span class="metric-label">Open Services</span>
+                                </div>
+                                <div class="metric-item verified-highlight">
+                                    <span class="metric-value" id="verified-services-count">-</span>
+                                    <span class="metric-label">Verified Services</span>
+                                </div>
+                                <div class="metric-item critical">
+                                    <span class="metric-value" id="vulns-count">-</span>
+                                    <span class="metric-label">Vulnerabilities</span>
+                                </div>
+                                <div class="metric-item critical">
+                                    <span class="metric-value" id="kev-count">-</span>
+                                    <span class="metric-label">CISA KEV</span>
+                                </div>
+                                <div class="metric-item epss-highlight">
+                                    <span class="metric-value" id="epss-count">-</span>
+                                    <span class="metric-label">High EPSS (&gt;50%)</span>
+                                </div>
+                            </div>
                         </div>
-                        <div class="metric-item">
-                            <span class="metric-value" id="subdomains-count">-</span>
-                            <span class="metric-label">Subdomains</span>
-                        </div>
-                        <div class="metric-item">
-                            <span class="metric-value" id="ips-count">-</span>
-                            <span class="metric-label">IP Addresses</span>
-                        </div>
-                        <div class="metric-item">
-                            <span class="metric-value" id="services-count">-</span>
-                            <span class="metric-label">Open Services</span>
-                        </div>
-                        <div class="metric-item verified-highlight">
-                            <span class="metric-value" id="verified-services-count">-</span>
-                            <span class="metric-label">Verified Services</span>
-                        </div>
-                        <div class="metric-item critical">
-                            <span class="metric-value" id="vulns-count">-</span>
-                            <span class="metric-label">Vulnerabilities</span>
-                        </div>
-                        <div class="metric-item critical">
-                            <span class="metric-value" id="kev-count">-</span>
-                            <span class="metric-label">CISA KEV</span>
-                        </div>
-                        <div class="metric-item epss-highlight">
-                            <span class="metric-value" id="epss-count">-</span>
-                            <span class="metric-label">High EPSS (&gt;50%)</span>
-                        </div>
-                    </div>
+                    </details>
                 </div>
 
                 <!-- Search Box (Above Lead Selector) -->
@@ -561,7 +568,7 @@
     </div>
 
     <script src="/static/js/api.js?v=8"></script>
-    <script src="/static/js/graph.js?v=40"></script>
+    <script src="/static/js/graph.js?v=41"></script>
     
     <script>
         // Debug logging & icon initialization
