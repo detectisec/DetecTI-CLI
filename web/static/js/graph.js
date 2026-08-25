@@ -4856,28 +4856,6 @@ class EASMDashboard {
             });
         }
 
-        // Drawer Expand / Collapse Toggle Button
-        const expandBtn = document.getElementById('btn-toggle-drawer-expand');
-        const drawer = document.getElementById('targets-drawer');
-        if (expandBtn && drawer) {
-            expandBtn.addEventListener('click', () => {
-                drawer.classList.toggle('expanded');
-                const isExpanded = drawer.classList.contains('expanded');
-                const expIcon = expandBtn.querySelector('.expand-icon');
-                const colIcon = expandBtn.querySelector('.collapse-icon');
-                if (expIcon && colIcon) {
-                    expIcon.style.display = isExpanded ? 'none' : 'block';
-                    colIcon.style.display = isExpanded ? 'block' : 'none';
-                }
-                // Dynamically resize cytoscape canvas
-                if (this.cy) {
-                    setTimeout(() => {
-                        this.cy.resize();
-                    }, 320);
-                }
-            });
-        }
-
         // Drawer Tabs Switching
         const tabBtns = document.querySelectorAll('.drawer-tab-btn');
         const tabPanes = {
