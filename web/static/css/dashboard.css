@@ -252,57 +252,34 @@ html, body {
     white-space: nowrap;
 }
 
-.header-website-link {
+.header-docs-icon-btn {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0.35rem 0.75rem;
-    background: rgba(140, 82, 255, 0.08);
-    border: 1px solid rgba(140, 82, 255, 0.24);
-    border-radius: 40px;
-    color: var(--purple-light);
-    font-size: 0.78rem;
-    font-weight: 600;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: rgba(0, 229, 255, 0.08);
+    border: 1px solid rgba(0, 229, 255, 0.28);
+    color: var(--cyan-accent);
     text-decoration: none;
     transition: all 0.2s ease;
-    white-space: nowrap;
-    margin-left: 0.3rem;
+    margin-left: 0.5rem;
+    flex-shrink: 0;
 }
 
-.header-website-link .link-icon {
-    font-size: 0.85rem;
+.header-docs-icon-btn .ui-icon {
+    width: 17px;
+    height: 17px;
+    stroke-width: 2.2px;
 }
 
-.header-website-link .link-external-arrow {
-    font-size: 0.75rem;
-    opacity: 0.7;
-    transition: transform 0.2s ease;
-}
-
-.header-website-link:hover {
-    background: rgba(140, 82, 255, 0.22);
-    border-color: var(--purple-electric);
-    color: var(--text-white);
-    box-shadow: 0 0 14px var(--purple-glow);
-    transform: translateY(-1px);
-}
-
-.header-website-link:hover .link-external-arrow {
-    opacity: 1;
-    transform: translate(1px, -1px);
-}
-
-.header-docs-link {
-    background: rgba(0, 229, 255, 0.08);
-    border-color: rgba(0, 229, 255, 0.25);
-    color: #7dd3fc;
-}
-
-.header-docs-link:hover {
-    background: rgba(0, 229, 255, 0.2);
+.header-docs-icon-btn:hover {
+    background: rgba(0, 229, 255, 0.22);
     border-color: var(--cyan-accent);
-    color: var(--text-white);
+    color: #fff;
     box-shadow: 0 0 14px var(--cyan-glow);
+    transform: translateY(-1px);
 }
 
 /* Header Right Controls */
@@ -2206,10 +2183,10 @@ html, body {
         height: 28px;
     }
 
-    .header-website-link {
-        font-size: 0.72rem;
-        padding: 0.25rem 0.5rem;
-        margin-left: 0.2rem;
+    .header-docs-icon-btn {
+        width: 30px;
+        height: 30px;
+        margin-left: 0.35rem;
     }
 
     .target-info {
@@ -2295,8 +2272,10 @@ html, body {
         font-size: 0.58rem;
     }
 
-    .header-website-link {
-        display: none;
+    .header-docs-icon-btn {
+        width: 28px;
+        height: 28px;
+        margin-left: 0.25rem;
     }
 
     .header-right {
