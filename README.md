@@ -110,10 +110,12 @@ flowchart TD
 
 4. **Stage 1.8: Target Management & Active Scanning (Masscan + Nuclei)**:
    - **Masscan Active Port Scan**: Targets marked on the graph are scanned at high speeds with banner grabbing (`--banners`) to verify live exposed services.
-   - **Verified Active Rule for Nuclei**: Nuclei vulnerability scanning only executes on **"Verified Active"** endpoints (discovered or validated by Masscan). If an IP target has not yet been scanned with Masscan, a pre-scan verification is executed automatically before dispatching Nuclei templates.
+   - **Smart Port Exclusion & 2-Phase Pipeline**: Automatically omits already confirmed active ports to minimize load. When scanning All Ports (`0-65535`), Phase 1 immediately tests known passive unverified ports for rapid visual feedback, followed by Phase 2 sweeping remaining ports.
+   - **Mandatory "Verified Active" Rule for Nuclei**: Nuclei strictly targets endpoints confirmed as **"Verified Active"**. If an IP target has unverified passive ports in the database, Nuclei requests a targeted Masscan pre-scan specifically for those passive ports. If verified active, Nuclei proceeds; otherwise, if no ports respond or no ports are mapped, the scan is safely skipped with an explanatory log in the console.
 
 5. **Stage 2: Threat Intelligence & Vulnerability Prioritization**:
    - All unique CVE IDs identified across passive feeds and active Nuclei scans are aggregated and tracked by their provenance (**Vulnerability Source**: `Nuclei`, `NVD`, etc.).
+   - Prioritized via the **3D EASM Risk Matrix**: **CISA KEV** (P1 Active Exploitation) > **Weaponized PoCs & Exploits** > **FIRST EPSS Probability** > **CVSS Severity**.
    - **NVD 2.0 API**: Retrieves official CVSS v3.1, v3.0, and v2.0 base scores, vector metrics, and **CWE (Common Weakness Enumeration)** weakness name.
    - **FIRST EPSS API**: Appends real-world exploitation probability percentages (0.0% to 100%) and percentile scores.
    - **CISA KEV Catalog**: Cross-checks vulnerabilities actively leveraged in ransomware and targeted cyber campaigns.
@@ -143,6 +145,7 @@ flowchart TD
   - **Reverse WHOIS**: Correlates domains by registrant email, organization name, or domain (WhoisFreaks API + HackerTarget fallback).
   - Shodan DNS historical record mapping.
 - **🛡️ Advanced Threat Intelligence & Risk Prioritization**:
+  - **3D EASM Risk Matrix**: Intelligent sorting placing actively exploited CISA KEV flaws, weaponized PoCs, and high EPSS probability at the top.
   - **NVD 2.0 API**: CVSS base scores, severity levels, and **CWE Name** weakness mapping.
   - **FIRST EPSS**: Exploit Prediction Scoring System (probability percentage & percentile).
   - **CISA KEV**: Catalogs vulnerabilities actively exploited in real-world attacks & ransomware campaigns.
@@ -154,7 +157,7 @@ flowchart TD
     - **Left-Click (Drag)**: Pan and navigate smoothly across the canvas.
     - **Left-Click (Node)**: Select single node and inspect deep asset metadata in the Asset Inspector.
     - **Ctrl + Left-Click (Node)** / **Cmd + Left-Click**: Additive sequential multi-selection of target nodes.
-    - **Right-Click (Node)**: Custom Context Menu to Collapse/Uncollapse Services or Vulnerabilities, Set/Remove Targets, Focus Node, or Copy Domain/IP/CVE identifiers.
+    - **Right-Click (Node)**: Custom Context Menu to Collapse/Uncollapse Services or Vulnerabilities, Set/Remove Targets, Remove Verified Active, Focus Node, or Copy Domain/IP/CVE identifiers.
     - **Right-Click (Drag)**: Box area selection to group and reposition multiple nodes together.
     - **Smooth Scroll Wheel**: Seamless zoom in/out centered directly at the cursor position.
   - **Retractable Filters & Controls Drawer**: Smoothly collapse the left sidebar to liberate 100% of the screen for graph exploration across all desktop and mobile devices.
@@ -173,11 +176,14 @@ flowchart TD
   - **Export Data Menu**: One-click download of active scan data in **JSON**, **Executive Markdown**, and **Standalone HTML** formats.
   - **Floating Action Controls**: Instant access to `📐 Fit to Screen`, `🔍 Reset Zoom`, `🔄 Re-layout`, and **Layout Selector** (`🌳 Hierarchical (Top-Down, Default)`, `🌐 Force-Directed`, `🎯 Concentric`, `▦ Grid`).
   - **Smart Collapsible Clusters (High Fan-Out Optimization)**: Group high-density services or vulnerabilities into clean, collapsible cluster nodes with a dashed border.
-  - **Asset Inspector & Risk Metrics Accordions**: Deep-dive into technical properties, CWE descriptions, affected ports, associated domains, weaponized exploit URLs, and explicit vulnerability **Source** attribution.
+  - **Asset Inspector & Risk Metrics Accordions**: Deep-dive into technical properties, CWE descriptions, affected ports, associated domains, weaponized exploit URLs, banner metadata, and explicit vulnerability **Source** attribution.
 - **🎯 Target Management & High-Speed Active Port Scanning (Masscan)**:
   - **Right-Click Target Marking & Bulk Selection**:
     - Mark/unmark any individual `IP Address` node as a scan target directly from the Cytoscape graph context menu (**Set as Target** / **Remove Target**).
     - **Bulk Target Addition on Root Nodes**: Right-click on any `Organization`, `Network / ASN`, `Target Root`, or `Domain` node to instantly mark or unmark **all associated descendant IPs** as scan targets in a single click (**Set all N IPs as Targets** / **Remove all N IPs from Targets**).
+  - **Active Verification Reset (Remove Verified Active)**: Right-click individual active services or parent root nodes to reset active verification back to passive status for targeted re-scans without losing existing asset metadata.
+  - **Smart Port Exclusion**: Automatically filters out ports already marked `Confirmed Active` to avoid duplicate scanning and save network bandwidth.
+  - **2-Phase Pipeline for All Ports (0-65535)**: Phase 1 prioritizes unverified passive ports for immediate 1-2s visual confirmation, followed by Phase 2 batch sweep of remaining ports.
   - **Inspector Direct Actions**: Toggle individual or bulk target states directly from the **Asset Inspector** drawer for both IP nodes and parent Organization/Domain roots.
   - **Target Management Drawer**: Right-side sliding panel providing real-time target status (`Idle`, `Scanning`, `Completed`, `Failed`), discovered open port counts, port chips with banner tooltips, individual or bulk scan execution, and a live console output stream.
   - **Live Scan Indicator**: Pulsing **`Scanning...`** badge and visual status indicators on the Targets header button while port or vulnerability scans are executing in the background.
@@ -189,7 +195,7 @@ flowchart TD
     - Active scan service connections render as solid **Emerald Green relationship edges** (`#2ecc71`).
 - **🛡️ Active Vulnerability Scanning (Nuclei)**:
   - Integration with ProjectDiscovery's **Nuclei** engine for template-based vulnerability assessment.
-  - **Mandatory "Verified Active" Enforcement**: Scans are strictly targeted at ports confirmed open and active via Masscan. Unverified targets trigger an automated pre-scan verification prior to template execution.
+  - **Mandatory "Verified Active" Enforcement**: Scans are strictly targeted at ports confirmed open and active via Masscan. Unverified passive ports trigger a targeted Masscan pre-scan verification prior to template execution. If unverified or unavailable, Nuclei safely skips with explicit rationale logged.
   - Configurable severity filters (Critical, High, Medium, Low, Info), protocol/template tags, rate limits, concurrency, and custom flags.
   - Automated database merging, deduplication, and immediate Cytoscape graph node generation with weaponized PoC linkage.
 - **🔐 Pre-Flight API Verification & Sanity Checking**:
