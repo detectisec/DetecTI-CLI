@@ -304,18 +304,57 @@ class EASMDashboard {
                 try {
                     const nodeData = node.data || node;
                     
-                    // Find connected vulnerabilities to determine threat level
+                    // Find connected vulnerabilities and services to determine 3D Risk level
                     const connectedVulns = this.findConnectedVulnerabilities(nodeData.id, elements);
-                    
-                    // Calculate threat indicators
-                    const vulnCount = connectedVulns.length;
-                    const hasKev = connectedVulns.some(v => v.is_cisa_kev === true || v.is_cisa_kev === 'true' || v.is_cisa_kev === 1);
-                    const hasCritical = connectedVulns.some(v => v.severity === 'CRITICAL');
-                    const pocCount = connectedVulns.filter(v => (v.exploit_count || 0) > 0).length;
-                    
-                    // Find connected services
                     const connectedServices = this.findConnectedServices(nodeData.id, elements);
+                    
+                    // Threat indicators according to 3D Risk Matrix
+                    const vulnCount = connectedVulns.length;
+                    const kevVulns = connectedVulns.filter(v => v.is_cisa_kev === true || v.is_cisa_kev === 'true' || v.is_cisa_kev === 1);
+                    const kevCount = kevVulns.length;
+                    const hasKev = kevCount > 0;
+                    
+                    const criticalVulns = connectedVulns.filter(v => String(v.severity || '').toUpperCase() === 'CRITICAL');
+                    const criticalCount = criticalVulns.length;
+                    const hasCritical = criticalCount > 0;
+
+                    const highVulns = connectedVulns.filter(v => String(v.severity || '').toUpperCase() === 'HIGH');
+                    const highCount = highVulns.length;
+
+                    // PoC weaponization count
+                    const pocCount = connectedVulns.reduce((sum, v) => {
+                        const cnt = (v.exploits && v.exploits.length) || v.exploit_count || 0;
+                        return sum + (cnt > 0 ? cnt : 0);
+                    }, 0);
+
+                    // EPSS metrics
+                    let maxEpss = 0.0;
+                    let highEpssCount = 0;
+                    connectedVulns.forEach(v => {
+                        const epss = parseFloat(v.epss_score) || 0.0;
+                        if (epss > maxEpss) maxEpss = epss;
+                        if (epss >= 0.20) highEpssCount++;
+                    });
+
+                    // Dimension 1: Active Services & Verified Active Services
                     const serviceCount = connectedServices.length;
+                    const verifiedServiceCount = connectedServices.filter(s => 
+                        s.verified_active === true || s.verified === true || s.status === 'active' || s.verified_active === 1
+                    ).length;
+
+                    // 3D Composite Risk Score
+                    // Dim 3: CISA KEV (1M each), PoCs (200k each), High EPSS >=20% (100k each + maxEpss*50k)
+                    // Dim 2: Critical (50k each), High (20k each), Total Vulns (1k each)
+                    // Dim 1: Verified Active (5k each), Total Services (100 each)
+                    const threeDScore = (kevCount * 1000000) +
+                                        (pocCount * 200000) +
+                                        (highEpssCount * 100000) +
+                                        (maxEpss * 50000) +
+                                        (criticalCount * 50000) +
+                                        (highCount * 20000) +
+                                        (verifiedServiceCount * 5000) +
+                                        (vulnCount * 1000) +
+                                        (serviceCount * 100);
                     
                     // Create lead object with clean display name handling
                     let displayName = nodeData.label || nodeData.name || nodeData.ip || nodeData.id;
@@ -333,10 +372,17 @@ class EASMDashboard {
                         org: nodeData.org || 'Unknown',
                         country: nodeData.country || 'Unknown',
                         service_count: serviceCount,
+                        verified_service_count: verifiedServiceCount,
                         vuln_count: vulnCount,
                         has_kev: hasKev,
+                        kev_count: kevCount,
                         has_critical: hasCritical,
+                        critical_count: criticalCount,
+                        high_count: highCount,
                         poc_count: pocCount,
+                        max_epss: maxEpss,
+                        high_epss_count: highEpssCount,
+                        three_d_score: threeDScore,
                         ip_count: nodeData.type === 'domain' ? this.countConnectedIPs(nodeData.id, elements) : 0
                     };
                     
@@ -650,6 +696,9 @@ class EASMDashboard {
 
             // 3. FIRST EPSS Probability (0.0 to 1.0 -> 0% to 100%)
             const epss = parseFloat(v.epss_score) || 0.0;
+            if (epss >= 0.20) {
+                score += 100000; // Bonus for reaching 3D Matrix threshold
+            }
             score += epss * 50000;
 
             // 4. Nominal Severity & CVSS Score Base
@@ -908,24 +957,21 @@ class EASMDashboard {
         leadList.innerHTML = '';
         const fragment = document.createDocumentFragment();
 
-        // Sort leads by priority: KEV > Critical > PoC count > Vuln count > Service count
+        // Sort leads strictly following the 3D Risk Matrix criteria:
+        // Dim 3 (Active Threat / Weaponization) > Dim 2 (Technical Severity) > Dim 1 (Active Asset Exposure)
         const sortedLeads = [...this.leads].sort((a, b) => {
-            // CISA KEV first
-            if (a.has_kev && !b.has_kev) return -1;
-            if (!a.has_kev && b.has_kev) return 1;
-            
-            // Critical vulnerabilities second
-            if (a.has_critical && !b.has_critical) return -1;
-            if (!a.has_critical && b.has_critical) return 1;
-            
-            // PoC count third
-            if (a.poc_count !== b.poc_count) return b.poc_count - a.poc_count;
-            
-            // Vulnerability count fourth
-            if (a.vuln_count !== b.vuln_count) return b.vuln_count - a.vuln_count;
-            
-            // Service count last
-            return b.service_count - a.service_count;
+            if (b.three_d_score !== a.three_d_score) {
+                return b.three_d_score - a.three_d_score;
+            }
+            if (b.kev_count !== a.kev_count) return b.kev_count - a.kev_count;
+            if (b.poc_count !== a.poc_count) return b.poc_count - a.poc_count;
+            if (b.max_epss !== a.max_epss) return b.max_epss - a.max_epss;
+            if (b.critical_count !== a.critical_count) return b.critical_count - a.critical_count;
+            if (b.high_count !== a.high_count) return b.high_count - a.high_count;
+            if (b.verified_service_count !== a.verified_service_count) return b.verified_service_count - a.verified_service_count;
+            if (b.vuln_count !== a.vuln_count) return b.vuln_count - a.vuln_count;
+            if (b.service_count !== a.service_count) return b.service_count - a.service_count;
+            return (a.display_name || '').localeCompare(b.display_name || '');
         });
 
         sortedLeads.forEach(lead => {
@@ -945,6 +991,12 @@ class EASMDashboard {
             if (lead.has_critical) {
                 badges.push('<span class="lead-badge critical" title="Critical Severity Vulnerabilities"><i data-lucide="alert-triangle" class="badge-icon"></i> CRIT</span>');
             }
+
+            // High EPSS badge (>= 20% 3D Matrix threshold)
+            if (lead.max_epss >= 0.20) {
+                const epssPct = (lead.max_epss * 100).toFixed(0);
+                badges.push(`<span class="lead-badge epss" style="background: rgba(245, 158, 11, 0.18); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 0.72rem; padding: 1px 5px; border-radius: 4px; font-weight: bold;" title="Max EPSS Probability: ${(lead.max_epss * 100).toFixed(1)}%"><i data-lucide="trending-up" class="badge-icon"></i> ${epssPct}% EPSS</span>`);
+            }
             
             // PoC/Exploit availability badge
             if (lead.poc_count > 0) {
@@ -958,21 +1010,22 @@ class EASMDashboard {
 
             // Build detailed stats
             let stats = '';
+            const verifiedText = lead.verified_service_count > 0 ? ` (${lead.verified_service_count} verified)` : '';
             if (lead.type === 'ip') {
                 const orgInfo = lead.org && lead.org !== 'Unknown' ? ` (${lead.org})` : '';
                 const countryInfo = lead.country && lead.country !== 'Unknown' ? ` [${lead.country}]` : '';
-                stats = `${lead.service_count} services, ${lead.vuln_count} vulns${orgInfo}${countryInfo}`;
+                stats = `${lead.service_count} services${verifiedText}, ${lead.vuln_count} vulns${orgInfo}${countryInfo}`;
             } else if (lead.type === 'domain') {
-                stats = `${lead.ip_count} IPs, ${lead.service_count} services, ${lead.vuln_count} vulns`;
+                stats = `${lead.ip_count} IPs, ${lead.service_count} services${verifiedText}, ${lead.vuln_count} vulns`;
             }
 
             // Add risk level indicator
             let riskClass = '';
             if (lead.has_kev) {
                 riskClass = 'risk-critical';
-            } else if (lead.has_critical || lead.poc_count > 0) {
+            } else if (lead.has_critical || lead.poc_count > 0 || lead.max_epss >= 0.20) {
                 riskClass = 'risk-high';
-            } else if (lead.vuln_count > 0) {
+            } else if (lead.vuln_count > 0 || lead.verified_service_count > 0) {
                 riskClass = 'risk-medium';
             } else {
                 riskClass = 'risk-low';
