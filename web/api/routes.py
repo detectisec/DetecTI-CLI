@@ -852,81 +852,74 @@ async def start_nuclei_scan(
             if ip_to_scan in _target_registry:
                 _target_registry[ip_to_scan]["nuclei_status"] = "scanning"
 
-            # Check if there are verified active services discovered by Masscan / active scan
+            # 1. Check if there are already verified active services discovered by Masscan / active scan
             active_services = _get_verified_active_services_for_ip(ip_to_scan, active_db)
 
             if not active_services:
-                # Query all mapped ports from passive sources (Shodan, Censys, etc.) for this IP
-                existing_mapped_ports: List[int] = []
-                if active_db and Path(active_db.db_path).exists():
-                    import sqlite3
-                    with sqlite3.connect(active_db.db_path) as conn:
-                        ip_row = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (ip_to_scan,)).fetchone()
-                        if ip_row:
-                            p_rows = conn.execute("SELECT DISTINCT port FROM services WHERE ip_id = ? AND port IS NOT NULL", (ip_row[0],)).fetchall()
-                            existing_mapped_ports = [r[0] for r in p_rows if r[0]]
+                # 2. Check if target has unverified passive ports mapped in database
+                verified_ports, unverified_passive_ports = _get_target_ports_partition(ip_to_scan, active_db)
 
-                # Build optimized port target: test specific mapped ports first if available
-                if existing_mapped_ports:
-                    ports_to_verify = f"-p{','.join(str(p) for p in sorted(set(existing_mapped_ports)))}"
+                if not unverified_passive_ports:
+                    # Target has NO passive ports mapped in database -> Skip Nuclei directly (no blind top-ports scan)
+                    if ip_to_scan in _target_registry:
+                        _target_registry[ip_to_scan]["nuclei_status"] = "completed"
+                        _target_registry[ip_to_scan]["vulns_count"] = 0
                     _append_scan_log(
-                        "info",
-                        f"[Pre-Scan Rule] Verifying {len(existing_mapped_ports)} mapped passive port(s) ({ports_to_verify}) on {ip_to_scan} via Masscan...",
+                        "warning",
+                        f"[Nuclei Smart Skip] Skipped vulnerability scan on {ip_to_scan}: Target has no 'Confirmed Active' services and 0 mapped passive ports in database. Nuclei will not execute blind scans without known services. Run a Masscan port scan first or add services to enable Nuclei scanning.",
                         target=ip_to_scan
                     )
-                else:
-                    ports_to_verify = "--top-ports 100"
-                    _append_scan_log(
-                        "info",
-                        f"[Pre-Scan Rule] No prior services mapped for {ip_to_scan}. Running Masscan Top 100 active port verification...",
-                        target=ip_to_scan
-                    )
-                
-                # Execute Masscan runner to verify active ports
+                    return
+
+                # Target has unverified passive ports -> Request Masscan verification strictly on these passive ports
+                ports_to_verify = ",".join(str(p) for p in sorted(unverified_passive_ports))
+                _append_scan_log(
+                    "info",
+                    f"[Nuclei Pre-Scan] Target {ip_to_scan} has {len(unverified_passive_ports)} unverified passive port(s) [{ports_to_verify}]. Requesting Masscan verification strictly on these ports before Nuclei execution...",
+                    target=ip_to_scan
+                )
+
                 masscan_runner = MasscanRunner()
                 if masscan_runner.is_available():
                     if ip_to_scan in _target_registry:
                         _target_registry[ip_to_scan]["status"] = "scanning"
-                    
-                    def _masscan_log_cb(lvl: str, m: str):
-                        _append_scan_log(lvl, f"[Masscan Pre-Scan] {m}", target=ip_to_scan)
 
                     m_res = await masscan_runner.scan_target(
-                        target=ip_to_scan,
+                        target_ip=ip_to_scan,
                         ports=ports_to_verify,
                         rate=1000,
                         disable_ping=True,
                         banners=True,
                     )
 
-                    if m_res.get("success"):
-                        open_ports = m_res.get("ports", [])
+                    open_ports = m_res.get("ports") or m_res.get("open_ports") or []
+                    if open_ports:
                         if ip_to_scan in _target_registry:
                             _target_registry[ip_to_scan]["status"] = "completed"
                             _target_registry[ip_to_scan]["ports_count"] = len(open_ports)
                             _target_registry[ip_to_scan]["ports"] = open_ports
                             _target_registry[ip_to_scan]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                        if active_db and Path(active_db.db_path).exists() and open_ports:
+                        if active_db and Path(active_db.db_path).exists():
                             active_db.merge_active_scan_services(ip_to_scan, open_ports)
                         
                         _append_scan_log(
                             "success",
-                            f"[Masscan Pre-Scan] Verification completed for {ip_to_scan}: {len(open_ports)} active port(s) verified.",
+                            f"[Nuclei Pre-Scan] Masscan verified {len(open_ports)} of {len(unverified_passive_ports)} passive port(s) as Confirmed Active on {ip_to_scan}. Proceeding with Nuclei vulnerability scan.",
                             target=ip_to_scan
                         )
                     else:
                         if ip_to_scan in _target_registry:
-                            _target_registry[ip_to_scan]["status"] = "idle"
+                            _target_registry[ip_to_scan]["status"] = "completed"
                         _append_scan_log(
                             "warning",
-                            f"[Masscan Pre-Scan] Masscan verification returned no open ports or error: {m_res.get('error', 'No open ports')}",
+                            f"[Nuclei Pre-Scan] Masscan verification returned 0 open ports for passive ports [{ports_to_verify}] on {ip_to_scan}.",
                             target=ip_to_scan
                         )
                 else:
                     _append_scan_log(
                         "warning",
-                        f"[Pre-Scan Rule] Masscan binary not available to verify active ports for {ip_to_scan}.",
+                        f"[Nuclei Pre-Scan] Masscan binary not available to verify passive ports [{ports_to_verify}] on {ip_to_scan}.",
                         target=ip_to_scan
                     )
 
@@ -939,7 +932,7 @@ async def start_nuclei_scan(
                     _target_registry[ip_to_scan]["vulns_count"] = 0
                 _append_scan_log(
                     "warning",
-                    f"[Nuclei Smart Skip] Skipped vulnerability scan on {ip_to_scan}: No responsive 'Confirmed Active' ports/services were found in database or discovered during pre-scan verification. Nuclei requires live active services to prevent sending blind template requests.",
+                    f"[Nuclei Smart Skip] Skipped vulnerability scan on {ip_to_scan}: None of the target's passive ports responded as 'Confirmed Active' during Masscan verification. Nuclei requires live active services to prevent sending blind template requests.",
                     target=ip_to_scan
                 )
                 return
