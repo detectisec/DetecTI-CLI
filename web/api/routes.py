@@ -468,6 +468,11 @@ async def unverify_services_endpoint(
         all_services=bool(req.all_services)
     )
 
+    # Synchronize in-memory target registry ports count
+    for ip, t_info in _target_registry.items():
+        v_ports, _ = _get_target_ports_partition(ip, active_db)
+        t_info["ports_count"] = len(v_ports)
+
     # Log to live console
     target_label = target or "Active Target"
     _append_scan_log(

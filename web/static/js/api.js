@@ -135,6 +135,19 @@ class APIClient {
         });
     }
 
+    async unverifyServices(serviceIds = [], ipAddresses = []) {
+        return this.request('/services/unverify', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                service_ids: serviceIds,
+                ip_addresses: ipAddresses
+            })
+        });
+    }
+
     async getScanStatus() {
         return this.request('/scan/status');
     }

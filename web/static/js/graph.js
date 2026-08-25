@@ -4668,20 +4668,15 @@ class EASMDashboard {
         if (!Array.isArray(serviceNodes) || serviceNodes.length === 0) return;
         const sIds = serviceNodes.map(s => s.id());
         try {
-            const targetParam = this.activeTarget ? `?target=${encodeURIComponent(this.activeTarget)}` : '';
-            const res = await fetch(`/api/services/unverify${targetParam}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ service_ids: sIds })
-            });
-            const data = await res.json();
-            if (data.success) {
+            const data = await window.api.unverifyServices(sIds);
+            if (data && data.success) {
                 // Update Cytoscape node and edge states locally
                 serviceNodes.forEach(sNode => {
                     sNode.data('verified_active', false);
                     sNode.data('is_active_scan', false);
                     const curSources = sNode.data('sources') || [];
-                    const newSources = curSources.filter(s => !String(s).toLowerCase().includes('masscan') && !String(s).toLowerCase().includes('active'));
+                    const newSources = (Array.isArray(curSources) ? curSources : [curSources])
+                        .filter(s => !String(s).toLowerCase().includes('masscan') && !String(s).toLowerCase().includes('active'));
                     if (newSources.length === 0) newSources.push('Passive');
                     sNode.data('sources', newSources);
 
@@ -4689,18 +4684,52 @@ class EASMDashboard {
                     sNode.incomers('edge[label="EXPOSES"]').forEach(edge => {
                         edge.data('verified_active', false);
                         edge.data('is_active_scan', false);
+                        edge.removeClass('active-scan-edge');
                     });
                 });
 
+                // Update in-memory graphData elements
+                if (this.graphData && this.graphData.elements && Array.isArray(this.graphData.elements.nodes)) {
+                    this.graphData.elements.nodes.forEach(n => {
+                        if (sIds.includes(n.data?.id)) {
+                            n.data.verified_active = false;
+                            n.data.is_active_scan = false;
+                            const curSources = n.data.sources || [];
+                            const newSources = (Array.isArray(curSources) ? curSources : [curSources])
+                                .filter(s => !String(s).toLowerCase().includes('masscan') && !String(s).toLowerCase().includes('active'));
+                            if (newSources.length === 0) newSources.push('Passive');
+                            n.data.sources = newSources;
+                        }
+                    });
+                }
+                if (this.graphData && this.graphData.elements && Array.isArray(this.graphData.elements.edges)) {
+                    this.graphData.elements.edges.forEach(e => {
+                        if (sIds.includes(e.data?.target) && e.data?.label === 'EXPOSES') {
+                            e.data.verified_active = false;
+                            e.data.is_active_scan = false;
+                        }
+                    });
+                }
+
+                // Force Cytoscape style update
+                if (this.cy) {
+                    this.cy.style().update();
+                }
+
                 const count = data.unverified_count || serviceNodes.length;
-                this.showToast('info', `Removed Verified Active from ${count} service(s). Services are now Passive and ready for re-validation.`);
+                this.showToast('info', `Removed Verified Active from ${count} service(s). Now marked as Passive (ready for re-validation).`);
 
                 // Re-render inspector if selected node is affected
                 if (this.selectedNode) {
                     this.showNodeInspector(this.selectedNode);
                 }
+
+                // Refresh Target Management Drawer if target statuses exist
+                if (typeof this.fetchTargetStatuses === 'function') {
+                    await this.fetchTargetStatuses();
+                }
             } else {
-                this.showToast('error', data.error || 'Failed to remove Verified Active status.');
+                this.showToast('error', (data && data.error) || 'Failed to remove Verified Active status.');
             }
         } catch (err) {
             console.error('Error unverifying services:', err);
