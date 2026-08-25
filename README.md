@@ -329,8 +329,8 @@ You can pass custom Shodan search queries directly into the target `-t` paramete
 ./detecti-cli scan -t 142.250.191.68 --cvss critical
 ```
 
-### 6. Automatic SQLite Database Persistence & DetecTI Hound Launch
-Target scans automatically save all correlated entities (Domains, IPs, Ports, Services, CVEs, PoCs) into `./data/dbs/{target_root}.sqlite` and automatically launch the **DetecTI Hound** WebGUI:
+### 6. Automatic SQLite Database Persistence & DetecTIHound Launch
+Target scans automatically save all correlated entities (Domains, IPs, Ports, Services, CVEs, PoCs) into `./data/dbs/{target_root}.sqlite` and automatically launch the **DetecTIHound** WebGUI:
 
 ```bash
 # Scan a domain (automatically creates ./data/dbs/spacex.com.sqlite and starts Hound)
@@ -339,7 +339,7 @@ Target scans automatically save all correlated entities (Domains, IPs, Ports, Se
 # Scan with custom database name
 ./detecti-cli scan -t 142.250.191.0/24 --create-db google_net
 ```
-> 💡 All scan databases are centralized in `./data/dbs/` so both the CLI and DetecTI Hound can automatically discover, list, and switch between them. (Note: Standalone CVE lookups like `CVE-2021-44228` do not create databases).
+> 💡 All scan databases are centralized in `./data/dbs/` so both the CLI and DetecTIHound can automatically discover, list, and switch between them. (Note: Standalone CVE lookups like `CVE-2021-44228` do not create databases).
 
 ### 7. Export Reports (JSON, Markdown & HTML)
 ```bash
@@ -361,11 +361,11 @@ Target scans automatically save all correlated entities (Domains, IPs, Ports, Se
 ./detecti-cli update-xdb
 ```
 
-### 9. Interactive EASM Web Dashboard (DetecTI Hound)
+### 9. Interactive EASM Web Dashboard (DetecTIHound)
 Explore the mapped attack surface visually via the interactive web application from previously saved SQLite databases:
 
 ```bash
-# Start the DetecTI Hound web dashboard (databases are selected dynamically directly in the Web UI)
+# Start the DetecTIHound web dashboard (databases are selected dynamically directly in the Web UI)
 ./detecti-cli hound start
 
 # List available databases from previous scans (stored in ./data/dbs)

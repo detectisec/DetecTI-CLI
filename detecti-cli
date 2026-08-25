@@ -81,7 +81,7 @@ app = typer.Typer(
 # Create hound subcommand group (Interactive EASM Attack Surface Graph Dashboard)
 hound_app = typer.Typer(
     name="hound",
-    help="DetecTI Hound - Interactive EASM Attack Surface Graph Dashboard management",
+    help="DetecTIHound - Interactive EASM Attack Surface Graph Dashboard management",
     add_completion=False,
 )
 app.add_typer(hound_app, name="hound")
@@ -232,7 +232,7 @@ def scan_command(
             except Exception as e:
                 print_error(f"Failed to store results in database: {e}")
 
-            # Automatically launch DetecTI Hound WebGUI
+            # Automatically launch DetecTIHound WebGUI
             try:
                 from web.process_manager import WebServerManager
                 
@@ -245,11 +245,11 @@ def scan_command(
                 started = ws_manager.start_server(final_db_name or db_name, host, port)
                 real_ip = get_real_ip()
                 if started:
-                    print_success(f"🚀 DetecTI Hound WebGUI started automatically with database: [bold cyan]{final_db_name or db_name}[/bold cyan]")
+                    print_success(f"🚀 DetecTIHound WebGUI started automatically with database: [bold cyan]{final_db_name or db_name}[/bold cyan]")
                     console.print(f"  👉 [bold cyan]Local URL:[/bold cyan]   [bold underline cyan]http://localhost:{port}[/bold underline cyan]")
                     console.print(f"  👉 [bold cyan]Network URL:[/bold cyan] [bold underline cyan]http://{real_ip}:{port}[/bold underline cyan]")
                 else:
-                    print_info(f"Open DetecTI Hound: [bold cyan]{cli_name} hound start --db {final_db_name or db_name}[/bold cyan]")
+                    print_info(f"Open DetecTIHound: [bold cyan]{cli_name} hound start --db {final_db_name or db_name}[/bold cyan]")
             except Exception:
                 pass
 
@@ -394,7 +394,7 @@ def start_server(
         
         if success:
             real_ip = get_real_ip()
-            print_success(f"✅ DetecTI Hound web server started successfully!")
+            print_success(f"✅ DetecTIHound web server started successfully!")
             console.print(f"  👉 [bold cyan]Local Access:[/bold cyan]   [bold underline cyan]http://localhost:{port}[/bold underline cyan]")
             console.print(f"  👉 [bold cyan]Network Access:[/bold cyan] [bold underline cyan]http://{real_ip}:{port}[/bold underline cyan]")
             if db:
