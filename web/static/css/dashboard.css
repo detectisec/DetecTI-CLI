@@ -863,7 +863,10 @@ html, body {
     cursor: pointer;
     font-size: 0.88rem;
     color: var(--text-secondary);
-    transition: color 0.2s ease;
+    transition: all 0.2s ease;
+    padding: 3px 0;
+    flex-wrap: wrap;
+    row-gap: 2px;
 }
 
 .filter-checkbox:hover {
@@ -1110,6 +1113,12 @@ html, body {
     background: rgba(220, 20, 60, 0.25);
     color: #ff4757;
     border: 1px solid rgba(220, 20, 60, 0.5);
+}
+
+.lead-badge.epss {
+    background: rgba(245, 158, 11, 0.18);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.4);
 }
 
 @keyframes pulse-badge {
