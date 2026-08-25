@@ -3663,12 +3663,6 @@ class EASMDashboard {
                     <span class="key">SSL/TLS:</span>
                     <span class="value">${data.ssl ? 'Yes' : 'No'}</span>
                 </div>
-                ${data.banner ? `
-                <div class="property banner-property" style="flex-direction: column; align-items: flex-start; gap: 0.25rem;">
-                    <span class="key" style="margin-bottom: 0.2rem;">Banner:</span>
-                    <pre class="service-banner-preview" style="background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 0.5rem 0.65rem; font-family: var(--font-mono, monospace); font-size: 0.76rem; color: #38bdf8; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; width: 100%; margin: 0;">${this.escapeHtml(data.banner)}</pre>
-                </div>
-                ` : ''}
                 ${(data.verified_active || data.is_active_scan) ? `
                 <div class="property">
                     <span class="key">Verification Status:</span>
@@ -3684,6 +3678,12 @@ class EASMDashboard {
                 <div class="property">
                     <span class="key">Sources:</span>
                     <span class="value">${data.sources.join(', ')}</span>
+                </div>
+                ` : ''}
+                ${data.banner ? `
+                <div class="property banner-property" style="flex-direction: column; align-items: flex-start; gap: 0.25rem;">
+                    <span class="key" style="margin-bottom: 0.2rem;">Banner:</span>
+                    <pre class="service-banner-preview" style="background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 0.5rem 0.65rem; font-family: var(--font-mono, monospace); font-size: 0.76rem; color: #38bdf8; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; width: 100%; margin: 0;">${this.escapeHtml(data.banner)}</pre>
                 </div>
                 ` : ''}
                 ${riskMetricsHtml}
