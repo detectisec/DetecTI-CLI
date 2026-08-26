@@ -124,7 +124,7 @@ class Settings(BaseSettings):
     http_backoff_factor: float = Field(default=0.5, description="Exponential backoff factor")
     http_concurrency_limit: int = Field(default=10, description="Max concurrent async requests")
     user_agent: str = Field(
-        default="DetecTI-CLI/2.0 (+https://github.com/detectibr/detecti-cli)",
+        default="DetecTI-CLI/2.0 (+https://github.com/detectisec/DetecTI-CLI)",
         description="HTTP User-Agent header",
     )
 

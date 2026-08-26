@@ -241,7 +241,7 @@ flowchart TD
 
 ### Install with pip or editable mode
 ```bash
-git clone https://github.com/detectibr/DetecTI-CLI.git
+git clone https://github.com/detectisec/DetecTI-CLI.git
 cd DetecTI-CLI
 
 # Install in editable mode
