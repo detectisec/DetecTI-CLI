@@ -41,17 +41,25 @@ class ReverseWhoisModule(BaseModule):
     ) -> List[Finding]:
         """Execute reverse WHOIS query based on target type (email, org, or domain/ip)."""
         target = target.strip()
+        clean_target = target
+        if clean_target.startswith("http://") or clean_target.startswith("https://"):
+            clean_target = clean_target.split("//")[1].split("/")[0]
+        if ":" in clean_target and " " not in clean_target:
+            clean_target = clean_target.split(":")[0]
+        if "/" in clean_target:
+            clean_target = clean_target.split("/")[0]
+
         findings: List[Finding] = []
 
         if self.is_configured():
             logger.info("Executing structured Reverse WHOIS via WhoisFreaks API...")
-            findings = await self._query_whoisfreaks(target)
+            findings = await self._query_whoisfreaks(clean_target)
             if findings:
                 return findings
 
         # Free fallback execution
         logger.info("Executing free Reverse WHOIS / HackerTarget discovery fallback...")
-        findings = await self._query_free_fallbacks(target)
+        findings = await self._query_free_fallbacks(clean_target)
         return findings
 
     async def _query_whoisfreaks(self, target: str) -> List[Finding]:

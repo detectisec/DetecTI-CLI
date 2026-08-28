@@ -9,15 +9,13 @@ from typer.testing import CliRunner
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
-    # Import the CLI app from the detecti-cli file
-    import importlib.util
-    cli_path = Path(__file__).parent.parent / "detecti-cli"
-    spec = importlib.util.spec_from_file_location("detecti_cli", cli_path)
-    detecti_cli = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(detecti_cli)
+    import importlib.machinery
+    cli_path = (Path(__file__).parent.parent / "detecti-cli").resolve()
+    loader = importlib.machinery.SourceFileLoader("detecti_cli", str(cli_path))
+    detecti_cli = loader.load_module()
     app = detecti_cli.app
 except Exception as e:
-    # Fallback for testing without CLI
+    detecti_cli = None
     app = None
 
 from core.engine import ThreatTrackEngine, DetectIEngine
@@ -83,6 +81,48 @@ def test_setup_manager_checks():
     assert "nuclei" in checks
     assert "exploitdb" in checks
     assert checks["python_version"]["ok"] is True
+
+
+def test_target_parsing_and_normalization():
+    """Test engine target normalization across URLs, subdomains, ports, and raw targets."""
+    engine = ThreatTrackEngine()
+
+    # URL with domain
+    meta1 = engine.parse_target_metadata("https://spacex.com")
+    assert meta1["type"] == "domain"
+    assert meta1["clean_target"] == "spacex.com"
+    assert meta1["root_domain"] == "spacex.com"
+
+    # URL with subdomain, path and port
+    meta2 = engine.parse_target_metadata("https://api.spacex.com:8443/v1/health")
+    assert meta2["type"] == "domain"
+    assert meta2["clean_target"] == "api.spacex.com"
+    assert meta2["root_domain"] == "spacex.com"
+    assert meta2["subdomain"] == "api"
+    assert meta2["port"] == 8443
+
+    # URL with IP and port
+    meta3 = engine.parse_target_metadata("https://192.168.1.10:8080/admin")
+    assert meta3["type"] == "ip"
+    assert meta3["clean_target"] == "192.168.1.10"
+    assert meta3["port"] == 8080
+
+    # Subdomain with multiple levels
+    meta4 = engine.parse_target_metadata("sub.corp.example.com.br")
+    assert meta4["type"] == "domain"
+    assert meta4["clean_target"] == "sub.corp.example.com.br"
+    assert meta4["root_domain"] == "example.com.br"
+    assert meta4["subdomain"] == "sub.corp"
+
+
+def test_target_to_db_name_url():
+    """Test database name generation from URL and subdomain targets."""
+    if detecti_cli is None:
+        pytest.skip("CLI not imported")
+    target_to_db_name = detecti_cli.target_to_db_name
+    assert target_to_db_name("https://api.spacex.com/v1") == "api.spacex.com.sqlite"
+    assert target_to_db_name("http://sub.domain.com.br:8080/") == "sub.domain.com.br.sqlite"
+    assert target_to_db_name("https://192.168.1.1:8443") == "192.168.1.1.sqlite"
 
 
 def test_engine_multi_source_correlation(monkeypatch):

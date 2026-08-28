@@ -30,14 +30,22 @@ class CrtshModule(BaseModule):
         context: Optional[Dict[str, Any]] = None,
     ) -> List[Finding]:
         """Query crt.sh for domain certificates and extract unique subdomains."""
-        # Clean target
+        # Clean target and extract registered root domain
         domain = target.strip().lower()
         if domain.startswith("http://") or domain.startswith("https://"):
             domain = domain.split("//")[1].split("/")[0]
+        if ":" in domain:
+            domain = domain.split(":")[0]
+        if "/" in domain:
+            domain = domain.split("/")[0]
+
+        import tldextract
+        ext = tldextract.extract(domain)
+        search_domain = ext.registered_domain if (ext.domain and ext.suffix) else domain
 
         # crt.sh query format
         url = f"{settings.crtsh_api_url}/"
-        params = {"q": f"%.{domain}", "output": "json"}
+        params = {"q": f"%.{search_domain}", "output": "json"}
 
         findings: List[Finding] = []
         discovered_subdomains: Set[str] = set()

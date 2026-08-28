@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
+import httpx
+import tldextract
 from config import settings
 
 from core.models import (
@@ -79,38 +81,85 @@ class ThreatTrackEngine:
             self.progress_callback(module_name, message)
         logger.info(f"[{module_name}] {message}")
 
-    def classify_target(self, target: str) -> str:
-        """Identify target classification (ip, cidr, domain, cve, query, file, email)."""
-        target = target.strip()
-        if Path(target).is_file() and not target.startswith("http"):
-            return "file"
-        if target.startswith("host:"):
-            inner = target[5:]
-            return "cidr" if "/" in inner else "ip"
-        if target.startswith("domain:"):
-            return "domain"
-        if target.upper().startswith("CVE-"):
-            return "cve"
-        if "@" in target:
-            return "email"
+    def parse_target_metadata(self, target: str) -> Dict[str, Any]:
+        """Extract canonical target type, cleaned host/domain, port, and root domain supporting full URLs and subdomains."""
+        raw = target.strip()
+        if Path(raw).is_file() and not raw.startswith("http"):
+            return {"type": "file", "clean_target": raw, "root_domain": None, "subdomain": None, "port": None}
 
-        if "/" in target:
+        if raw.upper().startswith("CVE-"):
+            return {"type": "cve", "clean_target": raw.upper(), "root_domain": None, "subdomain": None, "port": None}
+
+        if "@" in raw and " " not in raw and "://" not in raw:
+            domain_part = raw.split("@", 1)[1] if "@" in raw else None
+            return {"type": "email", "clean_target": raw, "root_domain": domain_part, "subdomain": None, "port": None}
+
+        clean = raw
+        if clean.startswith("host:"):
+            clean = clean[5:].strip()
+        elif clean.startswith("domain:"):
+            clean = clean[7:].strip()
+
+        port: Optional[int] = None
+        if "://" in clean or "/" in clean or (":" in clean and " " not in clean):
+            # Check if valid CIDR network
             try:
-                ipaddress.ip_network(target, strict=False)
-                return "cidr"
+                ipaddress.ip_network(clean, strict=False)
+                return {"type": "cidr", "clean_target": clean, "root_domain": None, "subdomain": None, "port": None}
             except ValueError:
                 pass
 
+            # Parse as URL / Host:Port
+            url_candidate = clean if "://" in clean else f"http://{clean}"
+            try:
+                parsed = httpx.URL(url_candidate)
+                extracted_host = parsed.host
+                if parsed.port:
+                    port = parsed.port
+                clean = extracted_host or clean
+            except Exception:
+                pass
+
+        if "/" in clean:
+            clean = clean.split("/")[0]
+        if ":" in clean:
+            parts = clean.split(":")
+            clean = parts[0]
+            try:
+                port = int(parts[1])
+            except ValueError:
+                pass
+
+        clean = clean.strip().lower()
+
+        # Check IP
         try:
-            ipaddress.ip_address(target)
-            return "ip"
+            ipaddress.ip_address(clean)
+            return {"type": "ip", "clean_target": clean, "root_domain": None, "subdomain": None, "port": port}
         except ValueError:
             pass
 
-        if "." in target and " " not in target and ":" not in target:
-            return "domain"
+        # Check Domain / Subdomain with tldextract
+        import tldextract
+        ext = tldextract.extract(clean)
+        if ext.domain and ext.suffix and " " not in clean:
+            root_domain = ext.registered_domain or f"{ext.domain}.{ext.suffix}"
+            subdomain = ext.subdomain if ext.subdomain else None
+            return {
+                "type": "domain",
+                "clean_target": clean,
+                "root_domain": root_domain,
+                "subdomain": subdomain,
+                "is_subdomain": bool(subdomain),
+                "port": port,
+            }
 
-        return "query"
+        return {"type": "query", "clean_target": raw, "root_domain": None, "subdomain": None, "port": None}
+
+    def classify_target(self, target: str) -> str:
+        """Identify target classification (ip, cidr, domain, cve, query, file, email)."""
+        meta = self.parse_target_metadata(target)
+        return meta.get("type", "query")
 
     async def verify_environment_apis(self, enabled_modules: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
         """Verify API keys present in the environment/config and perform non-blocking pre-flight checks."""
@@ -225,10 +274,12 @@ class ThreatTrackEngine:
         cvss_filter: Optional[str] = None,
         skip_preflight: bool = False,
     ) -> ScanResult:
-        """Run complete scan pipeline organized per host and domain."""
-        target = target.strip()
         start_time = time.monotonic()
-        target_type = self.classify_target(target)
+        meta = self.parse_target_metadata(target)
+        target_type = meta["type"]
+        clean_target = meta["clean_target"]
+        root_domain = meta.get("root_domain")
+        target_port = meta.get("port")
 
         # Handle file input containing multiple targets
         if target_type == "file":
@@ -249,14 +300,78 @@ class ThreatTrackEngine:
                     self._notify(mod, f"{info.get('name')}: {info.get('status')}")
 
         result = ScanResult(
-            target=target,
+            target=clean_target,
             target_type=target_type,
             started_at=datetime.now(timezone.utc),
             modules_run=active_mod_names,
         )
 
-        context: Dict[str, Any] = {"target": target, "target_type": target_type, "cves": set(), "warnings": []}
+        context: Dict[str, Any] = {
+            "target": clean_target,
+            "raw_target": target,
+            "target_type": target_type,
+            "root_domain": root_domain,
+            "port": target_port,
+            "cves": set(),
+            "warnings": [],
+        }
         raw_recon_findings: List[Finding] = []
+
+        # Direct DNS Resolution for Domain / Subdomain / URL targets
+        if target_type == "domain":
+            try:
+                addr_info = await asyncio.get_event_loop().getaddrinfo(clean_target, None)
+                resolved_ips = {res[4][0] for res in addr_info if res and len(res) > 4 and res[4]}
+                for rip in resolved_ips:
+                    raw_recon_findings.append(
+                        Finding(
+                            type=FindingType.HOST_INFO,
+                            target=clean_target,
+                            value=rip,
+                            source="DNS Resolution",
+                            host_ip=rip,
+                            host_info=HostInfoData(
+                                ip=rip,
+                                hostnames=[clean_target],
+                                domains=[root_domain] if root_domain else [clean_target],
+                            ),
+                        )
+                    )
+                    if target_port:
+                        raw_recon_findings.append(
+                            Finding(
+                                type=FindingType.OPEN_PORT,
+                                target=clean_target,
+                                value=f"{rip}:{target_port}",
+                                source="Target URL",
+                                host_ip=rip,
+                                port_info=PortData(
+                                    port=target_port,
+                                    transport="tcp",
+                                    service="https" if (target_port == 443 or "https" in target.lower()) else "http",
+                                    sources=["Target URL"],
+                                ),
+                            )
+                        )
+            except Exception as exc:
+                logger.debug(f"Direct DNS resolution for {clean_target}: {exc}")
+
+        elif target_type == "ip" and target_port:
+            raw_recon_findings.append(
+                Finding(
+                    type=FindingType.OPEN_PORT,
+                    target=clean_target,
+                    value=f"{clean_target}:{target_port}",
+                    source="Target URL",
+                    host_ip=clean_target,
+                    port_info=PortData(
+                        port=target_port,
+                        transport="tcp",
+                        service="https" if (target_port == 443 or "https" in target.lower()) else "http",
+                        sources=["Target URL"],
+                    ),
+                )
+            )
 
         # ----------------------------------------------------
         # Stage 1: Recon & Discovery (Shodan Primary Query, Censys, crt.sh, Reverse WHOIS)
@@ -267,27 +382,29 @@ class ThreatTrackEngine:
         has_censys = "censys" in active_mod_names and self.modules["censys"].is_configured()
 
         if target_type == "cve":
-            context["cves"].add(target.upper())
+            context["cves"].add(clean_target.upper())
         else:
             # 1. Shodan Search / Host Lookup
             if has_shodan:
-                self._notify("shodan", f"Querying Shodan for {target}...")
-                recon_tasks.append(self.modules["shodan"].run(target, context))
+                self._notify("shodan", f"Querying Shodan for {clean_target}...")
+                recon_tasks.append(self.modules["shodan"].run(clean_target, context))
 
             # 2. Censys Direct Host Lookup (Executed in Stage 1 for direct IP targets, or as fallback if Shodan is not configured)
             if has_censys and (is_direct_ip or not has_shodan):
-                self._notify("censys", f"Querying Censys for {target}...")
-                recon_tasks.append(self.modules["censys"].run(target, context))
+                self._notify("censys", f"Querying Censys for {clean_target}...")
+                recon_tasks.append(self.modules["censys"].run(clean_target, context))
 
-            # 3. Certificate Transparency
+            # 3. Certificate Transparency (Uses root domain to capture full subdomain hierarchy)
             if target_type in ("domain", "email") and "crtsh" in active_mod_names:
-                self._notify("crtsh", f"Querying Certificate Transparency for {target}...")
-                recon_tasks.append(self.modules["crtsh"].run(target, context))
+                query_dom = root_domain or clean_target
+                self._notify("crtsh", f"Querying Certificate Transparency for {query_dom}...")
+                recon_tasks.append(self.modules["crtsh"].run(query_dom, context))
 
             # 4. Reverse WHOIS
             if target_type in ("domain", "ip", "email") and "reverse_whois" in active_mod_names:
-                self._notify("reverse_whois", f"Performing Reverse WHOIS lookup for {target}...")
-                recon_tasks.append(self.modules["reverse_whois"].run(target, context))
+                query_whois = root_domain or clean_target
+                self._notify("reverse_whois", f"Performing Reverse WHOIS lookup for {query_whois}...")
+                recon_tasks.append(self.modules["reverse_whois"].run(query_whois, context))
 
         if recon_tasks:
             recon_results = await asyncio.gather(*recon_tasks, return_exceptions=True)

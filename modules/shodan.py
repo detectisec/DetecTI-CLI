@@ -97,13 +97,24 @@ class ShodanModule(BaseModule):
         target = target.strip()
         findings: List[Finding] = []
 
-        # 1. CIDR Network Check (e.g. 192.168.1.0/24 or host:192.168.1.0/24)
+        # 1. Target Cleaning and Normalization
         clean_target = target
         if clean_target.startswith("host:"):
-            clean_target = clean_target[5:]
+            clean_target = clean_target[5:].strip()
         elif clean_target.startswith("domain:"):
-            clean_target = clean_target[7:]
+            clean_target = clean_target[7:].strip()
 
+        if clean_target.startswith("http://") or clean_target.startswith("https://"):
+            clean_target = clean_target.split("//")[1].split("/")[0]
+        if ":" in clean_target and " " not in clean_target and not clean_target.startswith("net:"):
+            clean_target = clean_target.split(":")[0]
+        if "/" in clean_target and not clean_target.startswith("net:"):
+            try:
+                ipaddress.ip_network(clean_target, strict=False)
+            except ValueError:
+                clean_target = clean_target.split("/")[0]
+
+        # 2. CIDR Network Check (e.g. 192.168.1.0/24 or host:192.168.1.0/24)
         if "/" in clean_target:
             try:
                 network = ipaddress.ip_network(clean_target, strict=False)
@@ -125,21 +136,32 @@ class ShodanModule(BaseModule):
             except ValueError:
                 pass
 
-        # 2. Direct IP Address Check
+        # 3. Direct IP Address Check
         try:
             ipaddress.ip_address(clean_target)
             return await self.get_host_info(clean_target, context=context)
         except ValueError:
             pass
 
-        # 3. Domain Check (DNS domain info)
-        if target.startswith("domain:") or ("." in target and " " not in target and ":" not in target):
-            domain_name = target[7:] if target.startswith("domain:") else target
-            dns_findings = await self.get_domain_info(domain_name)
+        # 4. Domain & Subdomain Check (DNS domain info & hostname query)
+        import tldextract
+        ext = tldextract.extract(clean_target)
+        if ext.domain and ext.suffix and " " not in clean_target:
+            root_domain = ext.registered_domain or f"{ext.domain}.{ext.suffix}"
+            dns_findings = await self.get_domain_info(root_domain)
             findings.extend(dns_findings)
+
+            # If targeting a specific subdomain, query hostname in Shodan
+            if clean_target != root_domain:
+                try:
+                    host_findings = await self.search_query(f"hostname:{clean_target}", max_pages=1)
+                    findings.extend(host_findings)
+                except Exception as exc:
+                    logger.debug(f"Shodan hostname search error for {clean_target}: {exc}")
+
             return findings
 
-        # 4. Search Query Check
+        # 5. Search Query Check
         query = target[5:] if target.startswith("host:") else target
         return await self.search_query(query)
 
@@ -295,7 +317,19 @@ class ShodanModule(BaseModule):
 
     async def get_domain_info(self, domain: str) -> List[Finding]:
         """Fetch DNS domain info and subdomains from Shodan."""
-        url = f"https://api.shodan.io/dns/domain/{domain}"
+        clean_domain = domain.strip().lower()
+        if clean_domain.startswith("http://") or clean_domain.startswith("https://"):
+            clean_domain = clean_domain.split("//")[1].split("/")[0]
+        if ":" in clean_domain:
+            clean_domain = clean_domain.split(":")[0]
+        if "/" in clean_domain:
+            clean_domain = clean_domain.split("/")[0]
+
+        import tldextract
+        ext = tldextract.extract(clean_domain)
+        search_domain = ext.registered_domain if (ext.domain and ext.suffix) else clean_domain
+
+        url = f"https://api.shodan.io/dns/domain/{search_domain}"
         params = {"key": settings.shodan_api_key, "history": "true"}
 
         data = await self.http_client.get_json(url=url, params=params, timeout=20.0)

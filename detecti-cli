@@ -94,17 +94,18 @@ def target_to_db_name(target: str) -> str:
     if Path(t).is_file() and not t.startswith("http"):
         base = Path(t).stem or "file_target"
         return f"{base}.sqlite"
-    if t.startswith("domain:") or t.startswith("host:"):
-        t = t.split(":", 1)[1].strip()
-    
-    # If email, extract domain or clean address
-    if "@" in t and " " not in t:
-        parts = t.split("@", 1)
-        t = parts[1] if parts[1] else parts[0]
-        
+
+    try:
+        from core.engine import ThreatTrackEngine
+        engine = ThreatTrackEngine()
+        meta = engine.parse_target_metadata(t)
+        clean_target = meta.get("clean_target") or t
+    except Exception:
+        clean_target = t
+
     # Replace invalid/unfriendly path characters while preserving dots, hyphens and underscores
     clean = []
-    for c in t:
+    for c in clean_target:
         if c.isalnum() or c in (".", "-", "_"):
             clean.append(c)
         else:
@@ -112,7 +113,7 @@ def target_to_db_name(target: str) -> str:
     cleaned_name = "".join(clean).strip("._-")
     if not cleaned_name:
         cleaned_name = "scan_target"
-    
+
     if not cleaned_name.endswith(".sqlite"):
         cleaned_name = f"{cleaned_name}.sqlite"
     return cleaned_name
