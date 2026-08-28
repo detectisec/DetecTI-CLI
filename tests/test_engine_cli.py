@@ -370,3 +370,93 @@ def test_database_api_list_and_delete(tmp_path):
             test_db.unlink()
 
 
+def test_recursive_subdomain_and_ip_feedback_loop(monkeypatch):
+    """Test that subdomains discovered via crt.sh/recon are resolved to IPs and retrofed to Shodan/Censys."""
+    import asyncio
+    from core.engine import ThreatTrackEngine
+    from modules.crtsh import CrtshModule
+    from modules.shodan import ShodanModule
+    from core.models import Finding, FindingType, PortData
+
+    async def _test():
+        engine = ThreatTrackEngine()
+        
+        # 1. Mock Crtsh to discover 2 subdomains
+        async def mock_crtsh_run(self, target, context=None):
+            return [
+                Finding(
+                    type=FindingType.SUBDOMAIN,
+                    target=target,
+                    value="api.example.com",
+                    source="crt.sh",
+                ),
+                Finding(
+                    type=FindingType.SUBDOMAIN,
+                    target=target,
+                    value="vpn.example.com",
+                    source="crt.sh",
+                ),
+            ]
+
+        # 2. Mock DNS resolution
+        async def mock_getaddrinfo(host, port):
+            if host == "api.example.com":
+                return [(None, None, None, None, ("198.51.100.10", 0))]
+            elif host == "vpn.example.com":
+                return [(None, None, None, None, ("198.51.100.20", 0))]
+            return []
+
+        # 3. Mock Shodan get_host_info to track retrofed IPs
+        shodan_retrofed_ips = []
+
+        async def mock_shodan_get_host(self, ip):
+            shodan_retrofed_ips.append(ip)
+            return [
+                Finding(
+                    type=FindingType.OPEN_PORT,
+                    target=ip,
+                    value=f"{ip}:443",
+                    source="Shodan",
+                    host_ip=ip,
+                    port_info=PortData(port=443, transport="tcp", service="https", sources=["Shodan"]),
+                ),
+                Finding(
+                    type=FindingType.VULNERABILITY,
+                    target=ip,
+                    value="CVE-2024-1234",
+                    source="Shodan",
+                    host_ip=ip,
+                )
+            ]
+
+        async def mock_shodan_run(self, target, context=None):
+            return []
+
+        monkeypatch.setattr(CrtshModule, "is_configured", lambda self: True)
+        monkeypatch.setattr(CrtshModule, "run", mock_crtsh_run)
+        monkeypatch.setattr(ShodanModule, "is_configured", lambda self: True)
+        monkeypatch.setattr(ShodanModule, "run", mock_shodan_run)
+        monkeypatch.setattr(ShodanModule, "get_host_info", mock_shodan_get_host)
+        monkeypatch.setattr(asyncio.get_event_loop(), "getaddrinfo", mock_getaddrinfo)
+
+        result = await engine.scan("example.com", enabled_modules=["crtsh", "shodan"])
+
+        # Must have retrofed both resolved subdomain IPs to Shodan
+        assert "198.51.100.10" in shodan_retrofed_ips
+        assert "198.51.100.20" in shodan_retrofed_ips
+        assert len(shodan_retrofed_ips) == 2
+
+        # Verify host mapping and associated assets
+        assert len(result.hosts) == 2
+        host_ips = {h.ip for h in result.hosts}
+        assert "198.51.100.10" in host_ips
+        assert "198.51.100.20" in host_ips
+
+        api_host = next(h for h in result.hosts if h.ip == "198.51.100.10")
+        assert "api.example.com" in api_host.hostnames
+        assert any(p.port == 443 for p in api_host.ports)
+
+    asyncio.run(_test())
+
+
+

@@ -416,31 +416,106 @@ class ThreatTrackEngine:
                     logger.error(f"Error during recon stage: {res}")
 
         # ----------------------------------------------------
-        # Stage 1.5: Complementary Censys Host Enrichment for All Discovered IPs
-        # (Enrich all IPs discovered from DNS/crt.sh/Shodan with Censys port & service dossiers)
+        # Stage 1.2: Subdomain DNS Resolution & Recursive IP Mapping
+        # (Resolves all subdomains discovered via crt.sh/WHOIS/Shodan to their active A/AAAA IPs)
         # ----------------------------------------------------
-        if has_censys and target_type != "cve":
-            # Extract all unique host IPs discovered that haven't had a full Censys host lookup yet
-            already_queried_censys_ips = {
-                f.host_ip for f in raw_recon_findings if f.host_ip and "censys" in f.source.lower() and f.type == FindingType.HOST_INFO
-            }
-            all_discovered_ips = set()
+        discovered_subdomains: Set[str] = set()
+        subdomain_finding_refs: Dict[str, List[Finding]] = {}
+        for f in raw_recon_findings:
+            if f.type == FindingType.SUBDOMAIN and f.value:
+                sub_val = f.value.strip().lower()
+                if sub_val.startswith("*."):
+                    sub_val = sub_val[2:]
+                if sub_val and "." in sub_val and " " not in sub_val and not sub_val.startswith("@"):
+                    discovered_subdomains.add(sub_val)
+                    subdomain_finding_refs.setdefault(sub_val, []).append(f)
+
+        if discovered_subdomains and target_type != "cve":
+            self._notify("engine", f"Resolving DNS A-records for {len(discovered_subdomains)} discovered subdomains...")
+            
+            dns_semaphore = asyncio.Semaphore(50)
+            loop = asyncio.get_event_loop()
+
+            async def _resolve_subdomain(sub: str) -> tuple[str, Set[str]]:
+                async with dns_semaphore:
+                    try:
+                        addr_info = await loop.getaddrinfo(sub, None)
+                        ips = {res[4][0] for res in addr_info if res and len(res) > 4 and res[4]}
+                        return sub, ips
+                    except Exception:
+                        return sub, set()
+
+            resolve_results = await asyncio.gather(*[_resolve_subdomain(s) for s in discovered_subdomains])
+            
+            for sub, ips in resolve_results:
+                if ips:
+                    for ip in ips:
+                        raw_recon_findings.append(
+                            Finding(
+                                type=FindingType.HOST_INFO,
+                                target=sub,
+                                value=ip,
+                                source="DNS Resolution",
+                                host_ip=ip,
+                                host_info=HostInfoData(
+                                    ip=ip,
+                                    hostnames=[sub],
+                                    domains=[root_domain] if root_domain else [sub],
+                                ),
+                            )
+                        )
+                        for sub_finding in subdomain_finding_refs.get(sub, []):
+                            if not sub_finding.host_ip:
+                                sub_finding.host_ip = ip
+
+        # ----------------------------------------------------
+        # Stage 1.3: Recursive Threat Intelligence Feedback Loop (Shodan & Censys)
+        # (Feeds all resolved subdomain IPs back into Shodan & Censys for full port, service, banner & CVE discovery)
+        # ----------------------------------------------------
+        if (has_shodan or has_censys) and target_type != "cve":
+            all_known_ips = set()
             for f in raw_recon_findings:
                 hip = f.host_ip or (f.host_info.ip if f.host_info else None)
-                if hip and hip not in already_queried_censys_ips:
-                    all_discovered_ips.add(hip)
+                if hip:
+                    all_known_ips.add(hip)
 
-            enrichment_ips = list(all_discovered_ips)
-            if enrichment_ips:
-                self._notify("censys", f"Enriching all {len(enrichment_ips)} discovered host IPs with Censys port & service dossiers...")
-                censys_mod: CensysModule = self.modules["censys"]  # type: ignore
-                censys_tasks = [censys_mod.get_host_info(ip) for ip in enrichment_ips]
-                censys_results = await asyncio.gather(*censys_tasks, return_exceptions=True)
-                for res in censys_results:
-                    if isinstance(res, list):
-                        raw_recon_findings.extend(res)
-                    elif isinstance(res, Exception):
-                        logger.debug(f"Censys host enrichment exception: {res}")
+            # 1. Shodan Recursive Host Enrichment
+            if has_shodan and all_known_ips:
+                already_queried_shodan_ips = {
+                    f.host_ip for f in raw_recon_findings 
+                    if f.host_ip and "shodan" in f.source.lower() and f.type == FindingType.HOST_INFO
+                }
+                shodan_enrich_ips = [ip for ip in all_known_ips if ip not in already_queried_shodan_ips]
+                
+                if shodan_enrich_ips:
+                    self._notify("shodan", f"Retrofeeding {len(shodan_enrich_ips)} resolved subdomain IPs to Shodan for port & CVE profiling...")
+                    shodan_mod: ShodanModule = self.modules["shodan"]  # type: ignore
+                    shodan_tasks = [shodan_mod.get_host_info(ip) for ip in shodan_enrich_ips]
+                    shodan_results = await asyncio.gather(*shodan_tasks, return_exceptions=True)
+                    for res in shodan_results:
+                        if isinstance(res, list):
+                            raw_recon_findings.extend(res)
+                        elif isinstance(res, Exception):
+                            logger.debug(f"Shodan recursive enrichment exception: {res}")
+
+            # 2. Censys Recursive Host Enrichment
+            if has_censys and all_known_ips:
+                already_queried_censys_ips = {
+                    f.host_ip for f in raw_recon_findings 
+                    if f.host_ip and "censys" in f.source.lower() and f.type == FindingType.HOST_INFO
+                }
+                censys_enrich_ips = [ip for ip in all_known_ips if ip not in already_queried_censys_ips]
+                
+                if censys_enrich_ips:
+                    self._notify("censys", f"Enriching {len(censys_enrich_ips)} discovered host IPs with Censys port & service dossiers...")
+                    censys_mod: CensysModule = self.modules["censys"]  # type: ignore
+                    censys_tasks = [censys_mod.get_host_info(ip) for ip in censys_enrich_ips]
+                    censys_results = await asyncio.gather(*censys_tasks, return_exceptions=True)
+                    for res in censys_results:
+                        if isinstance(res, list):
+                            raw_recon_findings.extend(res)
+                        elif isinstance(res, Exception):
+                            logger.debug(f"Censys recursive enrichment exception: {res}")
 
         # ----------------------------------------------------
         # Group Discoveries per Host
