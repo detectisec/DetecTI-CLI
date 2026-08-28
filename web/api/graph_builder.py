@@ -380,7 +380,7 @@ class GraphBuilder:
                 }
             })
         
-        # Connect Subdomains -> IPs (RESOLVES_TO)
+        # Connect Subdomains -> IPs (CONTAINS_IP)
         for sub_id, ip_ids in subdomain_to_ips.items():
             for ip_id in ip_ids:
                 edges.append({
@@ -388,7 +388,7 @@ class GraphBuilder:
                         "id": f"e_sub_ip_{sub_id}_{ip_id}",
                         "source": f"sub_{sub_id}",
                         "target": f"ip_{ip_id}",
-                        "label": "RESOLVES_TO"
+                        "label": "CONTAINS_IP"
                     }
                 })
                 connected_ips.add(ip_id)

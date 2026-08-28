@@ -86,38 +86,72 @@ class DatabaseManager:
 
     def _store_subdomains(self, conn: sqlite3.Connection, findings: List[Finding]) -> Dict[str, str]:
         """Store subdomain findings in database and return subdomain_name -> subdomain_id mapping."""
-        subdomain_findings = [f for f in findings if f.type == FindingType.SUBDOMAIN]
         subdomain_map = {}
         
-        for finding in subdomain_findings:
-            # Extract domain from subdomain using tldextract (handles .com.br, .co.uk, .gov.br, etc.)
-            subdomain = finding.value
-            if '.' in subdomain:
-                try:
-                    import tldextract
-                    ext = tldextract.extract(subdomain)
-                    domain = ext.registered_domain if ext.registered_domain else '.'.join(subdomain.split('.')[-2:])
-                except Exception:
-                    parts = subdomain.split('.')
-                    domain = '.'.join(parts[-2:]) if len(parts) >= 2 else subdomain
-                
-                domain_id = self._get_or_create_domain(conn, domain)
-                
-                # Check if subdomain already exists
-                cursor = conn.execute(
-                    "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
-                    (domain_id, subdomain)
-                )
-                row = cursor.fetchone()
-                if row:
-                    subdomain_map[subdomain] = row[0]
-                else:
-                    subdomain_id = str(uuid.uuid4())
-                    conn.execute("""
-                        INSERT INTO subdomains (id, domain_id, name)
-                        VALUES (?, ?, ?)
-                    """, (subdomain_id, domain_id, subdomain))
-                    subdomain_map[subdomain] = subdomain_id
+        # 1. Register subdomains from FindingType.SUBDOMAIN
+        for finding in findings:
+            if finding.type == FindingType.SUBDOMAIN and finding.value:
+                subdomain = finding.value.strip().lower()
+                if subdomain.startswith("*."):
+                    subdomain = subdomain[2:]
+                if '.' in subdomain and ' ' not in subdomain and not subdomain.replace('.', '').isdigit():
+                    try:
+                        import tldextract
+                        ext = tldextract.extract(subdomain)
+                        domain = ext.registered_domain if ext.registered_domain else '.'.join(subdomain.split('.')[-2:])
+                    except Exception:
+                        parts = subdomain.split('.')
+                        domain = '.'.join(parts[-2:]) if len(parts) >= 2 else subdomain
+                    
+                    if domain:
+                        domain_id = self._get_or_create_domain(conn, domain)
+                        cursor = conn.execute(
+                            "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
+                            (domain_id, subdomain)
+                        )
+                        row = cursor.fetchone()
+                        if row:
+                            subdomain_id = row[0]
+                        else:
+                            subdomain_id = str(uuid.uuid4())
+                            conn.execute("""
+                                INSERT INTO subdomains (id, domain_id, name)
+                                VALUES (?, ?, ?)
+                            """, (subdomain_id, domain_id, subdomain))
+                        subdomain_map[subdomain] = subdomain_id
+
+        # 2. Register subdomains from FindingType.HOST_INFO hostnames
+        for finding in findings:
+            if finding.type == FindingType.HOST_INFO and finding.host_info:
+                for hname in finding.host_info.hostnames:
+                    hname_clean = hname.strip().lower()
+                    if hname_clean.startswith("*."):
+                        hname_clean = hname_clean[2:]
+                    if '.' in hname_clean and ' ' not in hname_clean and not hname_clean.replace('.', '').isdigit():
+                        try:
+                            import tldextract
+                            ext = tldextract.extract(hname_clean)
+                            domain = ext.registered_domain if ext.registered_domain else '.'.join(hname_clean.split('.')[-2:])
+                        except Exception:
+                            parts = hname_clean.split('.')
+                            domain = '.'.join(parts[-2:]) if len(parts) >= 2 else hname_clean
+                        
+                        if domain:
+                            domain_id = self._get_or_create_domain(conn, domain)
+                            cursor = conn.execute(
+                                "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
+                                (domain_id, hname_clean)
+                            )
+                            row = cursor.fetchone()
+                            if row:
+                                subdomain_id = row[0]
+                            else:
+                                subdomain_id = str(uuid.uuid4())
+                                conn.execute("""
+                                    INSERT INTO subdomains (id, domain_id, name)
+                                    VALUES (?, ?, ?)
+                                """, (subdomain_id, domain_id, hname_clean))
+                            subdomain_map[hname_clean] = subdomain_id
         
         return subdomain_map
 
@@ -192,36 +226,52 @@ class DatabaseManager:
                 elif len(service_ids) == 1:
                     service_id = list(service_ids.values())[0]
             
+            # Serialize exploit data if present
+            exploits_json = None
+            if vuln.exploits:
+                exploits_json = json.dumps([exp.model_dump() for exp in vuln.exploits])
+            
+            # Get CVSS score and severity
+            cvss_score = getattr(vuln, 'cvss_score', None)
+            cvss_version = getattr(vuln, 'cvss_version', None)
+            severity = vuln.cvss_severity.value if hasattr(getattr(vuln, 'cvss_severity', None), 'value') else str(getattr(vuln, 'cvss_severity', 'UNKNOWN'))
+            cwe_id = getattr(vuln, 'cwe_id', None)
+            cwe_name = getattr(vuln, 'cwe_name', None)
+            is_cisa_kev = getattr(vuln, 'in_cisa_kev', False)
+            source = getattr(vuln, 'source', None) or "Unknown"
+            
             conn.execute("""
                 INSERT INTO vulnerabilities (
-                    id, ip_id, service_id, cve_id, severity, cvss_score, cvss_version, description,
-                    cwe_id, cwe_name, epss_score, epss_percentile, is_cisa_kev, cisa_kev_data, source
+                    id, service_id, ip_id, cve_id, severity, cvss_score, cvss_version,
+                    description, cwe_id, cwe_name, epss_score, epss_percentile,
+                    is_cisa_kev, cisa_kev_data, source
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                vuln_id, ip_id, service_id, vuln.cve_id, vuln.cvss_severity.value,
-                vuln.cvss_score, vuln.cvss_version, vuln.description,
-                vuln.cwe_id, vuln.cwe_name, epss_score, epss_percentile,
-                vuln.in_cisa_kev, cisa_kev_json, getattr(vuln, "source", None) or "NVD"
+                vuln_id, service_id, ip_id, vuln.cve_id, severity, cvss_score, cvss_version,
+                vuln.description, cwe_id, cwe_name, epss_score, epss_percentile,
+                is_cisa_kev, cisa_kev_json, source
             ))
             
-            # Store exploits
-            for exploit in vuln.exploits:
-                exploit_id = str(uuid.uuid4())
-                conn.execute("""
-                    INSERT INTO exploits (id, vulnerability_id, title, source, url, verified, author, date, exploit_type)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    exploit_id, vuln_id, exploit.title, exploit.source, exploit.url,
-                    exploit.verified, exploit.author, exploit.date, exploit.exploit_type
-                ))
+            # Store individual exploits in the exploits table for detailed querying
+            if vuln.exploits:
+                for exp in vuln.exploits:
+                    exploit_id = str(uuid.uuid4())
+                    conn.execute("""
+                        INSERT INTO exploits (id, vulnerability_id, title, source, url, verified, author, date, exploit_type)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        exploit_id, vuln_id, exp.title, exp.source, exp.url,
+                        getattr(exp, 'verified', False), getattr(exp, 'author', None),
+                        getattr(exp, 'date', None), getattr(exp, 'exploit_type', None)
+                    ))
 
-    def store_scan_result(self, result: ScanResult) -> None:
-        """Store complete scan result in database."""
+    def save_scan_result(self, result: ScanResult) -> None:
+        """Save a complete ScanResult into the SQLite database."""
         with sqlite3.connect(self.db_path) as conn:
             # Store scan metadata
             modules_json = json.dumps(result.modules_run)
             conn.execute("""
-                INSERT OR REPLACE INTO scan_results (
+                INSERT INTO scan_results (
                     id, target, target_type, started_at, completed_at, elapsed_seconds,
                     modules_run, total_findings, total_hosts
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -236,24 +286,76 @@ class DatabaseManager:
             subdomain_map = self._store_subdomains(conn, result.findings)
             
             # Store host data and create subdomain-IP mappings
-            ip_map = {}  # hostname -> ip_id mapping
+            ip_map = {}  # ip -> ip_id mapping
             for host in result.hosts:
                 ip_id = self._get_or_create_ip(conn, host)
                 ip_map[host.ip] = ip_id
                 
                 # Map hostnames to this IP
                 for hostname in host.hostnames:
-                    if hostname in subdomain_map:
-                        # Create subdomain-IP mapping
+                    hname_clean = hostname.strip().lower()
+                    if hname_clean.startswith("*."):
+                        hname_clean = hname_clean[2:]
+                    
+                    if hname_clean in subdomain_map:
+                        sub_id = subdomain_map[hname_clean]
+                    else:
+                        if '.' in hname_clean and not hname_clean.replace('.', '').isdigit():
+                            try:
+                                import tldextract
+                                ext = tldextract.extract(hname_clean)
+                                dom = ext.registered_domain if ext.registered_domain else '.'.join(hname_clean.split('.')[-2:])
+                            except Exception:
+                                parts = hname_clean.split('.')
+                                dom = '.'.join(parts[-2:]) if len(parts) >= 2 else hname_clean
+                            
+                            if dom:
+                                dom_id = self._get_or_create_domain(conn, dom)
+                                cursor = conn.execute("SELECT id FROM subdomains WHERE domain_id = ? AND name = ?", (dom_id, hname_clean))
+                                row = cursor.fetchone()
+                                if row:
+                                    sub_id = row[0]
+                                else:
+                                    sub_id = str(uuid.uuid4())
+                                    conn.execute("INSERT INTO subdomains (id, domain_id, name) VALUES (?, ?, ?)", (sub_id, dom_id, hname_clean))
+                                subdomain_map[hname_clean] = sub_id
+                            else:
+                                sub_id = None
+                        else:
+                            sub_id = None
+
+                    if sub_id:
                         conn.execute("""
                             INSERT OR IGNORE INTO subdomain_ips (subdomain_id, ip_id)
                             VALUES (?, ?)
-                        """, (subdomain_map[hostname], ip_id))
+                        """, (sub_id, ip_id))
                 
                 service_ids = self._store_services(conn, ip_id, host)
                 self._store_vulnerabilities(conn, ip_id, host, service_ids)
             
+            # Also ensure all findings with host_ip and subdomain target/value are mapped
+            for finding in result.findings:
+                hip = finding.host_ip or (finding.host_info.ip if finding.host_info else None)
+                if hip and hip in ip_map:
+                    target_val = finding.target.strip().lower()
+                    if target_val in subdomain_map:
+                        conn.execute("""
+                            INSERT OR IGNORE INTO subdomain_ips (subdomain_id, ip_id)
+                            VALUES (?, ?)
+                        """, (subdomain_map[target_val], ip_map[hip]))
+                    if finding.type == FindingType.SUBDOMAIN and finding.value:
+                        sub_val = finding.value.strip().lower()
+                        if sub_val in subdomain_map:
+                            conn.execute("""
+                                INSERT OR IGNORE INTO subdomain_ips (subdomain_id, ip_id)
+                                VALUES (?, ?)
+                            """, (subdomain_map[sub_val], ip_map[hip]))
+
             conn.commit()
+
+    def store_scan_result(self, result: ScanResult) -> None:
+        """Alias for save_scan_result."""
+        self.save_scan_result(result)
 
     def get_summary_stats(self) -> Dict[str, int]:
         """Get summary statistics for the database."""

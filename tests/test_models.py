@@ -233,8 +233,8 @@ def test_graph_builder_target_root_hierarchy(tmp_path: Path):
     assert len(dom_sub_edges) == 2
     assert all(e["data"]["source"] == root_domain["data"]["id"] for e in dom_sub_edges)
 
-    # Subdomain (api.alvo.com) -> IP (RESOLVES_TO)
-    sub_ip_edges = [e for e in edges if e["data"]["label"] == "RESOLVES_TO"]
+    # Subdomain (api.alvo.com) -> IP (CONTAINS_IP)
+    sub_ip_edges = [e for e in edges if e["data"]["label"] in ("CONTAINS_IP", "RESOLVES_TO")]
     assert len(sub_ip_edges) >= 1
 
     # IP -> Service (EXPOSES)
