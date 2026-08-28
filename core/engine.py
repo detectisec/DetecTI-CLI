@@ -337,41 +337,8 @@ class ThreatTrackEngine:
                             ),
                         )
                     )
-                    if target_port:
-                        raw_recon_findings.append(
-                            Finding(
-                                type=FindingType.OPEN_PORT,
-                                target=clean_target,
-                                value=f"{rip}:{target_port}",
-                                source="Target URL",
-                                host_ip=rip,
-                                port_info=PortData(
-                                    port=target_port,
-                                    transport="tcp",
-                                    service="https" if (target_port == 443 or "https" in target.lower()) else "http",
-                                    sources=["Target URL"],
-                                ),
-                            )
-                        )
             except Exception as exc:
                 logger.debug(f"Direct DNS resolution for {clean_target}: {exc}")
-
-        elif target_type == "ip" and target_port:
-            raw_recon_findings.append(
-                Finding(
-                    type=FindingType.OPEN_PORT,
-                    target=clean_target,
-                    value=f"{clean_target}:{target_port}",
-                    source="Target URL",
-                    host_ip=clean_target,
-                    port_info=PortData(
-                        port=target_port,
-                        transport="tcp",
-                        service="https" if (target_port == 443 or "https" in target.lower()) else "http",
-                        sources=["Target URL"],
-                    ),
-                )
-            )
 
         # ----------------------------------------------------
         # Stage 1: Recon & Discovery (Shodan Primary Query, Censys, crt.sh, Reverse WHOIS)
