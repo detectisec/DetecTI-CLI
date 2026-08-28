@@ -126,7 +126,7 @@ flowchart TD
 
 7. **Stage 4: Graph Modeling & Relational Synthesis**:
    - Binds assets into a structured, query-rooted hierarchical topology:
-     $$\text{Target Query Root} \xrightarrow{\text{MATCHES\_DOMAIN}} \text{Domains / Org Networks} \xrightarrow{\text{HAS\_SUBDOMAIN / CONTAINS\_IP}} \text{Subdomains / IPs} \xrightarrow{\text{RESOLVES\_TO}} \text{Hosts} \xrightarrow{\text{EXPOSES}} \text{Services} \xrightarrow{\text{HAS\_VULN}} \text{CVEs}$$
+     $$\text{TARGET\_ROOT} \xrightarrow{\text{MATCHES\_DOMAIN / TARGET\_SUBDOMAIN}} \text{DOMÍNIO / SUBDOMÍNIO} \xrightarrow{\text{HAS\_SUBDOMAIN}} \text{SUBDOMÍNIOS} \xrightarrow{\text{CONTAINS\_IP}} \text{IPs} \xrightarrow{\text{EXPOSES}} \text{SERVIÇOS} \xrightarrow{\text{HAS\_VULN}} \text{CVEs}$$
 
 8. **Stage 5: Persistence & Presentation**:
    - Stores all relationships in a relational SQLite database with auto-migration support.
