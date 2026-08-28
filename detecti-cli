@@ -313,11 +313,31 @@ def update_xdb_command() -> None:
 
 
 @app.command(name="config-check")
-def config_check_command() -> None:
-    """Check configured API keys, environment settings, and live endpoint verification."""
+def config_check_command(
+    setup: bool = typer.Option(
+        False,
+        "--setup",
+        "--install",
+        "--fix",
+        help="Automatically configure prerequisites, install missing dependencies, set capabilities, and update databases",
+    ),
+) -> None:
+    """Check prerequisites, API keys, environment health, or run automated setup."""
     print_banner()
-    print_section_header("API Keys & Environment Verification")
 
+    from utils.setup import SetupManager
+    setup_mgr = SetupManager(console=console)
+
+    if setup:
+        setup_mgr.run_automated_setup()
+
+    # 1. System & Environment Health Diagnostics
+    print_section_header("System & Environment Diagnostics")
+    checks = setup_mgr.check_all()
+    setup_mgr.render_diagnostics_table(checks)
+
+    # 2. Live API Verification
+    print_section_header("API Credentials & Live Endpoint Verification")
     engine = ThreatTrackEngine()
     api_statuses = asyncio.run(engine.verify_environment_apis())
 
@@ -334,6 +354,39 @@ def config_check_command() -> None:
 
     console.print(f" • [cyan]HTTP Concurrency Limit:[/cyan] {settings.http_concurrency_limit}")
     console.print(f" • [cyan]HTTP Timeout:[/cyan] {settings.http_timeout}s")
+    console.print(f" • [cyan]Shodan Rate Limit Delay:[/cyan] {getattr(settings, 'shodan_delay', 1.05)}s")
+
+    needs_setup = not all(c.get("ok", False) for k, c in checks.items() if k != "nuclei")
+    if needs_setup and not setup:
+        console.print(
+            "\n[bold yellow]💡 Tip:[/bold yellow] Run [bold cyan]./detecti-cli setup[/bold cyan] or [bold cyan]./detecti-cli config-check --setup[/bold cyan] to automatically configure missing prerequisites.\n"
+        )
+
+
+@app.command(name="setup")
+def setup_command() -> None:
+    """Automated initial installation and prerequisite configuration routine."""
+    print_banner()
+    from utils.setup import SetupManager
+    setup_mgr = SetupManager(console=console)
+    setup_mgr.run_automated_setup()
+
+    print_section_header("Verification Diagnostics")
+    checks = setup_mgr.check_all()
+    setup_mgr.render_diagnostics_table(checks)
+
+    print_section_header("API Credentials Status")
+    engine = ThreatTrackEngine()
+    api_statuses = asyncio.run(engine.verify_environment_apis())
+    for mod_key, info in api_statuses.items():
+        name = info.get("name", mod_key.title())
+        status = info.get("status", "Unknown")
+        status_styled = (
+            f"[bold green]{status}[/bold green]"
+            if info.get("valid")
+            else (f"[bold red]{status}[/bold red]" if info.get("configured") else f"[dim]{status}[/dim]")
+        )
+        console.print(f" • [cyan]{name}:[/cyan] {status_styled}")
 
 
 @hound_app.command("start")

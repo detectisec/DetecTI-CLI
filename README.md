@@ -246,30 +246,23 @@ flowchart TD
   # Or download pre-built binary from https://github.com/projectdiscovery/nuclei/releases
   ```
 
-### Install with pip or editable mode
+### Quick Installation & Automated Setup
 ```bash
 git clone https://github.com/detectisec/DetecTI-CLI.git
 cd DetecTI-CLI
-
-# Install in editable mode
-pip install -e .
-
-# Or install dependencies via requirements.txt
-pip install -r requirements.txt
-
 chmod +x detecti-cli
 
-# Install and update Exploit Database
-./detecti-cli update-xdb
+# Run automated setup (verifies prerequisites, directories, dependencies, and capabilities)
+./detecti-cli setup
 ```
 
 ---
 
-## ⚙️ Configuration & API Keys
+## ⚙️ Configuration & API Diagnostics
 
 DetecTI-CLI works out-of-the-box with free fallbacks (crt.sh, HackerTarget, EPSS, CISA KEV, GitHub PoC API), but you can configure API keys for full power:
 
-Create a `.env` file or export environment variables:
+Create a `.env` file (automatically cloned from `.env.example` during setup) or export environment variables:
 ```bash
 # Required for Shodan queries
 export SHODAN_API_KEY="your_shodan_api_key_here"
@@ -288,9 +281,14 @@ export WHOISFREAKS_API_KEY="your_whoisfreaks_api_key_here"
 export GITHUB_TOKEN="your_github_token_here"
 ```
 
-You can verify your configuration anytime:
+### Diagnostics & Automated Pre-requisite Configuration
+Verify your environment health, Python packages, project directories, raw socket capabilities, and live API endpoints:
 ```bash
+# Run diagnostics check
 ./detecti-cli config-check
+
+# Automatically configure missing prerequisites, directories, and capabilities
+./detecti-cli config-check --setup
 ```
 
 ---

@@ -56,7 +56,33 @@ def test_cli_config_check():
         pytest.skip("CLI app not available")
     res = runner.invoke(app, ["config-check"])
     assert res.exit_code == 0
-    assert "Shodan API Key" in res.stdout
+    assert "System & Environment Diagnostics" in res.stdout
+    assert "Shodan" in res.stdout
+
+
+def test_cli_setup():
+    """Test CLI setup command."""
+    if app is None:
+        pytest.skip("CLI app not available")
+    res = runner.invoke(app, ["setup"])
+    assert res.exit_code == 0
+    assert "Automated Environment Setup" in res.stdout
+    assert "Verification Diagnostics" in res.stdout
+
+
+def test_setup_manager_checks():
+    """Test SetupManager diagnostic check suite."""
+    from utils.setup import SetupManager
+    mgr = SetupManager()
+    checks = mgr.check_all()
+    assert "python_version" in checks
+    assert "python_modules" in checks
+    assert "directories" in checks
+    assert "env_file" in checks
+    assert "masscan" in checks
+    assert "nuclei" in checks
+    assert "exploitdb" in checks
+    assert checks["python_version"]["ok"] is True
 
 
 def test_engine_multi_source_correlation(monkeypatch):
