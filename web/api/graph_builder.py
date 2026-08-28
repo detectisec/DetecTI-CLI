@@ -72,15 +72,15 @@ class GraphBuilder:
         domains_list = cursor.fetchall()
         
         # 1. Create a dedicated Target Root Node for the query/target that generated the entire scan (Always anchors the graph)
+        targets_list = []
+        explicit_targets = set()
         if target_name:
-            targets_list = []
             # If target_type is file or list, retrieve the exact targets from the input file on disk
             if target_type == "file":
                 from pathlib import Path
                 clean_path = str(target_name).strip()
                 file_obj = Path(clean_path)
                 if not file_obj.is_absolute():
-                    # Check current directory or relative
                     if not file_obj.exists():
                         candidate = Path.cwd() / clean_path
                         if candidate.exists():
@@ -99,6 +99,20 @@ class GraphBuilder:
                     file_doms = [d[1] for d in domains_list]
                     targets_list = sorted(list(set(file_doms + file_ips)))
 
+            def _normalize_target_item(t: str) -> str:
+                t = str(t).strip().lower()
+                if t.startswith("http://"):
+                    t = t[7:]
+                elif t.startswith("https://"):
+                    t = t[8:]
+                if "/" in t:
+                    t = t.split("/")[0]
+                if ":" in t:
+                    t = t.split(":")[0]
+                return t
+
+            explicit_targets = {_normalize_target_item(t) for t in targets_list if _normalize_target_item(t)}
+
             root_target_node = {
                 "data": {
                     "id": "target_root",
@@ -111,9 +125,13 @@ class GraphBuilder:
                 }
             }
 
+        is_file_target = (target_type == "file" or bool(targets_list and len(targets_list) > 1))
+        direct_target_subdomains = set()
+
         # 2. Add domain nodes (Domains discovered during the scan)
         for domain_id, domain_name in domains_list:
-            is_main_domain = bool(target_name and (domain_name.lower() == target_name.lower() or target_name.lower().endswith(f".{domain_name.lower()}")))
+            dname_lower = domain_name.lower()
+            is_main_domain = bool(target_name and (dname_lower == target_name.lower() or target_name.lower().endswith(f".{dname_lower}")))
             node_data = {
                 "id": f"dom_{domain_id}",
                 "label": domain_name,
@@ -124,17 +142,27 @@ class GraphBuilder:
             nodes.append({"data": node_data})
             processed_domains.add(domain_id)
 
-            # Connect Target Root -> Domain (Unless this domain itself is the root query node and matches exactly 1 domain)
+            # Connect Target Root -> Domain (if domain was explicitly in targets_list or general scan)
             if root_target_node:
-                # If target is a multi-target list, query, cidr, or has multiple domains/IPs, connect target_root -> domains
-                edges.append({
-                    "data": {
-                        "id": f"e_target_dom_{domain_id}",
-                        "source": "target_root",
-                        "target": f"dom_{domain_id}",
-                        "label": "MATCHES_DOMAIN"
-                    }
-                })
+                if is_file_target and explicit_targets:
+                    if dname_lower in explicit_targets:
+                        edges.append({
+                            "data": {
+                                "id": f"e_target_dom_{domain_id}",
+                                "source": "target_root",
+                                "target": f"dom_{domain_id}",
+                                "label": "MATCHES_DOMAIN"
+                            }
+                        })
+                else:
+                    edges.append({
+                        "data": {
+                            "id": f"e_target_dom_{domain_id}",
+                            "source": "target_root",
+                            "target": f"dom_{domain_id}",
+                            "label": "MATCHES_DOMAIN"
+                        }
+                    })
         
         # Get all subdomains with their domain mappings and IP connections
         cursor = conn.execute("""
@@ -168,6 +196,19 @@ class GraphBuilder:
                 })
                 processed_subdomains.add(sub_id)
                 subdomain_records.append((sub_id, sub_name, domain_id, domain_name))
+
+                # Check if this subdomain is an explicit target from the input file/list
+                if is_file_target and explicit_targets and sub_name.lower() in explicit_targets:
+                    direct_target_subdomains.add(sub_id)
+                    if root_target_node:
+                        edges.append({
+                            "data": {
+                                "id": f"e_target_sub_{sub_id}",
+                                "source": "target_root",
+                                "target": f"sub_{sub_id}",
+                                "label": "MATCHES_SUBDOMAIN"
+                            }
+                        })
             
             # Keep track of Subdomain -> IP relationships
             if ip_id and ip_address:
@@ -201,6 +242,32 @@ class GraphBuilder:
                 processed_subdomains.add(sub_id)
                 subdomain_records.append((sub_id, sub_name, domain_id, domain_name))
 
+                if is_file_target and explicit_targets and sub_name.lower() in explicit_targets:
+                    direct_target_subdomains.add(sub_id)
+                    if root_target_node:
+                        edges.append({
+                            "data": {
+                                "id": f"e_target_sub_{sub_id}",
+                                "source": "target_root",
+                                "target": f"sub_{sub_id}",
+                                "label": "MATCHES_SUBDOMAIN"
+                            }
+                        })
+
+        # If a file target had domains but none matched explicitly, connect them to target_root
+        if is_file_target and root_target_node:
+            connected_targets = {e["data"]["target"] for e in edges if e["data"]["source"] == "target_root"}
+            if not connected_targets:
+                for domain_id, _ in domains_list:
+                    edges.append({
+                        "data": {
+                            "id": f"e_target_dom_{domain_id}",
+                            "source": "target_root",
+                            "target": f"dom_{domain_id}",
+                            "label": "MATCHES_DOMAIN"
+                        }
+                    })
+
         # 3. Build Multi-Level FQDN Tree Hierarchy
         # Map all known domain and subdomain names to their node IDs
         fqdn_to_node_id = {}
@@ -209,8 +276,51 @@ class GraphBuilder:
         for sub_id, sub_name, domain_id, domain_name in subdomain_records:
             fqdn_to_node_id[sub_name.lower()] = f"sub_{sub_id}"
 
+        # Ensure every explicit domain/subdomain target from input file exists as a node directly under target_root
+        if is_file_target and explicit_targets and root_target_node:
+            for item in explicit_targets:
+                item_clean = item.strip().lower()
+                if item_clean not in fqdn_to_node_id:
+                    # If it has dots and is not a plain IP
+                    if "." in item_clean and not item_clean.replace(".", "").isdigit():
+                        try:
+                            import tldextract
+                            ext = tldextract.extract(item_clean)
+                            reg_dom = ext.registered_domain
+                        except Exception:
+                            reg_dom = item_clean
+                        
+                        is_sub = bool(reg_dom and item_clean != reg_dom)
+                        node_type = "subdomain" if is_sub else "domain"
+                        node_id = f"target_item_{abs(hash(item_clean)) % 10000000}"
+                        fqdn_to_node_id[item_clean] = node_id
+                        
+                        nodes.append({
+                            "data": {
+                                "id": node_id,
+                                "label": item_clean,
+                                "type": node_type,
+                                "name": item_clean,
+                                "is_root": False
+                            }
+                        })
+                        edges.append({
+                            "data": {
+                                "id": f"e_target_root_{node_id}",
+                                "source": "target_root",
+                                "target": node_id,
+                                "label": "TARGET_SUBDOMAIN" if is_sub else "MATCHES_DOMAIN"
+                            }
+                        })
+                        if is_sub:
+                            direct_target_subdomains.add(node_id)
+
         # Connect each subdomain to its closest parent in the FQDN hierarchy
         for sub_id, sub_name, domain_id, domain_name in subdomain_records:
+            # If this subdomain was explicitly connected directly to target_root as a top-level target, don't nest it under domain
+            if sub_id in direct_target_subdomains:
+                continue
+
             sname_clean = sub_name.lower().strip()
             parts = sname_clean.split(".")
             parent_node_id = None
@@ -294,17 +404,34 @@ class GraphBuilder:
             cursor_dom = conn.execute("SELECT id FROM domains LIMIT 1")
             dom_row = cursor_dom.fetchone()
             
-            # When target_root is available, connect normalized targets from the list directly to target_root
+            targets_list = root_target_node["data"].get("targets_list", []) if root_target_node else []
+            explicit_targets = {str(t).strip().lower() for t in targets_list if t}
+            is_file_target = bool(root_target_node and (root_target_node["data"].get("target_type") == "file" or len(targets_list) > 1))
+            
+            # When target_root is available:
             if root_target_node:
                 for ip_id, ip, org in orphaned_ips:
-                    edges.append({
-                        "data": {
-                            "id": f"e_root_ip_{ip_id}",
-                            "source": "target_root",
-                            "target": f"ip_{ip_id}",
-                            "label": "CONTAINS_IP"
-                        }
-                    })
+                    ip_clean = str(ip).strip().lower()
+                    # If this IP was an explicit item in the target list, or if there are no domains in the scan:
+                    if (is_file_target and ip_clean in explicit_targets) or not dom_row:
+                        edges.append({
+                            "data": {
+                                "id": f"e_root_ip_{ip_id}",
+                                "source": "target_root",
+                                "target": f"ip_{ip_id}",
+                                "label": "CONTAINS_IP"
+                            }
+                        })
+                    elif dom_row:
+                        dom_id = dom_row[0]
+                        edges.append({
+                            "data": {
+                                "id": f"e_dom_ip_{dom_id}_{ip_id}",
+                                "source": f"dom_{dom_id}",
+                                "target": f"ip_{ip_id}",
+                                "label": "CONTAINS_IP"
+                            }
+                        })
             elif dom_row:
                 dom_id = dom_row[0]
                 for ip_id, ip, org in orphaned_ips:
