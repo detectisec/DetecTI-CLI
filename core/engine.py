@@ -167,12 +167,33 @@ class ThreatTrackEngine:
                 "port": port,
             }
 
-        return {"type": "query", "clean_target": raw, "root_domain": None, "subdomain": None, "port": None}
+        # Check Shodan Search Queries / Dorks
+        SHODAN_DORK_KEYWORDS = (
+            "org:", "product:", "port:", "city:", "country:", "ssl:", "os:",
+            "title:", "html:", "asn:", "net:", "has_vuln:", "vuln:", "tag:",
+            "http.title:", "http.html:", "http.status:", "cloud.provider:",
+            "host:", "domain:", "query:", "search:"
+        )
+        raw_lower = raw.lower()
+        if any(kw in raw_lower for kw in SHODAN_DORK_KEYWORDS) or (" " in raw and ":" in raw):
+            query_val = raw
+            if query_val.lower().startswith("query:") or query_val.lower().startswith("search:"):
+                query_val = query_val.split(":", 1)[1].strip()
+            return {"type": "query", "clean_target": query_val, "root_domain": None, "subdomain": None, "port": None}
+
+        # If it is not an IP, CIDR, Domain with valid TLD, CVE, Email, existing File, or valid Query Dork -> Invalid Target
+        raise ValueError(
+            f"Invalid target or file not found: '{raw}'. "
+            f"Target must be a valid IP, CIDR, Domain, URL, CVE, existing File, or Shodan Query filter (e.g., org:'Target', port:443)."
+        )
 
     def classify_target(self, target: str) -> str:
-        """Identify target classification (ip, cidr, domain, cve, query, file, email)."""
-        meta = self.parse_target_metadata(target)
-        return meta.get("type", "query")
+        """Identify target classification (ip, cidr, domain, cve, query, file, email, invalid)."""
+        try:
+            meta = self.parse_target_metadata(target)
+            return meta.get("type", "invalid")
+        except Exception:
+            return "invalid"
 
     async def verify_environment_apis(self, enabled_modules: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
         """Verify API keys present in the environment/config and perform non-blocking pre-flight checks."""

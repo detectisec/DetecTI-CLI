@@ -177,24 +177,15 @@ def scan_command(
         print_info(f"Use '{cli_name} scan --help' for more options.")
         raise typer.Exit(1)
 
-    # Validate file target existence if target resembles a file or path
-    KNOWN_FILE_EXTENSIONS = {
-        ".txt", ".list", ".csv", ".targets", ".ips", ".log", ".json", ".yaml", ".yml", ".conf", ".cfg"
-    }
-    target_clean = target.strip()
-    target_path = Path(target_clean)
-    is_file_like = (
-        target_path.suffix.lower() in KNOWN_FILE_EXTENSIONS
-        or target_clean.startswith(("./", "../", "/", "~/"))
-        or "\\" in target_clean
-        or target_path.is_file()
-    )
-    if is_file_like and not target_clean.startswith("http"):
-        if not target_path.is_file():
-            print_banner()
-            print_error(f"Target file not found: [bold white]{target}[/bold white]")
-            print_info("Please verify the file path and ensure the targets file exists.")
-            raise typer.Exit(1)
+    # Pre-validate target before starting scan progress
+    try:
+        temp_engine = ThreatTrackEngine()
+        meta = temp_engine.parse_target_metadata(target)
+    except (FileNotFoundError, ValueError) as exc:
+        print_banner()
+        print_error(str(exc))
+        print_info("Target must be a valid IP, CIDR, Domain, URL, CVE, existing File, or Shodan Query filter (e.g., org:'Target', port:443).")
+        raise typer.Exit(1)
 
     print_banner()
 
@@ -226,9 +217,16 @@ def scan_command(
             )
         )
 
-        # Automatic SQLite database storage for non-CVE targets
+        # Check if scan yielded any actionable findings / assets
+        has_results = (
+            (result.summary and (result.summary.total_hosts_count > 0 or result.summary.total_findings > 0))
+            or len(result.hosts) > 0
+            or len(result.findings) > 0
+        )
+
+        # Automatic SQLite database storage for non-CVE targets with valid findings
         is_cve = (result.target_type == "cve") or target.strip().upper().startswith("CVE-")
-        if not is_cve:
+        if not is_cve and has_results:
             final_db_name = None
             try:
                 from core.database.storage import DatabaseManager
@@ -270,8 +268,10 @@ def scan_command(
                     console.print(f"  👉 [bold cyan]Network URL:[/bold cyan] [bold underline cyan]http://{real_ip}:{port}[/bold underline cyan]")
                 else:
                     print_info(f"Open DetecTIHound: [bold cyan]{cli_name} hound start --db {final_db_name or db_name}[/bold cyan]")
-            except Exception:
-                pass
+            except Exception as e:
+                print_warning(f"Could not automatically launch DetecTIHound WebGUI: {e}")
+        elif not is_cve and not has_results:
+            print_warning(f"No intelligence assets or findings discovered for target '{target}'. SQLite database was not created.")
 
     # 1. Executive Terminal Output
     if output_format.lower() in ("table", "all") or not output_file:
