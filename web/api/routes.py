@@ -82,18 +82,28 @@ async def list_databases(request: Request) -> Dict:
 @router.post("/databases/select")
 async def select_database(req: SelectDbRequest, request: Request) -> Dict:
     """Switch active SQLite database in the web dashboard."""
-    db_name = req.name
+    dbs_dir = _get_dbs_dir()
+    db_name = req.name.strip()
     if not db_name.endswith(".sqlite"):
-        db_name += ".sqlite"
+        filename = f"{db_name}.sqlite"
+    else:
+        filename = db_name
         
-    db_file = Path.cwd() / "data" / "dbs" / db_name
+    safe_filename = Path(filename).name
+    db_file = dbs_dir / safe_filename
     if not db_file.exists():
-        # Check absolute path
-        abs_file = Path(req.name)
-        if abs_file.exists() and abs_file.suffix == ".sqlite":
-            db_file = abs_file
+        # Case-insensitive or matching by stem
+        matches = [f for f in dbs_dir.glob("*.sqlite") if f.name.lower() == safe_filename.lower() or f.stem.lower() == db_name.lower()]
+        if matches:
+            db_file = matches[0]
+            safe_filename = db_file.name
         else:
-            raise HTTPException(status_code=404, detail=f"Database '{req.name}' not found")
+            # Check absolute path
+            abs_file = Path(req.name)
+            if abs_file.exists() and abs_file.suffix == ".sqlite":
+                db_file = abs_file
+            else:
+                raise HTTPException(status_code=404, detail=f"Database '{req.name}' not found")
     
     # Switch database in app state
     request.app.state.db_manager = DatabaseManager(db_file)
@@ -142,7 +152,14 @@ async def _perform_delete_database(target_raw: str, request: Request) -> Dict:
             raise HTTPException(status_code=404, detail=f"Database '{safe_filename}' not found in {dbs_dir}")
     
     try:
-        db_file.unlink()
+        if db_file.exists():
+            db_file.unlink()
+        wal_file = db_file.with_name(f"{db_file.name}-wal")
+        if wal_file.exists():
+            wal_file.unlink()
+        shm_file = db_file.with_name(f"{db_file.name}-shm")
+        if shm_file.exists():
+            shm_file.unlink()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to delete database: {exc}")
     

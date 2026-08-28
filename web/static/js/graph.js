@@ -2979,6 +2979,9 @@ class EASMDashboard {
             if (res && res.success) {
                 this.showToast('success', `Database '${cleanName}' deleted successfully.`);
                 
+                // Immediately refresh database selector list via AJAX
+                await this.loadDatabases();
+
                 if (res.was_current) {
                     if (res.new_active_db) {
                         await this.switchDatabase(res.new_active_db);
@@ -2987,18 +2990,17 @@ class EASMDashboard {
                         if (this.cy) {
                             this.cy.elements().remove();
                         }
-                        await this.loadDatabases();
                         await this.loadSummary();
                     }
-                } else {
-                    await this.loadDatabases();
                 }
             } else {
                 this.showToast('error', (res && (res.detail || res.error)) || `Failed to delete database '${cleanName}'.`);
+                await this.loadDatabases();
             }
         } catch (error) {
             console.error('Error deleting database:', error);
             this.showToast('error', `Error deleting database: ${error.message}`);
+            await this.loadDatabases();
         } finally {
             if (confirmBtn) {
                 confirmBtn.disabled = false;
@@ -3046,9 +3048,10 @@ class EASMDashboard {
             }
         } catch (error) {
             console.error('Failed to switch database:', error);
-            alert(`Error switching database: ${error.message}`);
+            this.showToast('error', `Error switching database: ${error.message}`);
             const loadingEl = document.getElementById('graph-loading');
             if (loadingEl) loadingEl.style.display = 'none';
+            await this.loadDatabases();
         }
     }
 
