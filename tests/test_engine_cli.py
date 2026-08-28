@@ -334,3 +334,39 @@ def test_engine_unlimited_host_enrichment(monkeypatch):
     asyncio.run(_test())
 
 
+def test_database_api_list_and_delete(tmp_path):
+    """Test GET /databases strips .sqlite for clean target display and POST /databases/delete works."""
+    from web.server import create_app
+    from fastapi.testclient import TestClient
+
+    app = create_app()
+    client = TestClient(app)
+
+    # Create dummy sqlite db in ./data/dbs/
+    dbs_dir = Path.cwd() / "data" / "dbs"
+    dbs_dir.mkdir(parents=True, exist_ok=True)
+    test_db = dbs_dir / "test_target_dummy.sqlite"
+    test_db.write_text("test")
+
+    try:
+        res = client.get("/api/v1/databases")
+        assert res.status_code == 200
+        data = res.json()
+        assert "databases" in data
+        
+        # Check that test_target_dummy is present with clean name
+        found = [d for d in data["databases"] if d["filename"] == "test_target_dummy.sqlite"]
+        assert len(found) == 1
+        assert found[0]["clean_name"] == "test_target_dummy"
+        assert not found[0]["clean_name"].endswith(".sqlite")
+
+        # Delete database via API
+        del_res = client.post("/api/v1/databases/delete", json={"name": "test_target_dummy"})
+        assert del_res.status_code == 200
+        assert del_res.json()["success"] is True
+        assert not test_db.exists()
+    finally:
+        if test_db.exists():
+            test_db.unlink()
+
+

@@ -44,12 +44,22 @@
 
                 <!-- Right: Database Selector, Export Actions & Targets Button -->
                 <div class="header-right">
-                    <!-- Database Selector Control -->
-                    <div class="header-control-group">
-                        <label for="db-selector" class="control-label" title="Switch SQLite Database" aria-label="Database"><i data-lucide="database" class="ui-icon label-icon"></i></label>
-                        <select id="db-selector" class="db-select-input" title="Switch SQLite Database">
-                            <option value="">Loading databases...</option>
-                        </select>
+                    <!-- Database Selector Dropdown -->
+                    <div class="header-control-group db-dropdown-wrapper" id="db-dropdown-wrapper">
+                        <button id="btn-db-dropdown" class="action-btn db-trigger-btn" aria-haspopup="true" aria-expanded="false" title="Switch SQLite Database">
+                            <i data-lucide="database" class="ui-icon db-icon-main"></i>
+                            <span id="current-db-label" class="current-db-label">Loading database...</span>
+                            <i data-lucide="chevron-down" class="ui-icon dropdown-chevron"></i>
+                        </button>
+                        <div class="db-dropdown-menu" id="db-dropdown-menu">
+                            <div class="db-dropdown-header">
+                                <span>Attack Surface Databases</span>
+                                <span class="db-count-badge" id="db-count-badge">0</span>
+                            </div>
+                            <div class="db-dropdown-list" id="db-dropdown-list">
+                                <!-- Dynamic DB List Items populated via JS -->
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Export Report Dropdown -->
@@ -567,8 +577,36 @@
         <div id="cy-context-menu" class="cy-context-menu"></div>
     </div>
 
-    <script src="/static/js/api.js?v=8"></script>
-    <script src="/static/js/graph.js?v=43"></script>
+    <!-- Delete Database Confirmation Modal -->
+    <div class="modal-backdrop" id="delete-db-modal" style="display: none;">
+        <div class="modal-dialog delete-db-modal-dialog">
+            <div class="modal-header">
+                <div class="modal-title-row">
+                    <i data-lucide="alert-triangle" class="ui-icon modal-danger-icon" style="color: #ef4444;"></i>
+                    <h3>Delete Database</h3>
+                </div>
+                <button type="button" class="modal-close-btn" id="btn-close-delete-db-modal" aria-label="Close">
+                    <i data-lucide="x" class="ui-icon"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete database <strong id="delete-db-target-name" style="color: var(--cyan-accent, #00f0ff);"></strong>?</p>
+                <p class="modal-warning-text" style="color: var(--text-muted); font-size: 0.82rem; margin-top: 0.5rem; line-height: 1.4;">
+                    This will permanently remove the SQLite file and all associated asset topology findings. This action cannot be undone.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="action-btn modal-cancel-btn" id="btn-cancel-delete-db">Cancel</button>
+                <button type="button" class="action-btn modal-danger-btn" id="btn-confirm-delete-db" style="background: #dc2626; border-color: #ef4444; color: #fff;">
+                    <i data-lucide="trash-2" class="ui-icon" style="width: 14px; height: 14px;"></i>
+                    <span>Delete Database</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/api.js?v=9"></script>
+    <script src="/static/js/graph.js?v=44"></script>
     
     <script>
         // Debug logging & icon initialization

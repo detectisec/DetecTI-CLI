@@ -28,6 +28,10 @@ class SelectDbRequest(BaseModel):
     name: str
 
 
+class DeleteDbRequest(BaseModel):
+    name: str
+
+
 @router.get("/databases")
 async def list_databases(request: Request) -> Dict:
     """List all available SQLite databases in ./data/dbs/ and return the currently active one."""
@@ -36,31 +40,41 @@ async def list_databases(request: Request) -> Dict:
     
     current_db_path = getattr(request.app.state, "db_path", None)
     current_db_name = Path(current_db_path).name if current_db_path else None
+    current_target_name = None
     
     if data_dir.exists():
         for db_file in sorted(data_dir.glob("*.sqlite")):
             size_mb = db_file.stat().st_size / (1024 * 1024)
             mod_time = datetime.fromtimestamp(db_file.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
             
-            target = "Unknown"
+            clean_name = db_file.stem  # Strip .sqlite
+            target = clean_name
             try:
                 dm = DatabaseManager(db_file)
                 stats = dm.get_summary_stats()
-                if "target" in stats:
+                if "target" in stats and stats["target"] and stats["target"] != "Unknown":
                     target = stats["target"]
             except Exception:
                 pass
             
+            is_curr = (db_file.name == current_db_name)
+            if is_curr:
+                current_target_name = target or clean_name
+            
             databases.append({
-                "name": db_file.name,
+                "filename": db_file.name,
+                "name": clean_name,
+                "clean_name": clean_name,
                 "target": target,
+                "display_name": target or clean_name,
                 "size_mb": round(size_mb, 2),
                 "modified": mod_time,
-                "is_current": (db_file.name == current_db_name)
+                "is_current": is_curr
             })
     
     return {
         "current_db": current_db_name,
+        "current_target": current_target_name or (Path(current_db_path).stem if current_db_path else None),
         "databases": databases
     }
 
@@ -88,7 +102,61 @@ async def select_database(req: SelectDbRequest, request: Request) -> Dict:
     return {
         "success": True,
         "current_db": db_file.name,
+        "clean_name": db_file.stem,
         "db_path": str(db_file.resolve())
+    }
+
+
+@router.post("/databases/delete")
+@router.delete("/databases/{db_name}")
+async def delete_database(
+    request: Request,
+    req: Optional[DeleteDbRequest] = None,
+    db_name: Optional[str] = None
+) -> Dict:
+    """Delete a SQLite database file from ./data/dbs/."""
+    target_raw = (req.name if req else None) or db_name
+    if not target_raw:
+        raise HTTPException(status_code=400, detail="Database name is required")
+    
+    clean_target = target_raw.strip()
+    if not clean_target.endswith(".sqlite"):
+        filename = f"{clean_target}.sqlite"
+    else:
+        filename = clean_target
+        
+    safe_filename = Path(filename).name
+    db_file = Path.cwd() / "data" / "dbs" / safe_filename
+    if not db_file.exists():
+        raise HTTPException(status_code=404, detail=f"Database '{safe_filename}' not found")
+    
+    try:
+        db_file.unlink()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete database: {exc}")
+    
+    # Check if this was the active database
+    current_db_path = getattr(request.app.state, "db_path", None)
+    was_current = False
+    new_active_db = None
+    if current_db_path and Path(current_db_path).resolve() == db_file.resolve():
+        was_current = True
+        remaining_dbs = sorted((Path.cwd() / "data" / "dbs").glob("*.sqlite"))
+        if remaining_dbs:
+            new_db_file = remaining_dbs[0]
+            request.app.state.db_manager = DatabaseManager(new_db_file)
+            request.app.state.db_path = str(new_db_file.resolve())
+            new_active_db = new_db_file.stem
+        else:
+            request.app.state.db_manager = None
+            request.app.state.db_path = None
+    
+    return {
+        "success": True,
+        "deleted": safe_filename,
+        "clean_name": safe_filename[:-7] if safe_filename.endswith(".sqlite") else safe_filename,
+        "was_current": was_current,
+        "new_active_db": new_active_db
     }
 
 

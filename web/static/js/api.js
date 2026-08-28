@@ -66,6 +66,16 @@ class APIClient {
         });
     }
 
+    async deleteDatabase(dbName) {
+        return this.request('/databases/delete', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name: dbName })
+        });
+    }
+
     getExportUrl(format = 'json') {
         return `${this.baseURL}/export?format=${format}`;
     }

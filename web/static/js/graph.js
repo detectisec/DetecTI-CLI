@@ -2752,13 +2752,47 @@ class EASMDashboard {
             });
         }
 
-        // Database Selector Listener
-        const dbSelector = document.getElementById('db-selector');
-        if (dbSelector) {
-            dbSelector.addEventListener('change', async (e) => {
-                const selectedDb = e.target.value;
-                if (!selectedDb) return;
-                await this.switchDatabase(selectedDb);
+        // Database Selector Dropdown Controls
+        const dbDropdownWrapper = document.getElementById('db-dropdown-wrapper');
+        const btnDbDropdown = document.getElementById('btn-db-dropdown');
+
+        if (btnDbDropdown && dbDropdownWrapper) {
+            btnDbDropdown.addEventListener('click', (e) => {
+                e.stopPropagation();
+                dbDropdownWrapper.classList.toggle('active');
+                const isExpanded = dbDropdownWrapper.classList.contains('active');
+                btnDbDropdown.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+            });
+
+            // Close dropdown when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!dbDropdownWrapper.contains(e.target)) {
+                    dbDropdownWrapper.classList.remove('active');
+                    btnDbDropdown.setAttribute('aria-expanded', 'false');
+                }
+            });
+        }
+
+        // Delete Database Modal Controls
+        const deleteDbModal = document.getElementById('delete-db-modal');
+        const btnCloseDeleteDb = document.getElementById('btn-close-delete-db-modal');
+        const btnCancelDeleteDb = document.getElementById('btn-cancel-delete-db');
+        const btnConfirmDeleteDb = document.getElementById('btn-confirm-delete-db');
+
+        if (btnCloseDeleteDb) {
+            btnCloseDeleteDb.addEventListener('click', () => this.closeDeleteDbModal());
+        }
+        if (btnCancelDeleteDb) {
+            btnCancelDeleteDb.addEventListener('click', () => this.closeDeleteDbModal());
+        }
+        if (btnConfirmDeleteDb) {
+            btnConfirmDeleteDb.addEventListener('click', async () => await this.confirmDeleteDatabase());
+        }
+        if (deleteDbModal) {
+            deleteDbModal.addEventListener('click', (e) => {
+                if (e.target === deleteDbModal) {
+                    this.closeDeleteDbModal();
+                }
             });
         }
 
@@ -2811,38 +2845,166 @@ class EASMDashboard {
     async loadDatabases() {
         try {
             console.log('Loading available databases list...');
-            const dbSelector = document.getElementById('db-selector');
-            if (!dbSelector) return;
+            const listEl = document.getElementById('db-dropdown-list');
+            const labelEl = document.getElementById('current-db-label');
+            const countBadge = document.getElementById('db-count-badge');
+            const dbInfoEl = document.getElementById('db-info');
 
             const data = await window.api.getDatabases();
-            dbSelector.innerHTML = '';
+            const databases = data.databases || [];
 
-            if (!data.databases || data.databases.length === 0) {
-                const opt = document.createElement('option');
-                opt.value = '';
-                opt.textContent = 'No databases found';
-                dbSelector.appendChild(opt);
+            if (countBadge) {
+                countBadge.textContent = databases.length;
+            }
+
+            // Determine active target / database clean name without .sqlite
+            let activeCleanName = 'No Database';
+            if (data.current_target) {
+                activeCleanName = String(data.current_target).replace(/\.sqlite$/i, '');
+            } else if (data.current_db) {
+                activeCleanName = String(data.current_db).replace(/\.sqlite$/i, '');
+            }
+
+            if (labelEl) {
+                labelEl.textContent = activeCleanName;
+                labelEl.title = `Current Database: ${activeCleanName}`;
+            }
+
+            if (dbInfoEl) {
+                dbInfoEl.textContent = `DB: ${activeCleanName}`;
+            }
+
+            if (!listEl) return;
+            listEl.innerHTML = '';
+
+            if (databases.length === 0) {
+                listEl.innerHTML = `
+                    <div style="padding: 0.8rem; text-align: center; color: var(--text-muted); font-size: 0.78rem;">
+                        No databases found in ./data/dbs/
+                    </div>
+                `;
                 return;
             }
 
-            data.databases.forEach(db => {
-                const opt = document.createElement('option');
-                opt.value = db.name;
-                const targetText = db.target && db.target !== 'Unknown' ? ` (${db.target})` : '';
-                opt.textContent = `${db.name}${targetText}`;
-                if (db.is_current) {
-                    opt.selected = true;
+            databases.forEach(db => {
+                const itemEl = document.createElement('div');
+                itemEl.className = `db-dropdown-item ${db.is_current ? 'is-active' : ''}`;
+                
+                const dbFile = db.filename || (db.name && db.name.endsWith('.sqlite') ? db.name : `${db.name}.sqlite`);
+                const cleanDisplayName = String(db.display_name || db.target || db.clean_name || db.name || '').replace(/\.sqlite$/i, '');
+                const metaText = `${db.size_mb || 0} MB • ${db.modified || 'Recent'}`;
+
+                itemEl.innerHTML = `
+                    <button type="button" class="db-item-main" title="Switch to database: ${cleanDisplayName}">
+                        <i data-lucide="database" class="db-item-icon"></i>
+                        <div class="db-item-info">
+                            <span class="db-item-name">${this.escapeHtml(cleanDisplayName)}</span>
+                            <span class="db-item-meta">${this.escapeHtml(metaText)}</span>
+                        </div>
+                    </button>
+                    <button type="button" class="btn-delete-db" title="Delete database ${cleanDisplayName}" aria-label="Delete database ${cleanDisplayName}">
+                        <i data-lucide="trash-2" class="ui-icon" style="width: 14px; height: 14px;"></i>
+                    </button>
+                `;
+
+                // Switch database on click
+                const mainBtn = itemEl.querySelector('.db-item-main');
+                if (mainBtn) {
+                    mainBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        const dropdownWrapper = document.getElementById('db-dropdown-wrapper');
+                        if (dropdownWrapper) dropdownWrapper.classList.remove('active');
+                        await this.switchDatabase(dbFile);
+                    });
                 }
-                dbSelector.appendChild(opt);
+
+                // Open Delete Modal on click
+                const deleteBtn = itemEl.querySelector('.btn-delete-db');
+                if (deleteBtn) {
+                    deleteBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.openDeleteDbModal(dbFile, cleanDisplayName);
+                    });
+                }
+
+                listEl.appendChild(itemEl);
             });
 
-            // Update db-info badge in header
-            const dbInfoEl = document.getElementById('db-info');
-            if (dbInfoEl && data.current_db) {
-                dbInfoEl.textContent = `DB: ${data.current_db}`;
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
             }
         } catch (error) {
             console.error('Failed to load databases list:', error);
+        }
+    }
+
+    openDeleteDbModal(filename, cleanName) {
+        this.pendingDbDelete = { filename, cleanName };
+        const modal = document.getElementById('delete-db-modal');
+        const targetNameEl = document.getElementById('delete-db-target-name');
+        if (targetNameEl) {
+            targetNameEl.textContent = cleanName;
+        }
+        if (modal) {
+            modal.style.display = 'flex';
+        }
+        // Close dropdown menu if open
+        const dropdownWrapper = document.getElementById('db-dropdown-wrapper');
+        if (dropdownWrapper) dropdownWrapper.classList.remove('active');
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    closeDeleteDbModal() {
+        this.pendingDbDelete = null;
+        const modal = document.getElementById('delete-db-modal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    async confirmDeleteDatabase() {
+        if (!this.pendingDbDelete) return;
+        const { filename, cleanName } = this.pendingDbDelete;
+        const confirmBtn = document.getElementById('btn-confirm-delete-db');
+
+        try {
+            if (confirmBtn) {
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = '<span>Deleting...</span>';
+            }
+
+            const res = await window.api.deleteDatabase(filename);
+            this.closeDeleteDbModal();
+
+            if (res && res.success) {
+                this.showToast('success', `Database '${cleanName}' deleted successfully.`);
+                
+                if (res.was_current) {
+                    if (res.new_active_db) {
+                        await this.switchDatabase(res.new_active_db);
+                    } else {
+                        // No remaining databases
+                        if (this.cy) {
+                            this.cy.elements().remove();
+                        }
+                        await this.loadDatabases();
+                        await this.loadSummary();
+                    }
+                } else {
+                    await this.loadDatabases();
+                }
+            } else {
+                this.showToast('error', (res && (res.detail || res.error)) || `Failed to delete database '${cleanName}'.`);
+            }
+        } catch (error) {
+            console.error('Error deleting database:', error);
+            this.showToast('error', `Error deleting database: ${error.message}`);
+        } finally {
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.innerHTML = '<i data-lucide="trash-2" class="ui-icon" style="width: 14px; height: 14px;"></i><span>Delete Database</span>';
+                if (typeof lucide !== 'undefined') lucide.createIcons();
+            }
         }
     }
 
