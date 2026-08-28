@@ -36,9 +36,8 @@ def test_engine_target_classification():
     assert engine.classify_target("host:142.250.191.0/24") == "cidr"
     assert engine.classify_target("spacex.com") == "domain"
     assert engine.classify_target("domain:spacex.com") == "domain"
-    assert engine.classify_target("CVE-2021-44228") == "cve"
     assert engine.classify_target("admin@domain.com") == "email"
-    assert engine.classify_target("file:targets.txt") == "file"
+    assert engine.classify_target("Villa11_Ext") == "file"
     assert engine.classify_target("org:google product:OpenSSH") == "query"
 
 

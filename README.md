@@ -198,6 +198,13 @@ flowchart TD
   - **Mandatory "Verified Active" Enforcement**: Scans are strictly targeted at ports confirmed open and active via Masscan. Unverified passive ports trigger a targeted Masscan pre-scan verification prior to template execution. If unverified or unavailable, Nuclei safely skips with explicit rationale logged.
   - Configurable severity filters (Critical, High, Medium, Low, Info), protocol/template tags, rate limits, concurrency, and custom flags.
   - Automated database merging, deduplication, and immediate Cytoscape graph node generation with weaponized PoC linkage.
+- **🎯 Target Anchoring & Active Recon Staging**:
+  - Targets (IPs, CIDR subnets, domains, or target lists passed via `targets.txt`) without passive reconnaissance records on external search engines are automatically anchored as `Target (Awaiting Active Recon)` nodes.
+  - Guarantees that every queried asset is mapped into the SQLite database and rendered in the DetecTIHound interactive graph, ready for active port discovery (Masscan) and vulnerability probing (Nuclei).
+- **⚡ Domain-Level Rate Limiting & API Resilience**:
+  - Automatic rate-limit synchronization with official API specifications (e.g. Shodan 1 request/second) to prevent HTTP 429 throttling.
+  - Smart pre-flight validation caching and non-blocking retry-after handling during large batch file executions.
+  - Exact API diagnostic messaging (`No information available for that IP.`, rate limit notifications) logged and attributed directly to each target in reports and console streams.
 - **🔐 Pre-Flight API Verification & Sanity Checking**:
   - Built-in sanity layer (`config-check` and engine pre-flight) that filters dummy placeholder keys and verifies valid authentication before running scans, preventing silent 401/403 authorization errors.
 - **📊 Executive & Structured Reporting**:
@@ -304,12 +311,19 @@ You can verify your configuration anytime:
 ./detecti-cli scan -t spacex.com
 ```
 
-### 3. Scan a Specific CVE with EPSS, CISA KEV, and PoCs
+### 3. Scan a Batch Target List from File
+Pass any file containing targets (one IP, CIDR, or domain per line) directly to `-t`:
+```bash
+./detecti-cli scan -t targets.txt
+```
+> 💡 **Tip**: Automatically validates API credentials once for the entire batch, provides live per-target progress updates, and maps all targets into a unified SQLite database and Cytoscape topology in DetecTIHound ready for active recon.
+
+### 4. Scan a Specific CVE with EPSS, CISA KEV, and PoCs
 ```bash
 ./detecti-cli scan -t CVE-2021-44228
 ```
 
-### 4. Advanced Shodan Search Queries
+### 5. Advanced Shodan Search Queries
 You can pass custom Shodan search queries directly into the target `-t` parameter. **Always enclose the query in double quotes ("")**.
 
 ```bash
@@ -324,24 +338,27 @@ You can pass custom Shodan search queries directly into the target `-t` paramete
 ```
 > 💡 **Tip**: Explore all available search filters in the official [Shodan Search Filters Guide](https://www.shodan.io/search/filters).
 
-### 5. Filter Vulnerabilities by CVSS Severity
+### 6. Filter Vulnerabilities by CVSS Severity
 ```bash
 ./detecti-cli scan -t 142.250.191.68 --cvss critical
 ```
 
-### 6. Automatic SQLite Database Persistence & DetecTIHound Launch
+### 7. Automatic SQLite Database Persistence & DetecTIHound Launch
 Target scans automatically save all correlated entities (Domains, IPs, Ports, Services, CVEs, PoCs) into `./data/dbs/{target_root}.sqlite` and automatically launch the **DetecTIHound** WebGUI:
 
 ```bash
 # Scan a domain (automatically creates ./data/dbs/spacex.com.sqlite and starts Hound)
 ./detecti-cli scan -t spacex.com
 
+# Scan a batch list of targets
+./detecti-cli scan -t targets.txt
+
 # Scan with custom database name
 ./detecti-cli scan -t 142.250.191.0/24 --create-db google_net
 ```
 > 💡 All scan databases are centralized in `./data/dbs/` so both the CLI and DetecTIHound can automatically discover, list, and switch between them. (Note: Standalone CVE lookups like `CVE-2021-44228` do not create databases).
 
-### 7. Export Reports (JSON, Markdown & HTML)
+### 8. Export Reports (JSON, Markdown & HTML)
 ```bash
 # Export Markdown executive report
 ./detecti-cli scan -t example.com -o markdown -f report.md

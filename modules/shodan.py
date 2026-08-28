@@ -26,9 +26,14 @@ class ShodanModule(BaseModule):
     description: str = "Shodan.io internet-wide scanner & asset intelligence"
     category: str = "recon"
 
-    def __init__(self, client: Optional[AsyncHTTPClient] = None):
-        super().__init__(client=client)
+    def __init__(
+        self,
+        client: Optional[AsyncHTTPClient] = None,
+        progress_callback: Optional[Any] = None,
+    ):
+        super().__init__(client=client, progress_callback=progress_callback)
         self._auth_failed = False
+        self._validated_result: Optional[tuple[bool, str]] = None
 
     def is_configured(self) -> bool:
         """Check if valid Shodan API key is set."""
@@ -39,20 +44,45 @@ class ShodanModule(BaseModule):
 
     async def validate_credentials(self) -> bool:
         """Perform a fast pre-flight authentication verification check against Shodan API."""
+        is_valid, _ = await self.validate_credentials_detailed()
+        return is_valid
+
+    async def validate_credentials_detailed(self, force: bool = False) -> tuple[bool, str]:
+        """Perform a fast pre-flight authentication check returning validity and human-readable status."""
+        if not force and self._validated_result is not None:
+            return self._validated_result
+
         if not self.is_configured():
-            return False
+            return False, "Not Configured"
         url = "https://api.shodan.io/api-info"
         params = {"key": settings.shodan_api_key}
         try:
-            resp = await self.http_client.get(url=url, params=params, timeout=6.0, raise_for_status=False)
-            if resp.status_code in (401, 403):
+            resp = await self.http_client.get(
+                url=url,
+                params=params,
+                timeout=4.0,
+                max_retries=1,
+                max_retry_delay=2.0,
+                raise_for_status=False,
+            )
+            if resp.status_code == 200:
+                res = (True, "Active & Valid")
+            elif resp.status_code in (401, 403):
                 self._auth_failed = True
                 logger.debug("Shodan API key validation failed (HTTP 401/403).")
-                return False
-            return resp.status_code == 200
+                res = (False, "Invalid Key (HTTP 401/403)")
+            elif resp.status_code == 429:
+                logger.warning("Shodan API rate limit reached during pre-flight check.")
+                res = (False, "Rate Limited / Throttled (HTTP 429)")
+            else:
+                logger.debug(f"Shodan API key pre-check returned HTTP {resp.status_code}.")
+                res = (False, f"API Error (HTTP {resp.status_code})")
         except Exception as exc:
             logger.debug(f"Shodan API key pre-check encountered network exception: {exc}")
-            return True
+            res = (False, f"Network / Timeout Error ({type(exc).__name__})")
+
+        self._validated_result = res
+        return res
 
     async def run(
         self,
@@ -85,7 +115,7 @@ class ShodanModule(BaseModule):
                 # Fallback for small subnets (<= /28) if net query returned no results
                 if network.num_addresses <= 16:
                     hosts = list(network.hosts())
-                    host_tasks = [self.get_host_info(str(host_ip)) for host_ip in hosts]
+                    host_tasks = [self.get_host_info(str(host_ip), context=context) for host_ip in hosts]
                     if host_tasks:
                         results = await asyncio.gather(*host_tasks, return_exceptions=True)
                         for res in results:
@@ -98,7 +128,7 @@ class ShodanModule(BaseModule):
         # 2. Direct IP Address Check
         try:
             ipaddress.ip_address(clean_target)
-            return await self.get_host_info(clean_target)
+            return await self.get_host_info(clean_target, context=context)
         except ValueError:
             pass
 
@@ -113,12 +143,38 @@ class ShodanModule(BaseModule):
         query = target[5:] if target.startswith("host:") else target
         return await self.search_query(query)
 
-    async def get_host_info(self, ip: str) -> List[Finding]:
+    async def get_host_info(self, ip: str, context: Optional[Dict[str, Any]] = None) -> List[Finding]:
         """Fetch host info and ports from Shodan for a specific IP."""
         url = f"https://api.shodan.io/shodan/host/{ip}"
         params = {"key": settings.shodan_api_key, "minify": "false"}
 
-        data = await self.http_client.get_json(url=url, params=params, timeout=20.0)
+        try:
+            resp = await self.http_client.get(url=url, params=params, timeout=20.0, raise_for_status=False)
+            if resp.status_code == 200:
+                data = resp.json()
+            else:
+                try:
+                    err_payload = resp.json()
+                    err_msg = err_payload.get("error") if isinstance(err_payload, dict) else str(err_payload)
+                except Exception:
+                    err_msg = resp.text.strip() or f"HTTP {resp.status_code}"
+
+                log_entry = f"Shodan [{ip}]: {err_msg}"
+                if resp.status_code == 404:
+                    logger.info(log_entry)
+                elif resp.status_code == 429:
+                    logger.warning(log_entry)
+                else:
+                    logger.debug(log_entry)
+
+                self.notify(f"[{ip}] Shodan: {err_msg}")
+                if context is not None and "warnings" in context and isinstance(context["warnings"], list):
+                    context["warnings"].append(log_entry)
+                return []
+        except Exception as exc:
+            logger.debug(f"Shodan host query exception for {ip}: {exc}")
+            return []
+
         if not data:
             return []
 

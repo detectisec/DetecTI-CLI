@@ -303,6 +303,12 @@ def render_executive_summary(result: ScanResult) -> None:
     console.print("")
     console.print(render_summary_panel(result.summary, result.elapsed_seconds))
 
+    # Runtime API & Recon Notices (e.g. Shodan [IP]: No information available for that IP.)
+    if result.warnings:
+        console.print("")
+        for w in result.warnings:
+            console.print(f" [warning][!][/warning] [yellow]{w}[/yellow]")
+
     # 2. Critical & High-Impact Vulnerabilities Table (Only for standalone CVE lookups)
     if is_cve:
         all_vulns: List[tuple[str, Any]] = []

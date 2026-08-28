@@ -70,7 +70,7 @@ class ThreatTrackEngine:
         self.http_client = client or http_client
         self.progress_callback = progress_callback
         self.modules: Dict[str, BaseModule] = {
-            name: cls(client=self.http_client)
+            name: cls(client=self.http_client, progress_callback=self._notify)
             for name, cls in self.MODULE_REGISTRY.items()
         }
 
@@ -82,7 +82,7 @@ class ThreatTrackEngine:
     def classify_target(self, target: str) -> str:
         """Identify target classification (ip, cidr, domain, cve, query, file, email)."""
         target = target.strip()
-        if target.startswith("file:") or (Path(target).is_file() and not target.startswith("http")):
+        if Path(target).is_file() and not target.startswith("http"):
             return "file"
         if target.startswith("host:"):
             inner = target[5:]
@@ -126,12 +126,12 @@ class ThreatTrackEngine:
         if "shodan" in active_mod_names:
             shodan_mod: ShodanModule = self.modules["shodan"]  # type: ignore
             if shodan_mod.is_configured():
-                is_valid = await shodan_mod.validate_credentials()
+                is_valid, status_msg = await shodan_mod.validate_credentials_detailed()
                 status_report["shodan"] = {
                     "name": "Shodan",
                     "configured": True,
                     "valid": is_valid,
-                    "status": "Active & Valid" if is_valid else "Invalid Credentials (Bypassed)",
+                    "status": status_msg if not is_valid else "Active & Valid",
                     "tier": "Standard API",
                 }
             else:
@@ -147,12 +147,12 @@ class ThreatTrackEngine:
         if "censys" in active_mod_names:
             censys_mod: CensysModule = self.modules["censys"]  # type: ignore
             if censys_mod.is_configured():
-                is_valid = await censys_mod.validate_credentials()
+                is_valid, status_msg = await censys_mod.validate_credentials_detailed()
                 status_report["censys"] = {
                     "name": "Censys",
                     "configured": True,
                     "valid": is_valid,
-                    "status": "Active & Valid" if is_valid else "Invalid / Unauthorized (Bypassed)",
+                    "status": status_msg if not is_valid else "Active & Valid",
                     "tier": "PAT Token" if censys_mod.pat_token else "Legacy API",
                 }
             else:
@@ -223,6 +223,7 @@ class ThreatTrackEngine:
         target: str,
         enabled_modules: Optional[List[str]] = None,
         cvss_filter: Optional[str] = None,
+        skip_preflight: bool = False,
     ) -> ScanResult:
         """Run complete scan pipeline organized per host and domain."""
         target = target.strip()
@@ -231,8 +232,7 @@ class ThreatTrackEngine:
 
         # Handle file input containing multiple targets
         if target_type == "file":
-            file_path = target[5:] if target.startswith("file:") else target
-            return await self._scan_file(file_path, enabled_modules, cvss_filter)
+            return await self._scan_file(target, enabled_modules, cvss_filter)
 
         active_mod_names = (
             [m for m in enabled_modules if m in self.modules]
@@ -240,9 +240,13 @@ class ThreatTrackEngine:
             else list(self.modules.keys())
         )
 
-        # Pre-flight API verification layer: validate all APIs present in environment/config
-        self._notify("engine", "Verifying environment API credentials and endpoints...")
-        await self.verify_environment_apis(active_mod_names)
+        # Pre-flight API verification layer: validate all APIs present in environment/config (if not skipped)
+        if not skip_preflight:
+            self._notify("engine", "Verifying environment API credentials and endpoints...")
+            api_statuses = await self.verify_environment_apis(active_mod_names)
+            for mod, info in api_statuses.items():
+                if info.get("configured") and not info.get("valid"):
+                    self._notify(mod, f"{info.get('name')}: {info.get('status')}")
 
         result = ScanResult(
             target=target,
@@ -251,7 +255,7 @@ class ThreatTrackEngine:
             modules_run=active_mod_names,
         )
 
-        context: Dict[str, Any] = {"target": target, "target_type": target_type, "cves": set()}
+        context: Dict[str, Any] = {"target": target, "target_type": target_type, "cves": set(), "warnings": []}
         raw_recon_findings: List[Finding] = []
 
         # ----------------------------------------------------
@@ -410,6 +414,33 @@ class ThreatTrackEngine:
                         host_obj.domains.append(f.value)
 
         # ----------------------------------------------------
+        # Ensure Target Anchor in Hosts Map & Domain Discoveries
+        # (Guarantees target nodes exist on DetecTIHound graph for active recon staging)
+        # ----------------------------------------------------
+        clean_target = target
+        if clean_target.startswith("host:"):
+            clean_target = clean_target[5:]
+        elif clean_target.startswith("domain:"):
+            clean_target = clean_target[7:]
+
+        if target_type == "ip" and clean_target not in hosts_map:
+            hosts_map[clean_target] = HostResult(
+                ip=clean_target,
+                sources=["Target (Awaiting Active Recon)"],
+            )
+            host_cves_map[clean_target] = set()
+
+        if target_type == "domain" and not domain_findings and not any(clean_target in h.domains or clean_target in h.hostnames for h in hosts_map.values()):
+            domain_findings.append(
+                Finding(
+                    type=FindingType.SUBDOMAIN,
+                    target=clean_target,
+                    value=clean_target,
+                    source="Target",
+                )
+            )
+
+        # ----------------------------------------------------
         # Stage 2: Threat Intelligence & Vulnerability Enrichment (NVD, EPSS, CISA KEV)
         # ----------------------------------------------------
         enriched_vulns: Dict[str, VulnerabilityData] = {}
@@ -559,6 +590,7 @@ class ThreatTrackEngine:
 
         result.hosts = list(hosts_map.values())
         result.findings = final_findings
+        result.warnings = list(dict.fromkeys(context.get("warnings", [])))
         result.completed_at = datetime.now(timezone.utc)
         result.elapsed_seconds = time.monotonic() - start_time
         result.calculate_summary()
@@ -572,13 +604,27 @@ class ThreatTrackEngine:
         enabled_modules: Optional[List[str]],
         cvss_filter: Optional[str],
     ) -> ScanResult:
-        """Process file containing targets line-by-line."""
+        """Process file containing targets line-by-line with pre-flight check executed once and live progress."""
         path = Path(file_path)
         if not path.is_file():
             raise FileNotFoundError(f"Input file not found: {file_path}")
 
         lines = [line.strip() for line in path.read_text().splitlines() if line.strip() and not line.startswith("#")]
-        self._notify("engine", f"Loaded {len(lines)} targets from {file_path}")
+        total = len(lines)
+        self._notify("engine", f"Loaded {total} targets from {file_path}")
+
+        active_mod_names = (
+            [m for m in enabled_modules if m in self.modules]
+            if enabled_modules and "all" not in enabled_modules
+            else list(self.modules.keys())
+        )
+
+        # Pre-flight API verification layer: validate all APIs once for the batch
+        self._notify("engine", "Verifying environment API credentials and endpoints...")
+        api_statuses = await self.verify_environment_apis(active_mod_names)
+        for mod, info in api_statuses.items():
+            if info.get("configured") and not info.get("valid"):
+                self._notify(mod, f"{info.get('name')}: {info.get('status')}")
 
         combined_result = ScanResult(
             target=file_path,
@@ -589,17 +635,27 @@ class ThreatTrackEngine:
 
         all_findings: List[Finding] = []
         all_hosts: List[HostResult] = []
+        all_warnings: List[str] = []
 
-        for line in lines:
-            sub_res = await self.scan(line, enabled_modules=enabled_modules, cvss_filter=cvss_filter)
+        for idx, line in enumerate(lines, 1):
+            self._notify("engine", f"Processing target [{idx}/{total}]: {line}")
+            sub_res = await self.scan(
+                line,
+                enabled_modules=enabled_modules,
+                cvss_filter=cvss_filter,
+                skip_preflight=True,
+            )
             all_findings.extend(sub_res.findings)
             all_hosts.extend(sub_res.hosts)
+            all_warnings.extend(sub_res.warnings)
 
         combined_result.hosts = all_hosts
         combined_result.findings = all_findings
+        combined_result.warnings = list(dict.fromkeys(all_warnings))
         combined_result.completed_at = datetime.now(timezone.utc)
         combined_result.elapsed_seconds = (combined_result.completed_at - combined_result.started_at).total_seconds()
         combined_result.calculate_summary()
+        self._notify("engine", f"Batch scan finished: processed {total} targets with {len(all_findings)} findings.")
         return combined_result
 
 

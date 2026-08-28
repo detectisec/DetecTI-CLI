@@ -388,31 +388,44 @@ def test_shodan_search_pagination(monkeypatch):
         page1_ips = [f"10.0.0.{i}" for i in range(1, 101)]
         page2_ips = [f"10.0.1.{i}" for i in range(1, 101)]
 
-        async def mock_get_json(self, url, params=None, timeout=None):
+        class MockResponse:
+            def __init__(self, data, status_code=200):
+                self.status_code = status_code
+                self._data = data
+
+            def json(self):
+                return self._data
+
+        async def mock_get(self, url, headers=None, params=None, timeout=None, **kwargs):
             if "host/search" in url:
-                page = params.get("page", 1)
+                page = (params or {}).get("page", 1)
                 if page == 1:
-                    return {
+                    return MockResponse({
                         "total": 200,
                         "matches": [{"ip_str": ip, "port": 80} for ip in page1_ips],
-                    }
+                    })
                 elif page == 2:
-                    return {
+                    return MockResponse({
                         "total": 200,
                         "matches": [{"ip_str": ip, "port": 80} for ip in page2_ips],
-                    }
-                return {"total": 200, "matches": []}
+                    })
+                return MockResponse({"total": 200, "matches": []})
             elif "shodan/host/" in url:
                 ip = url.split("/")[-1]
-                return {
+                return MockResponse({
                     "ip_str": ip,
                     "hostnames": [],
                     "domains": [],
                     "ports": [80],
                     "data": [{"port": 80, "product": "nginx"}],
-                }
-            return None
+                })
+            return MockResponse(None, status_code=404)
 
+        async def mock_get_json(self, url, headers=None, params=None, timeout=None, **kwargs):
+            resp = await mock_get(self, url, headers=headers, params=params, timeout=timeout, **kwargs)
+            return resp.json() if resp.status_code == 200 else None
+
+        monkeypatch.setattr(AsyncHTTPClient, "get", mock_get)
         monkeypatch.setattr(AsyncHTTPClient, "get_json", mock_get_json)
 
         findings = await module.search_query("org:TestOrg")

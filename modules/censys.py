@@ -161,8 +161,10 @@ class CensysModule(BaseModule):
         pat_token: Optional[str] = None,
         org_id: Optional[str] = None,
         base_url: Optional[str] = None,
+        progress_callback: Optional[Any] = None,
+        **kwargs: Any,
     ):
-        super().__init__(client=client)
+        super().__init__(client=client, progress_callback=progress_callback)
         from config import is_placeholder_key
         raw_pat = pat_token or settings.censys_pat_token or os.getenv("CENSYS_PAT_TOKEN")
         self.pat_token = None if is_placeholder_key(raw_pat) else raw_pat
@@ -188,20 +190,37 @@ class CensysModule(BaseModule):
 
     async def validate_credentials(self) -> bool:
         """Perform a non-intrusive pre-flight authentication verification check."""
+        is_valid, _ = await self.validate_credentials_detailed()
+        return is_valid
+
+    async def validate_credentials_detailed(self) -> tuple[bool, str]:
+        """Perform a fast pre-flight authentication check returning validity and status."""
         if not self.is_configured():
-            return False
+            return False, "Not Configured"
         url = f"{self.base_url}/global/asset/host/8.8.8.8"
         headers = self._get_auth_headers(accept_header="application/vnd.censys.api.v3.host.v1+json")
         try:
-            resp = await self.http_client.get(url=url, headers=headers, timeout=6.0, raise_for_status=False)
-            if resp.status_code in (401, 403):
+            resp = await self.http_client.get(
+                url=url,
+                headers=headers,
+                timeout=4.0,
+                max_retries=1,
+                max_retry_delay=2.0,
+                raise_for_status=False,
+            )
+            if resp.status_code == 200:
+                return True, "Active & Valid"
+            elif resp.status_code in (401, 403):
                 self._auth_failed = True
                 logger.debug(f"Censys credential validation failed (HTTP {resp.status_code}).")
-                return False
-            return True
+                return False, f"Invalid / Unauthorized (HTTP {resp.status_code})"
+            elif resp.status_code == 429:
+                return False, "Rate Limited / Throttled (HTTP 429)"
+            else:
+                return False, f"API Error (HTTP {resp.status_code})"
         except Exception as exc:
             logger.debug(f"Censys credential pre-check encountered network exception: {exc}")
-            return True
+            return False, f"Network / Timeout Error ({type(exc).__name__})"
 
     def _get_auth_headers(self, accept_header: str = "application/json") -> Dict[str, str]:
         """Generate Platform API v3 Bearer token (or legacy fallback) and Organization headers."""

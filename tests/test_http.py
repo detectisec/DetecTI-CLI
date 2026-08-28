@@ -39,3 +39,23 @@ def test_http_client_handles_404(monkeypatch):
         await client.close()
 
     asyncio.run(_test())
+
+
+def test_http_client_shodan_rate_limiting():
+    """Test that requests to shodan.io enforce the configured rate limit delay."""
+    import time
+
+    async def _test():
+        client = AsyncHTTPClient()
+        url = "https://api.shodan.io/api-info"
+
+        t0 = time.monotonic()
+        await client._enforce_domain_rate_limit(url)
+        await client._enforce_domain_rate_limit(url)
+        t1 = time.monotonic()
+
+        # Elapsed time must be at least the configured shodan delay (~1.05s)
+        assert (t1 - t0) >= 0.95
+        await client.close()
+
+    asyncio.run(_test())

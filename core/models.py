@@ -209,6 +209,7 @@ class ScanResult(BaseModel):
     modules_run: List[str] = Field(default_factory=list)
     hosts: List[HostResult] = Field(default_factory=list, description="Detailed per-host dossiers")
     findings: List[Finding] = Field(default_factory=list, description="All flattened findings")
+    warnings: List[str] = Field(default_factory=list, description="API notices and runtime warning logs")
     summary: ScanSummary = Field(default_factory=ScanSummary)
 
     def calculate_summary(self) -> ScanSummary:

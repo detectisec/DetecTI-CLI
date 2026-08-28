@@ -132,6 +132,7 @@ class Settings(BaseSettings):
     nvd_delay_without_key: float = Field(default=6.0, description="Rate limit delay in seconds without NVD key")
     nvd_delay_with_key: float = Field(default=0.6, description="Rate limit delay in seconds with NVD key")
     hackertarget_delay: float = Field(default=1.0, description="Delay between HackerTarget free requests")
+    shodan_delay: float = Field(default=1.05, description="Rate limit delay in seconds for Shodan REST API (1 request/s limit)")
 
     # Threat Intelligence Endpoint URLs
     nvd_api_url: str = "https://services.nvd.nist.gov/rest/json/cves/2.0"

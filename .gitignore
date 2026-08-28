@@ -36,6 +36,7 @@ test_empty_db.js
 .webserver.json
 domain
 testeip
+Villa11_Ext
 *.log
 
 # Databases: Ignore all test/scan databases except the default example dataset

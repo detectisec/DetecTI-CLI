@@ -90,10 +90,9 @@ app.add_typer(hound_app, name="hound")
 def target_to_db_name(target: str) -> str:
     """Convert target string to a clean SQLite database filename (e.g. example.com.sqlite)."""
     t = target.strip()
-    # Remove query prefixes if any
-    if t.startswith("file:"):
-        p = Path(t[5:])
-        base = p.stem or "file_target"
+    # If target is a file path, use its stem
+    if Path(t).is_file() and not t.startswith("http"):
+        base = Path(t).stem or "file_target"
         return f"{base}.sqlite"
     if t.startswith("domain:") or t.startswith("host:"):
         t = t.split(":", 1)[1].strip()
@@ -125,7 +124,7 @@ def scan_command(
         None,
         "-t",
         "--target",
-        help="Target IP, CIDR, domain, email, CVE, search query, or file:LIST.txt",
+        help="Target IP, CIDR, domain, email, CVE, search query, or targets file (e.g., targets.txt)",
     ),
     output_format: str = typer.Option(
         "table",

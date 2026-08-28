@@ -15,8 +15,18 @@ class BaseModule(ABC):
     description: str = "Base collector module"
     category: str = "general"  # recon, osint, vuln, exploit
 
-    def __init__(self, client: Optional[AsyncHTTPClient] = None):
+    def __init__(
+        self,
+        client: Optional[AsyncHTTPClient] = None,
+        progress_callback: Optional[Any] = None,
+    ):
         self.http_client = client or http_client
+        self.progress_callback = progress_callback
+
+    def notify(self, message: str) -> None:
+        """Send notification via progress callback if registered."""
+        if self.progress_callback:
+            self.progress_callback(self.name, message)
 
     @abstractmethod
     async def run(

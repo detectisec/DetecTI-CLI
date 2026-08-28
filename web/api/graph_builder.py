@@ -75,9 +75,9 @@ class GraphBuilder:
         if target_name:
             targets_list = []
             # If target_type is file or list, retrieve the exact targets from the input file on disk
-            if target_type == "file" or "file:" in str(target_name).lower():
+            if target_type == "file":
                 from pathlib import Path
-                clean_path = str(target_name).replace("file:", "").strip()
+                clean_path = str(target_name).strip()
                 file_obj = Path(clean_path)
                 if not file_obj.is_absolute():
                     # Check current directory or relative
