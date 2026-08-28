@@ -283,7 +283,7 @@ class GraphBuilder:
                 })
                 connected_ips.add(ip_id)
         
-        # For any orphaned IPs not linked via subdomains:
+        # For any IPs not linked via subdomains (e.g. file targets, IP lists, direct IP targets):
         cursor = conn.execute("SELECT id, ip, org FROM ip_addresses")
         orphaned_ips = []
         for ip_id, ip, org in cursor.fetchall():
@@ -294,65 +294,28 @@ class GraphBuilder:
             cursor_dom = conn.execute("SELECT id FROM domains LIMIT 1")
             dom_row = cursor_dom.fetchone()
             
-            # When target_root is available (or no domains), connect orphaned/file-list IPs directly to target_root or Org clusters
+            # When target_root is available, connect normalized targets from the list directly to target_root
             if root_target_node:
-                # If there are no domains (e.g. scanning a file of IPs, CIDR, or direct IP query):
-                # Group IPs by their Organization if available to provide clean hierarchy:
-                # Target Root -> Org / Network -> IPs
-                org_groups: Dict[str, List[int]] = {}
                 for ip_id, ip, org in orphaned_ips:
-                    clean_org = (org or "").strip()
-                    if clean_org and clean_org.lower() != "unknown":
-                        org_groups.setdefault(clean_org, []).append(ip_id)
-                    else:
-                        org_groups.setdefault("Other Networks", []).append(ip_id)
-                
-                # If there's more than one distinct org, create Organization intermediate nodes
-                # Or if there is at least one meaningful org name:
-                meaningful_orgs = [o for o in org_groups.keys() if o != "Other Networks"]
-                
-                if meaningful_orgs and (len(org_groups) > 1 or len(orphaned_ips) > 1):
-                    for org_name, ip_id_list in org_groups.items():
-                        org_node_id = f"org_{abs(hash(org_name)) % 10000000}"
-                        nodes.append({
-                            "data": {
-                                "id": org_node_id,
-                                "label": org_name,
-                                "type": "network",  # Organization / Network ASN cluster node
-                                "name": org_name,
-                                "is_root": False
-                            }
-                        })
-                        # Connect target_root -> Org Node
-                        edges.append({
-                            "data": {
-                                "id": f"e_root_{org_node_id}",
-                                "source": "target_root",
-                                "target": org_node_id,
-                                "label": "MATCHES_DOMAIN"
-                            }
-                        })
-                        # Connect Org Node -> IPs
-                        for ip_id in ip_id_list:
-                            edges.append({
-                                "data": {
-                                    "id": f"e_org_ip_{org_node_id}_{ip_id}",
-                                    "source": org_node_id,
-                                    "target": f"ip_{ip_id}",
-                                    "label": "CONTAINS_IP"
-                                }
-                            })
-                else:
-                    # Direct connection target_root -> IP
-                    for ip_id, ip, org in orphaned_ips:
-                        edges.append({
-                            "data": {
-                                "id": f"e_root_ip_{ip_id}",
-                                "source": "target_root",
-                                "target": f"ip_{ip_id}",
-                                "label": "CONTAINS_IP"
-                            }
-                        })
+                    edges.append({
+                        "data": {
+                            "id": f"e_root_ip_{ip_id}",
+                            "source": "target_root",
+                            "target": f"ip_{ip_id}",
+                            "label": "CONTAINS_IP"
+                        }
+                    })
+            elif dom_row:
+                dom_id = dom_row[0]
+                for ip_id, ip, org in orphaned_ips:
+                    edges.append({
+                        "data": {
+                            "id": f"e_dom_ip_{dom_id}_{ip_id}",
+                            "source": f"dom_{dom_id}",
+                            "target": f"ip_{ip_id}",
+                            "label": "CONTAINS_IP"
+                        }
+                    })
         
         return nodes, edges
     
