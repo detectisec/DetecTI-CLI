@@ -2938,6 +2938,56 @@ class EASMDashboard {
         }
     }
 
+    showToast(type = 'info', message = '', duration = 4000) {
+        try {
+            let container = document.getElementById('toast-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'toast-container';
+                container.className = 'toast-container';
+                document.body.appendChild(container);
+            }
+
+            const toast = document.createElement('div');
+            toast.className = `toast-notification toast-${type}`;
+            
+            let iconName = 'info';
+            if (type === 'success') iconName = 'check-circle-2';
+            else if (type === 'error') iconName = 'alert-octagon';
+            else if (type === 'warning') iconName = 'alert-triangle';
+
+            toast.innerHTML = `
+                <i data-lucide="${iconName}" class="toast-icon"></i>
+                <span class="toast-message">${this.escapeHtml(message)}</span>
+                <button type="button" class="toast-close-btn" aria-label="Close notification">
+                    <i data-lucide="x" class="ui-icon" style="width: 12px; height: 12px;"></i>
+                </button>
+            `;
+
+            const closeBtn = toast.querySelector('.toast-close-btn');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    toast.classList.add('fade-out');
+                    setTimeout(() => toast.remove(), 250);
+                });
+            }
+
+            container.appendChild(toast);
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+
+            setTimeout(() => {
+                if (toast.parentElement) {
+                    toast.classList.add('fade-out');
+                    setTimeout(() => toast.remove(), 250);
+                }
+            }, duration);
+        } catch (e) {
+            console.log(`[Toast ${type}]:`, message);
+        }
+    }
+
     openDeleteDbModal(filename, cleanName) {
         this.pendingDbDelete = { filename, cleanName };
         const modal = document.getElementById('delete-db-modal');

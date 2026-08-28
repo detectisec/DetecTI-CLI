@@ -710,6 +710,110 @@ html, body {
     transform: translateY(-1px);
 }
 
+/* Toast Notification System */
+.toast-container {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    z-index: 3000;
+    pointer-events: none;
+    max-width: 380px;
+}
+
+.toast-notification {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.7rem 0.95rem;
+    border-radius: 8px;
+    background: rgba(13, 17, 38, 0.95);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 16px rgba(0, 240, 255, 0.15);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    font-weight: 500;
+    animation: toastSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: all 0.25s ease;
+}
+
+.toast-notification.fade-out {
+    opacity: 0;
+    transform: translateX(20px) scale(0.95);
+}
+
+@keyframes toastSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.toast-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.toast-message {
+    flex: 1;
+    line-height: 1.35;
+}
+
+.toast-close-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.2rem;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s ease;
+}
+
+.toast-close-btn:hover {
+    color: var(--text-white);
+}
+
+.toast-success {
+    border-left: 3px solid #10b981;
+}
+.toast-success .toast-icon {
+    color: #10b981;
+}
+
+.toast-error {
+    border-left: 3px solid #ef4444;
+}
+.toast-error .toast-icon {
+    color: #ef4444;
+}
+
+.toast-warning {
+    border-left: 3px solid #f59e0b;
+}
+.toast-warning .toast-icon {
+    color: #f59e0b;
+}
+
+.toast-info {
+    border-left: 3px solid var(--cyan-accent);
+}
+.toast-info .toast-icon {
+    color: var(--cyan-accent);
+}
+
 /* Export Dropdown Menu */
 .export-dropdown-wrapper {
     position: relative;
