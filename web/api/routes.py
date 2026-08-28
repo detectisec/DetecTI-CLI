@@ -107,15 +107,18 @@ async def select_database(req: SelectDbRequest, request: Request) -> Dict:
     }
 
 
-@router.post("/databases/delete")
-@router.delete("/databases/{db_name}")
-async def delete_database(
-    request: Request,
-    req: Optional[DeleteDbRequest] = None,
-    db_name: Optional[str] = None
-) -> Dict:
-    """Delete a SQLite database file from ./data/dbs/."""
-    target_raw = (req.name if req else None) or db_name
+def _get_dbs_dir() -> Path:
+    base = Path.cwd() / "data" / "dbs"
+    if base.exists():
+        return base
+    repo_base = Path(__file__).resolve().parent.parent.parent / "data" / "dbs"
+    if repo_base.exists():
+        return repo_base
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+async def _perform_delete_database(target_raw: str, request: Request) -> Dict:
     if not target_raw:
         raise HTTPException(status_code=400, detail="Database name is required")
     
@@ -126,9 +129,17 @@ async def delete_database(
         filename = clean_target
         
     safe_filename = Path(filename).name
-    db_file = Path.cwd() / "data" / "dbs" / safe_filename
+    dbs_dir = _get_dbs_dir()
+    db_file = dbs_dir / safe_filename
+    
     if not db_file.exists():
-        raise HTTPException(status_code=404, detail=f"Database '{safe_filename}' not found")
+        # Case-insensitive match or matching by stem
+        matches = [f for f in dbs_dir.glob("*.sqlite") if f.name.lower() == safe_filename.lower() or f.stem.lower() == clean_target.lower()]
+        if matches:
+            db_file = matches[0]
+            safe_filename = db_file.name
+        else:
+            raise HTTPException(status_code=404, detail=f"Database '{safe_filename}' not found in {dbs_dir}")
     
     try:
         db_file.unlink()
@@ -141,12 +152,12 @@ async def delete_database(
     new_active_db = None
     if current_db_path and Path(current_db_path).resolve() == db_file.resolve():
         was_current = True
-        remaining_dbs = sorted((Path.cwd() / "data" / "dbs").glob("*.sqlite"))
+        remaining_dbs = sorted(dbs_dir.glob("*.sqlite"))
         if remaining_dbs:
             new_db_file = remaining_dbs[0]
             request.app.state.db_manager = DatabaseManager(new_db_file)
             request.app.state.db_path = str(new_db_file.resolve())
-            new_active_db = new_db_file.stem
+            new_active_db = new_db_file.name
         else:
             request.app.state.db_manager = None
             request.app.state.db_path = None
@@ -158,6 +169,18 @@ async def delete_database(
         "was_current": was_current,
         "new_active_db": new_active_db
     }
+
+
+@router.post("/databases/delete")
+async def delete_database_post(req: DeleteDbRequest, request: Request) -> Dict:
+    """Delete a SQLite database file via JSON POST body."""
+    return await _perform_delete_database(req.name, request)
+
+
+@router.delete("/databases/{db_name}")
+async def delete_database_by_param(db_name: str, request: Request) -> Dict:
+    """Delete a SQLite database file via URL path parameter."""
+    return await _perform_delete_database(db_name, request)
 
 
 @router.get("/summary")
