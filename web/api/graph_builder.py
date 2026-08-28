@@ -32,14 +32,14 @@ class GraphBuilder:
                 pass
 
             # 2. Build domain & subdomain nodes
-            domain_nodes, domain_edges, root_target_node, subdomain_to_ips = self._build_domain_nodes(conn, target_name, target_type)
+            domain_nodes, domain_edges, root_target_node, subdomain_to_ips, domain_to_ips = self._build_domain_nodes(conn, target_name, target_type)
             if root_target_node:
                 nodes.append(root_target_node)
             nodes.extend(domain_nodes)
             edges.extend(domain_edges)
             
             # 3. Build IP nodes connected to subdomains/domains (or target root)
-            ip_nodes, ip_edges = self._build_ip_nodes(conn, subdomain_to_ips, root_target_node)
+            ip_nodes, ip_edges = self._build_ip_nodes(conn, subdomain_to_ips, domain_to_ips, root_target_node)
             nodes.extend(ip_nodes)
             edges.extend(ip_edges)
             
@@ -212,6 +212,7 @@ class GraphBuilder:
         
         processed_subdomains = set()
         subdomain_to_ips = {}
+        domain_to_ips = {}
         subdomain_records = []
         
         for row in cursor.fetchall():
@@ -219,6 +220,12 @@ class GraphBuilder:
             
             # Filter out out-of-scope subdomains
             if target_scopes and (not _is_in_scope(sub_name) or not _is_in_scope(domain_name)):
+                continue
+
+            # If sub_name is the root domain itself (e.g. vila11.com.br == vila11.com.br), do not create duplicate subdomain node
+            if sub_name.strip().lower() == domain_name.strip().lower():
+                if ip_id and ip_address:
+                    domain_to_ips.setdefault(domain_id, set()).add(ip_id)
                 continue
 
             # Add subdomain node if not already added
@@ -268,6 +275,9 @@ class GraphBuilder:
         
         for sub_id, sub_name, domain_id, domain_name in cursor.fetchall():
             if target_scopes and (not _is_in_scope(sub_name) or not _is_in_scope(domain_name)):
+                continue
+
+            if sub_name.strip().lower() == domain_name.strip().lower():
                 continue
 
             if sub_id not in processed_subdomains:
@@ -393,9 +403,9 @@ class GraphBuilder:
                     }
                 })
         
-        return nodes, edges, root_target_node, subdomain_to_ips
+        return nodes, edges, root_target_node, subdomain_to_ips, domain_to_ips
     
-    def _build_ip_nodes(self, conn: sqlite3.Connection, subdomain_to_ips: Dict[str, set], root_target_node: Dict | None = None) -> tuple[List[Dict], List[Dict]]:
+    def _build_ip_nodes(self, conn: sqlite3.Connection, subdomain_to_ips: Dict[str, set], domain_to_ips: Dict[str, set] | None = None, root_target_node: Dict | None = None) -> tuple[List[Dict], List[Dict]]:
         """Build IP address nodes connected to Subdomains/Domains or Root Target."""
         nodes = []
         edges = []
@@ -434,6 +444,21 @@ class GraphBuilder:
                     }
                 })
                 connected_ips.add(ip_id)
+
+        # Connect Domains -> IPs (CONTAINS_IP for root domain resolutions)
+        if domain_to_ips:
+            for dom_id, ip_ids in domain_to_ips.items():
+                for ip_id in ip_ids:
+                    if ip_id not in connected_ips:
+                        edges.append({
+                            "data": {
+                                "id": f"e_dom_ip_{dom_id}_{ip_id}",
+                                "source": f"dom_{dom_id}",
+                                "target": f"ip_{ip_id}",
+                                "label": "CONTAINS_IP"
+                            }
+                        })
+                        connected_ips.add(ip_id)
         
         # For any IPs not linked via subdomains (e.g. file targets, IP lists, direct IP targets):
         cursor = conn.execute("SELECT id, ip, org FROM ip_addresses")

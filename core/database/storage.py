@@ -146,20 +146,23 @@ class DatabaseManager:
                             continue
 
                         domain_id = self._get_or_create_domain(conn, domain)
-                        cursor = conn.execute(
-                            "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
-                            (domain_id, subdomain)
-                        )
-                        row = cursor.fetchone()
-                        if row:
-                            subdomain_id = row[0]
-                        else:
-                            subdomain_id = str(uuid.uuid4())
-                            conn.execute("""
-                                INSERT INTO subdomains (id, domain_id, name)
-                                VALUES (?, ?, ?)
-                            """, (subdomain_id, domain_id, subdomain))
-                        subdomain_map[subdomain] = subdomain_id
+                        
+                        # Only insert as a subdomain if it is not the root domain itself
+                        if subdomain != domain:
+                            cursor = conn.execute(
+                                "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
+                                (domain_id, subdomain)
+                            )
+                            row = cursor.fetchone()
+                            if row:
+                                subdomain_id = row[0]
+                            else:
+                                subdomain_id = str(uuid.uuid4())
+                                conn.execute("""
+                                    INSERT INTO subdomains (id, domain_id, name)
+                                    VALUES (?, ?, ?)
+                                """, (subdomain_id, domain_id, subdomain))
+                            subdomain_map[subdomain] = subdomain_id
 
         # 2. Register subdomains from FindingType.HOST_INFO hostnames
         for finding in findings:
@@ -186,20 +189,23 @@ class DatabaseManager:
                                 continue
 
                             domain_id = self._get_or_create_domain(conn, domain)
-                            cursor = conn.execute(
-                                "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
-                                (domain_id, hname_clean)
-                            )
-                            row = cursor.fetchone()
-                            if row:
-                                subdomain_id = row[0]
-                            else:
-                                subdomain_id = str(uuid.uuid4())
-                                conn.execute("""
-                                    INSERT INTO subdomains (id, domain_id, name)
-                                    VALUES (?, ?, ?)
-                                """, (subdomain_id, domain_id, hname_clean))
-                            subdomain_map[hname_clean] = subdomain_id
+                            
+                            # Only insert as a subdomain if it is not the root domain itself
+                            if hname_clean != domain:
+                                cursor = conn.execute(
+                                    "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
+                                    (domain_id, hname_clean)
+                                )
+                                row = cursor.fetchone()
+                                if row:
+                                    subdomain_id = row[0]
+                                else:
+                                    subdomain_id = str(uuid.uuid4())
+                                    conn.execute("""
+                                        INSERT INTO subdomains (id, domain_id, name)
+                                        VALUES (?, ?, ?)
+                                    """, (subdomain_id, domain_id, hname_clean))
+                                subdomain_map[hname_clean] = subdomain_id
         
         return subdomain_map
         
