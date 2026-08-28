@@ -84,7 +84,20 @@ class ThreatTrackEngine:
     def parse_target_metadata(self, target: str) -> Dict[str, Any]:
         """Extract canonical target type, cleaned host/domain, port, and root domain supporting full URLs and subdomains."""
         raw = target.strip()
-        if Path(raw).is_file() and not raw.startswith("http"):
+
+        KNOWN_FILE_EXTENSIONS = {
+            ".txt", ".list", ".csv", ".targets", ".ips", ".log", ".json", ".yaml", ".yml", ".conf", ".cfg"
+        }
+        target_path = Path(raw)
+        is_file_like = (
+            target_path.suffix.lower() in KNOWN_FILE_EXTENSIONS
+            or raw.startswith(("./", "../", "/", "~/"))
+            or "\\" in raw
+            or target_path.is_file()
+        )
+        if is_file_like and not raw.startswith("http"):
+            if not target_path.is_file():
+                raise FileNotFoundError(f"Target file not found: {raw}")
             return {"type": "file", "clean_target": raw, "root_domain": None, "subdomain": None, "port": None}
 
         if raw.upper().startswith("CVE-"):

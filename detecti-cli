@@ -171,11 +171,31 @@ def scan_command(
         print_error("Target is required. Use -t/--target to specify a target.")
         print_info("Examples:")
         print_info(f"  {cli_name} scan -t example.com")
+        print_info(f"  {cli_name} scan -t targets.txt")
         print_info(f"  {cli_name} scan -t 192.168.1.0/24")
         print_info(f"  {cli_name} scan -t CVE-2021-44228")
         print_info(f"Use '{cli_name} scan --help' for more options.")
         raise typer.Exit(1)
-    
+
+    # Validate file target existence if target resembles a file or path
+    KNOWN_FILE_EXTENSIONS = {
+        ".txt", ".list", ".csv", ".targets", ".ips", ".log", ".json", ".yaml", ".yml", ".conf", ".cfg"
+    }
+    target_clean = target.strip()
+    target_path = Path(target_clean)
+    is_file_like = (
+        target_path.suffix.lower() in KNOWN_FILE_EXTENSIONS
+        or target_clean.startswith(("./", "../", "/", "~/"))
+        or "\\" in target_clean
+        or target_path.is_file()
+    )
+    if is_file_like and not target_clean.startswith("http"):
+        if not target_path.is_file():
+            print_banner()
+            print_error(f"Target file not found: [bold white]{target}[/bold white]")
+            print_info("Please verify the file path and ensure the targets file exists.")
+            raise typer.Exit(1)
+
     print_banner()
 
     print_section_header("Scan Configuration")

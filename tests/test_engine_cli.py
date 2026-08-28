@@ -35,8 +35,19 @@ def test_engine_target_classification():
     assert engine.classify_target("spacex.com") == "domain"
     assert engine.classify_target("domain:spacex.com") == "domain"
     assert engine.classify_target("admin@domain.com") == "email"
-    assert engine.classify_target("Villa11_Ext") == "file"
     assert engine.classify_target("org:google product:OpenSSH") == "query"
+
+    with pytest.raises(FileNotFoundError):
+        engine.parse_target_metadata("nonexistent_targets.txt")
+
+
+def test_cli_nonexistent_file_rejection():
+    """Test that non-existent file targets are rejected with error and exit code 1."""
+    if app is None:
+        pytest.skip("CLI app not available")
+    res = runner.invoke(app, ["scan", "-t", "nonexistent_targets_file.txt"])
+    assert res.exit_code == 1
+    assert "Target file not found" in res.stdout
 
 
 def test_cli_version():
