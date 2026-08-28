@@ -22,6 +22,39 @@ from core.models import (
 from .schema import SCHEMA_SQL
 
 
+def _is_in_scope(hostname: str, target_scopes: Set[str]) -> bool:
+    if not hostname or not target_scopes:
+        return True
+    h = str(hostname).strip().lower()
+    if h.startswith("*."):
+        h = h[2:]
+    if h.startswith("http://"):
+        h = h[7:]
+    elif h.startswith("https://"):
+        h = h[8:]
+    if "/" in h:
+        h = h.split("/")[0]
+    if ":" in h:
+        h = h.split(":")[0]
+    
+    for scope in target_scopes:
+        s = str(scope).strip().lower()
+        if s.startswith("*."):
+            s = s[2:]
+        if s.startswith("http://"):
+            s = s[7:]
+        elif s.startswith("https://"):
+            s = s[8:]
+        if "/" in s:
+            s = s.split("/")[0]
+        if ":" in s:
+            s = s.split(":")[0]
+        
+        if h == s or h.endswith(f".{s}"):
+            return True
+    return False
+
+
 class DatabaseManager:
     """Manages SQLite database operations for EASM scan results."""
 
@@ -84,7 +117,7 @@ class DatabaseManager:
         """, (ip_id, host.ip, host.asn, host.org, host.country_name, host.city, host.region_code))
         return ip_id
 
-    def _store_subdomains(self, conn: sqlite3.Connection, findings: List[Finding]) -> Dict[str, str]:
+    def _store_subdomains(self, conn: sqlite3.Connection, findings: List[Finding], target_scopes: Optional[Set[str]] = None) -> Dict[str, str]:
         """Store subdomain findings in database and return subdomain_name -> subdomain_id mapping."""
         subdomain_map = {}
         
@@ -94,6 +127,11 @@ class DatabaseManager:
                 subdomain = finding.value.strip().lower()
                 if subdomain.startswith("*."):
                     subdomain = subdomain[2:]
+                
+                # Enforce in-scope check
+                if target_scopes and not _is_in_scope(subdomain, target_scopes):
+                    continue
+
                 if '.' in subdomain and ' ' not in subdomain and not subdomain.replace('.', '').isdigit():
                     try:
                         import tldextract
@@ -104,6 +142,9 @@ class DatabaseManager:
                         domain = '.'.join(parts[-2:]) if len(parts) >= 2 else subdomain
                     
                     if domain:
+                        if target_scopes and not _is_in_scope(domain, target_scopes):
+                            continue
+
                         domain_id = self._get_or_create_domain(conn, domain)
                         cursor = conn.execute(
                             "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
@@ -127,6 +168,10 @@ class DatabaseManager:
                     hname_clean = hname.strip().lower()
                     if hname_clean.startswith("*."):
                         hname_clean = hname_clean[2:]
+                    
+                    if target_scopes and not _is_in_scope(hname_clean, target_scopes):
+                        continue
+
                     if '.' in hname_clean and ' ' not in hname_clean and not hname_clean.replace('.', '').isdigit():
                         try:
                             import tldextract
@@ -137,6 +182,9 @@ class DatabaseManager:
                             domain = '.'.join(parts[-2:]) if len(parts) >= 2 else hname_clean
                         
                         if domain:
+                            if target_scopes and not _is_in_scope(domain, target_scopes):
+                                continue
+
                             domain_id = self._get_or_create_domain(conn, domain)
                             cursor = conn.execute(
                                 "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
@@ -152,6 +200,8 @@ class DatabaseManager:
                                     VALUES (?, ?, ?)
                                 """, (subdomain_id, domain_id, hname_clean))
                             subdomain_map[hname_clean] = subdomain_id
+        
+        return subdomain_map
         
         return subdomain_map
 
@@ -282,68 +332,90 @@ class DatabaseManager:
                 result.elapsed_seconds, modules_json, len(result.findings), len(result.hosts)
             ))
             
+            # Determine in-scope target roots
+            target_scopes: Set[str] = set()
+            clean_target = result.target.strip().lower()
+            if clean_target.startswith("http://"):
+                clean_target = clean_target[7:]
+            elif clean_target.startswith("https://"):
+                clean_target = clean_target[8:]
+            if "/" in clean_target:
+                clean_target = clean_target.split("/")[0]
+            if ":" in clean_target:
+                clean_target = clean_target.split(":")[0]
+
+            if result.target_type == "domain":
+                try:
+                    import tldextract
+                    ext = tldextract.extract(clean_target)
+                    if ext.registered_domain:
+                        target_scopes.add(ext.registered_domain.lower())
+                except Exception:
+                    pass
+                target_scopes.add(clean_target)
+            elif result.target_type == "file":
+                from pathlib import Path
+                fpath = Path(result.target)
+                if fpath.exists() and fpath.is_file():
+                    for line in fpath.read_text().splitlines():
+                        l_clean = line.strip().lower()
+                        if l_clean and not l_clean.startswith("#"):
+                            if l_clean.startswith("http://"):
+                                l_clean = l_clean[7:]
+                            elif l_clean.startswith("https://"):
+                                l_clean = l_clean[8:]
+                            if "/" in l_clean:
+                                l_clean = l_clean.split("/")[0]
+                            if ":" in l_clean:
+                                l_clean = l_clean.split(":")[0]
+                            if "." in l_clean and not l_clean.replace(".", "").isdigit():
+                                try:
+                                    import tldextract
+                                    ext = tldextract.extract(l_clean)
+                                    if ext.registered_domain:
+                                        target_scopes.add(ext.registered_domain.lower())
+                                except Exception:
+                                    pass
+                                target_scopes.add(l_clean)
+
+            if not target_scopes:
+                for f in result.findings:
+                    if f.type == FindingType.SUBDOMAIN and f.value:
+                        try:
+                            import tldextract
+                            ext = tldextract.extract(f.value)
+                            if ext.registered_domain:
+                                target_scopes.add(ext.registered_domain.lower())
+                        except Exception:
+                            pass
+
             # Store subdomain findings and get mapping
-            subdomain_map = self._store_subdomains(conn, result.findings)
+            subdomain_map = self._store_subdomains(conn, result.findings, target_scopes)
             
-            # Store host data and create subdomain-IP mappings
+            # Store host data
             ip_map = {}  # ip -> ip_id mapping
             for host in result.hosts:
                 ip_id = self._get_or_create_ip(conn, host)
                 ip_map[host.ip] = ip_id
                 
-                # Map hostnames to this IP
-                for hostname in host.hostnames:
-                    hname_clean = hostname.strip().lower()
-                    if hname_clean.startswith("*."):
-                        hname_clean = hname_clean[2:]
-                    
-                    if hname_clean in subdomain_map:
-                        sub_id = subdomain_map[hname_clean]
-                    else:
-                        if '.' in hname_clean and not hname_clean.replace('.', '').isdigit():
-                            try:
-                                import tldextract
-                                ext = tldextract.extract(hname_clean)
-                                dom = ext.registered_domain if ext.registered_domain else '.'.join(hname_clean.split('.')[-2:])
-                            except Exception:
-                                parts = hname_clean.split('.')
-                                dom = '.'.join(parts[-2:]) if len(parts) >= 2 else hname_clean
-                            
-                            if dom:
-                                dom_id = self._get_or_create_domain(conn, dom)
-                                cursor = conn.execute("SELECT id FROM subdomains WHERE domain_id = ? AND name = ?", (dom_id, hname_clean))
-                                row = cursor.fetchone()
-                                if row:
-                                    sub_id = row[0]
-                                else:
-                                    sub_id = str(uuid.uuid4())
-                                    conn.execute("INSERT INTO subdomains (id, domain_id, name) VALUES (?, ?, ?)", (sub_id, dom_id, hname_clean))
-                                subdomain_map[hname_clean] = sub_id
-                            else:
-                                sub_id = None
-                        else:
-                            sub_id = None
-
-                    if sub_id:
-                        conn.execute("""
-                            INSERT OR IGNORE INTO subdomain_ips (subdomain_id, ip_id)
-                            VALUES (?, ?)
-                        """, (sub_id, ip_id))
-                
                 service_ids = self._store_services(conn, ip_id, host)
                 self._store_vulnerabilities(conn, ip_id, host, service_ids)
             
-            # Also ensure all findings with host_ip and subdomain target/value are mapped
+            # Map specific authoritative DNS resolutions (subdomain -> IP)
             for finding in result.findings:
                 hip = finding.host_ip or (finding.host_info.ip if finding.host_info else None)
                 if hip and hip in ip_map:
-                    target_val = finding.target.strip().lower()
-                    if target_val in subdomain_map:
-                        conn.execute("""
-                            INSERT OR IGNORE INTO subdomain_ips (subdomain_id, ip_id)
-                            VALUES (?, ?)
-                        """, (subdomain_map[target_val], ip_map[hip]))
-                    if finding.type == FindingType.SUBDOMAIN and finding.value:
+                    # DNS Resolution specifically associates finding.target (subdomain) with finding.value (IP)
+                    if finding.source == "DNS Resolution" and finding.type == FindingType.HOST_INFO:
+                        sub_target = finding.target.strip().lower()
+                        if sub_target in subdomain_map and finding.value == hip:
+                            conn.execute("""
+                                INSERT OR IGNORE INTO subdomain_ips (subdomain_id, ip_id)
+                                VALUES (?, ?)
+                            """, (subdomain_map[sub_target], ip_map[hip]))
+                    
+                    # Subdomain finding with explicit host_ip
+                    elif finding.type == FindingType.SUBDOMAIN and finding.value and finding.host_ip == hip:
                         sub_val = finding.value.strip().lower()
                         if sub_val in subdomain_map:
                             conn.execute("""

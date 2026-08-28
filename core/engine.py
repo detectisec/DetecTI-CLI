@@ -472,6 +472,12 @@ class ThreatTrackEngine:
         # Stage 1.3: Recursive Threat Intelligence Feedback Loop (Shodan & Censys)
         # (Feeds all resolved subdomain IPs back into Shodan & Censys for full port, service, banner & CVE discovery)
         # ----------------------------------------------------
+        target_scopes: Set[str] = set()
+        if root_domain:
+            target_scopes.add(root_domain.lower())
+        if target_type == "domain":
+            target_scopes.add(clean_target.lower())
+
         if (has_shodan or has_censys) and target_type != "cve":
             all_known_ips = set()
             for f in raw_recon_findings:
@@ -494,6 +500,11 @@ class ThreatTrackEngine:
                     shodan_results = await asyncio.gather(*shodan_tasks, return_exceptions=True)
                     for res in shodan_results:
                         if isinstance(res, list):
+                            for f in res:
+                                if f.host_info and f.host_info.hostnames and target_scopes:
+                                    f.host_info.hostnames = [h for h in f.host_info.hostnames if any(h.lower() == s or h.lower().endswith(f".{s}") for s in target_scopes)]
+                                if f.host_info and f.host_info.domains and target_scopes:
+                                    f.host_info.domains = [d for d in f.host_info.domains if any(d.lower() == s or d.lower().endswith(f".{s}") for s in target_scopes)]
                             raw_recon_findings.extend(res)
                         elif isinstance(res, Exception):
                             logger.debug(f"Shodan recursive enrichment exception: {res}")
@@ -513,6 +524,11 @@ class ThreatTrackEngine:
                     censys_results = await asyncio.gather(*censys_tasks, return_exceptions=True)
                     for res in censys_results:
                         if isinstance(res, list):
+                            for f in res:
+                                if f.host_info and f.host_info.hostnames and target_scopes:
+                                    f.host_info.hostnames = [h for h in f.host_info.hostnames if any(h.lower() == s or h.lower().endswith(f".{s}") for s in target_scopes)]
+                                if f.host_info and f.host_info.domains and target_scopes:
+                                    f.host_info.domains = [d for d in f.host_info.domains if any(d.lower() == s or d.lower().endswith(f".{s}") for s in target_scopes)]
                             raw_recon_findings.extend(res)
                         elif isinstance(res, Exception):
                             logger.debug(f"Censys recursive enrichment exception: {res}")
@@ -549,8 +565,10 @@ class ThreatTrackEngine:
 
                 if f.type == FindingType.HOST_INFO and f.host_info:
                     hi = f.host_info
-                    host_obj.hostnames = sorted(list(set(host_obj.hostnames + hi.hostnames)))
-                    host_obj.domains = sorted(list(set(host_obj.domains + hi.domains)))
+                    in_scope_hnames = [h for h in hi.hostnames if not target_scopes or any(h.lower() == s or h.lower().endswith(f".{s}") for s in target_scopes)]
+                    in_scope_doms = [d for d in hi.domains if not target_scopes or any(d.lower() == s or d.lower().endswith(f".{s}") for s in target_scopes)]
+                    host_obj.hostnames = sorted(list(set(host_obj.hostnames + in_scope_hnames)))
+                    host_obj.domains = sorted(list(set(host_obj.domains + in_scope_doms)))
                     host_obj.org = hi.org or host_obj.org
                     host_obj.isp = hi.isp or host_obj.isp
                     host_obj.asn = hi.asn or host_obj.asn

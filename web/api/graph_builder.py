@@ -128,6 +128,41 @@ class GraphBuilder:
         is_file_target = (target_type == "file" or bool(targets_list and len(targets_list) > 1))
         direct_target_subdomains = set()
 
+        # Determine in-scope target roots
+        target_scopes = set()
+        if explicit_targets:
+            for item in explicit_targets:
+                if "." in item and not item.replace(".", "").isdigit():
+                    try:
+                        import tldextract
+                        ext = tldextract.extract(item)
+                        if ext.registered_domain:
+                            target_scopes.add(ext.registered_domain.lower())
+                    except Exception:
+                        pass
+                    target_scopes.add(item.lower())
+        elif target_name:
+            t_clean = target_name.strip().lower()
+            if "." in t_clean and not t_clean.replace(".", "").isdigit():
+                try:
+                    import tldextract
+                    ext = tldextract.extract(t_clean)
+                    if ext.registered_domain:
+                        target_scopes.add(ext.registered_domain.lower())
+                except Exception:
+                    pass
+                target_scopes.add(t_clean)
+
+        def _is_in_scope(h: str) -> bool:
+            if not target_scopes:
+                return True
+            h_clean = h.strip().lower()
+            return any(h_clean == s or h_clean.endswith(f".{s}") for s in target_scopes)
+
+        # Filter out out-of-scope third party domains (like rdstation, aramado, cloudfront, etc.)
+        if target_scopes:
+            domains_list = [d for d in domains_list if _is_in_scope(d[1])]
+
         # 2. Add domain nodes (Domains discovered during the scan)
         for domain_id, domain_name in domains_list:
             dname_lower = domain_name.lower()
@@ -182,6 +217,10 @@ class GraphBuilder:
         for row in cursor.fetchall():
             sub_id, sub_name, domain_id, domain_name, ip_id, ip_address = row
             
+            # Filter out out-of-scope subdomains
+            if target_scopes and (not _is_in_scope(sub_name) or not _is_in_scope(domain_name)):
+                continue
+
             # Add subdomain node if not already added
             if sub_id not in processed_subdomains:
                 nodes.append({
@@ -206,7 +245,7 @@ class GraphBuilder:
                                 "id": f"e_target_sub_{sub_id}",
                                 "source": "target_root",
                                 "target": f"sub_{sub_id}",
-                                "label": "MATCHES_SUBDOMAIN"
+                                "label": "TARGET_SUBDOMAIN"
                             }
                         })
             
@@ -228,6 +267,9 @@ class GraphBuilder:
         """)
         
         for sub_id, sub_name, domain_id, domain_name in cursor.fetchall():
+            if target_scopes and (not _is_in_scope(sub_name) or not _is_in_scope(domain_name)):
+                continue
+
             if sub_id not in processed_subdomains:
                 nodes.append({
                     "data": {
@@ -250,7 +292,7 @@ class GraphBuilder:
                                 "id": f"e_target_sub_{sub_id}",
                                 "source": "target_root",
                                 "target": f"sub_{sub_id}",
-                                "label": "MATCHES_SUBDOMAIN"
+                                "label": "TARGET_SUBDOMAIN"
                             }
                         })
 
