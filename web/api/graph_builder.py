@@ -444,7 +444,7 @@ class GraphBuilder:
                 }
             })
         
-        # Connect Subdomains -> IPs (CONTAINS_IP)
+        # Connect Subdomains -> IPs (RESOLVES_TO)
         for sub_id, ip_ids in subdomain_to_ips.items():
             for ip_id in ip_ids:
                 edges.append({
@@ -452,12 +452,12 @@ class GraphBuilder:
                         "id": f"e_sub_ip_{sub_id}_{ip_id}",
                         "source": f"sub_{sub_id}",
                         "target": f"ip_{ip_id}",
-                        "label": "CONTAINS_IP"
+                        "label": "RESOLVES_TO"
                     }
                 })
                 connected_ips.add(ip_id)
 
-        # Connect Domains -> IPs (CONTAINS_IP for root domain resolutions)
+        # Connect Domains -> IPs (RESOLVES_TO for root domain resolutions)
         if domain_to_ips:
             for dom_id, ip_ids in domain_to_ips.items():
                 for ip_id in ip_ids:
@@ -467,7 +467,7 @@ class GraphBuilder:
                                 "id": f"e_dom_ip_{dom_id}_{ip_id}",
                                 "source": f"dom_{dom_id}",
                                 "target": f"ip_{ip_id}",
-                                "label": "CONTAINS_IP"
+                                "label": "RESOLVES_TO"
                             }
                         })
                         connected_ips.add(ip_id)
@@ -508,7 +508,7 @@ class GraphBuilder:
                                 "id": f"e_dom_ip_{dom_id}_{ip_id}",
                                 "source": f"dom_{dom_id}",
                                 "target": f"ip_{ip_id}",
-                                "label": "CONTAINS_IP"
+                                "label": "RESOLVES_TO"
                             }
                         })
             elif dom_row:
@@ -519,7 +519,7 @@ class GraphBuilder:
                             "id": f"e_dom_ip_{dom_id}_{ip_id}",
                             "source": f"dom_{dom_id}",
                             "target": f"ip_{ip_id}",
-                            "label": "CONTAINS_IP"
+                            "label": "RESOLVES_TO"
                         }
                     })
         

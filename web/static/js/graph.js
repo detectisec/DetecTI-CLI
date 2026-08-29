@@ -528,7 +528,7 @@ class EASMDashboard {
                 if (edgeData.label === 'HAS_SUBDOMAIN' || edgeData.label === 'CONTAINS_SUBDOMAIN') {
                     visitedSubIds.add(edgeData.target);
                 }
-                if (edgeData.label === 'HOSTS_IP' || edgeData.label === 'CONTAINS_IP') {
+                if (edgeData.label === 'HOSTS_IP' || edgeData.label === 'CONTAINS_IP' || edgeData.label === 'RESOLVES_TO') {
                     connectedIpIds.add(edgeData.target);
                 }
             });
@@ -546,7 +546,7 @@ class EASMDashboard {
 
             const subOut = this.outEdges.get(subId) || [];
             subOut.forEach(edgeData => {
-                if (edgeData.label === 'RESOLVES_TO') {
+                if (edgeData.label === 'RESOLVES_TO' || edgeData.label === 'CONTAINS_IP' || edgeData.label === 'HOSTS_IP') {
                     connectedIpIds.add(edgeData.target);
                 }
                 if (edgeData.label === 'HAS_SUBDOMAIN' || edgeData.label === 'CONTAINS_SUBDOMAIN') {
