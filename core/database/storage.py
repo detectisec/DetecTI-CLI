@@ -249,39 +249,42 @@ class DatabaseManager:
 
                     domain_id = self._get_or_create_domain(conn, domain)
                     
-                    # Only insert as a subdomain if it is not the root domain itself
-                    if cand != domain:
-                        cursor = conn.execute(
-                            "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
-                            (domain_id, cand)
-                        )
-                        row = cursor.fetchone()
-                        if row:
-                            subdomain_id = row[0]
-                        else:
-                            subdomain_id = str(uuid.uuid4())
-                            conn.execute("""
-                                INSERT INTO subdomains (id, domain_id, name)
-                                VALUES (?, ?, ?)
-                            """, (subdomain_id, domain_id, cand))
-                        subdomain_map[cand] = subdomain_id
+                    cursor = conn.execute(
+                        "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
+                        (domain_id, cand)
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        subdomain_id = row[0]
+                    else:
+                        subdomain_id = str(uuid.uuid4())
+                        conn.execute("""
+                            INSERT INTO subdomains (id, domain_id, name)
+                            VALUES (?, ?, ?)
+                        """, (subdomain_id, domain_id, cand))
+                    subdomain_map[cand] = subdomain_id
 
-        # 1. Register subdomains from FindingType.SUBDOMAIN and targets
+        # 1. Register subdomains from FindingType.SUBDOMAIN, ASSOCIATED_DOMAIN and targets
         for finding in findings:
-            if finding.type == FindingType.SUBDOMAIN and finding.value:
+            if finding.type in (FindingType.SUBDOMAIN, FindingType.ASSOCIATED_DOMAIN) and finding.value:
                 _register_subdomain_candidate(finding.value)
             if finding.target:
                 _register_subdomain_candidate(finding.target)
             if finding.type == FindingType.HOST_INFO and finding.host_info:
                 for hname in finding.host_info.hostnames:
                     _register_subdomain_candidate(hname)
+                for dname in finding.host_info.domains:
+                    _register_subdomain_candidate(dname)
 
-        # 2. Register subdomains from hosts.hostnames
+        # 2. Register subdomains from hosts.hostnames and hosts.domains
         if hosts:
             for host in hosts:
                 if host.hostnames:
                     for hname in host.hostnames:
                         _register_subdomain_candidate(hname)
+                if host.domains:
+                    for dname in host.domains:
+                        _register_subdomain_candidate(dname)
         
         return subdomain_map
 

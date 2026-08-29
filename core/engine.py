@@ -416,13 +416,13 @@ class ThreatTrackEngine:
                     logger.error(f"Error during recon stage: {res}")
 
         # ----------------------------------------------------
-        # Stage 1.2: Subdomain DNS Resolution & Recursive IP Mapping
-        # (Resolves all subdomains discovered via crt.sh/WHOIS/Shodan to their active A/AAAA IPs)
+        # Stage 1.2: Subdomain & Domain DNS Resolution & Recursive IP Mapping
+        # (Resolves all subdomains and associated domains discovered via crt.sh/WHOIS/Shodan to their active A/AAAA IPs)
         # ----------------------------------------------------
         discovered_subdomains: Set[str] = set()
         subdomain_finding_refs: Dict[str, List[Finding]] = {}
         for f in raw_recon_findings:
-            if f.type == FindingType.SUBDOMAIN and f.value:
+            if f.type in (FindingType.SUBDOMAIN, FindingType.ASSOCIATED_DOMAIN) and f.value:
                 sub_val = f.value.strip().lower()
                 if sub_val.startswith("*."):
                     sub_val = sub_val[2:]
@@ -431,7 +431,7 @@ class ThreatTrackEngine:
                     subdomain_finding_refs.setdefault(sub_val, []).append(f)
 
         if discovered_subdomains and target_type != "cve":
-            self._notify("engine", f"Resolving DNS A-records for {len(discovered_subdomains)} discovered subdomains...")
+            self._notify("engine", f"Resolving DNS A-records for {len(discovered_subdomains)} discovered domains & subdomains...")
             
             dns_semaphore = asyncio.Semaphore(50)
             loop = asyncio.get_event_loop()
