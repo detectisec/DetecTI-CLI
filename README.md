@@ -59,18 +59,22 @@ flowchart TD
         CLASSIFY -->|Direct IP / Fallback| CENSYS_DIRECT[🌐 Censys: Direct IP Profile]:::recon
     end
 
-    subgraph Stage1_5 [Stage 1.5: Complementary Censys Host Enrichment]
-        CRTSH & WHOIS & SHODAN -->|All Discovered Host IPs| IP_EXTRACT[Extract Unique Discovered IPs]:::recon
-        IP_EXTRACT -->|Parallel Host Dossiers| CENSYS_ENRICH[🌐 Censys: Deep Port, Service & TLS Scan per IP]:::recon
+    subgraph Stage1_2 [Stage 1.2 & 1.3: DNS Resolution & Scope-Governed Feedback Loop]
+        CRTSH & WHOIS & SHODAN -->|Discovered Subdomains & Names| DNS_RES[⚡ Concurrent DNS A/AAAA Resolution]:::recon
+        DNS_RES -->|In-Scope Resolved IPs| THREAT_LOOP[🔄 Recursive Shodan & Censys Threat Profiling]:::recon
+    end
+
+    subgraph Stage1_4 [Stage 1.4: Automatic BGP & RDAP Fallback Enrichment]
+        THREAT_LOOP -->|Unprofiled / Zero-Banner IPs| BGP_RDAP[🌐 IP-API & RIPE Stat BGP/RDAP Enrichment]:::recon
     end
 
     subgraph Stage1_8 [Stage 1.8: Active Verification & Target Scanning]
-        IP_EXTRACT -->|Marked Scan Targets| MASSCAN[⚡ Masscan: High-Speed Port & Banner Grabbing]:::active
+        THREAT_LOOP & BGP_RDAP -->|Marked Scan Targets| MASSCAN[⚡ Masscan: High-Speed Port & Banner Grabbing]:::active
         MASSCAN -->|Verified Active Ports| NUCLEI[🛡️ Nuclei: Active Vulnerability Scan]:::active
     end
 
     subgraph Stage2 [Stage 2: Threat Intelligence & Vulnerability Scoring]
-        SHODAN & CENSYS_DIRECT & CENSYS_ENRICH & NUCLEI -->|Aggregated CVE IDs & Findings| CVE_AGG[CVE Aggregator & Deduplication]:::enrich
+        SHODAN & CENSYS_DIRECT & THREAT_LOOP & NUCLEI -->|Aggregated CVE IDs & Findings| CVE_AGG[CVE Aggregator & Deduplication]:::enrich
         CVE_AGG --> NVD[🛡️ NVD 2.0: CVSS Base Score, Severity & CWE Name]:::intel
         CVE_AGG --> EPSS[📈 FIRST EPSS: Real-world Exploit Probability %]:::intel
         CVE_AGG --> CISA[🚨 CISA KEV: Active Exploitation & Ransomware Flag]:::intel
@@ -83,7 +87,7 @@ flowchart TD
 
     subgraph Stage4 [Stage 4: Unified Graph Modeling & Correlation]
         NVD & EPSS & CISA & XDB & GITHUB & NUCLEI --> CORRELATION[🔗 Unified Engine Correlation & Graph Synthesis]:::correlate
-        CRTSH & WHOIS & SHODAN & CENSYS_ENRICH & MASSCAN --> CORRELATION
+        CRTSH & WHOIS & SHODAN & BGP_RDAP & MASSCAN --> CORRELATION
     end
 
     subgraph Stage5 [Stage 5: Multi-Channel Output]
@@ -96,39 +100,44 @@ flowchart TD
 
 ### 🔍 Step-by-Step Data Flow:
 
-1. **Target Classification**:
-   - Categorizes input into `IP`, `CIDR range`, `Domain`, `CVE-ID`, `Email`, `Custom Query`, or `Batch File`.
+1. **Target Classification & Scope Governance**:
+   - Categorizes input into `IP`, `CIDR range`, `Domain`, `CVE-ID`, `Email`, `Organization Query (org:)`, `ASN Query (asn:)`, `Custom Query`, or `Batch File`.
+   - **Strict Scope Governance for Org / ASN Targets**: When targeting organizations (`org:"..."`) or autonomous systems (`asn:"..."`), the engine strictly constrains the attack surface to assets owned by the target, quarantining foreign third-party IPs (e.g. CDNs or external providers) from polluting the inventory.
 
 2. **Stage 1: Primary Reconnaissance & Target Discovery**:
-   - **Shodan**: Primary discovery engine for custom queries (e.g., `org:`, `port:`), CIDR subnets (`192.168.1.0/24`), direct IP lookups, and domain DNS record mapping (resolving subdomains to active `A` record IPs).
+   - **Shodan**: Primary discovery engine for custom queries, CIDR subnets, direct IP lookups, and host profiles.
    - **Certificate Transparency (crt.sh)**: Discovers issued TLS/SSL certificates to uncover wildcards and hidden subdomains.
    - **Reverse WHOIS (WhoisFreaks API + HackerTarget fallback)**: Identifies associated parent/child domains registered by the same organization.
-   - **Censys (Direct IP Lookups)**: Queries host profiles for direct single IP targets, or acts as a primary fallback if Shodan is unconfigured.
+   - **Censys (Direct IP Lookups)**: Queries host profiles for direct single IP targets or primary fallback.
 
-3. **Stage 1.5: Complementary Censys Host & Service Enrichment**:
-   - Extracts **all unique discovered IPs** and queries parallel host dossiers (`/v3/global/asset/host/{ip}`) to enrich open ports, web service protocols, software versions, banners, TLS certificates, and additional CVEs.
+3. **Stage 1.2 & 1.3: DNS Resolution & Recursive Threat Intel Feedback Loop**:
+   - Asynchronously resolves discovered subdomains and domains to their active `A`/`AAAA` IP addresses.
+   - In-scope IPs are fed into a recursive intelligence feedback loop (Shodan & Censys) to uncover full open port maps, services, and passive CVEs.
 
-4. **Stage 1.8: Target Management & Active Scanning (Masscan + Nuclei)**:
+4. **Stage 1.4: Automatic BGP / RDAP Fallback Enrichment**:
+   - For hosts discovered via DNS or CT logs that return 0 indexed services on search engines, the engine automatically performs non-blocking BGP routing and RDAP lookups (via IP-API and RIPE Stat) to populate **ASN**, **Organization name**, **Country**, **City**, **Region**, and **GPS Coordinates**.
+
+5. **Stage 1.8: Target Management & Active Scanning (Masscan + Nuclei)**:
    - **Masscan Active Port Scan**: Targets marked on the graph are scanned at high speeds with banner grabbing (`--banners`) to verify live exposed services.
    - **Smart Port Exclusion & 2-Phase Pipeline**: Automatically omits already confirmed active ports to minimize load. When scanning All Ports (`0-65535`), Phase 1 immediately tests known passive unverified ports for rapid visual feedback, followed by Phase 2 sweeping remaining ports.
    - **Mandatory "Verified Active" Rule for Nuclei**: Nuclei strictly targets endpoints confirmed as **"Verified Active"**. If an IP target has unverified passive ports in the database, Nuclei requests a targeted Masscan pre-scan specifically for those passive ports. If verified active, Nuclei proceeds; otherwise, if no ports respond or no ports are mapped, the scan is safely skipped with an explanatory log in the console.
 
-5. **Stage 2: Threat Intelligence & Vulnerability Prioritization**:
+6. **Stage 2: Threat Intelligence & Vulnerability Prioritization**:
    - All unique CVE IDs identified across passive feeds and active Nuclei scans are aggregated and tracked by their provenance (**Vulnerability Source**: `Nuclei`, `NVD`, etc.).
    - Prioritized via the **3D EASM Risk Matrix**: **CISA KEV** (P1 Active Exploitation) > **Weaponized PoCs & Exploits** > **FIRST EPSS Probability** > **CVSS Severity**.
    - **NVD 2.0 API**: Retrieves official CVSS v3.1, v3.0, and v2.0 base scores, vector metrics, and **CWE (Common Weakness Enumeration)** weakness name.
    - **FIRST EPSS API**: Appends real-world exploitation probability percentages (0.0% to 100%) and percentile scores.
    - **CISA KEV Catalog**: Cross-checks vulnerabilities actively leveraged in ransomware and targeted cyber campaigns.
 
-6. **Stage 3: Weaponization & PoC Hunting**:
+7. **Stage 3: Weaponization & PoC Hunting**:
    - **ExploitDB (searchsploit)**: Matches CVEs against local exploit scripts, PoCs, and shellcodes with verification tags.
    - **GitHub PoC Intelligence**: Queries real-world public exploit repositories and verification status.
 
-7. **Stage 4: Graph Modeling & Relational Synthesis**:
-   - Binds assets into a structured, query-rooted hierarchical topology:
-     $$\text{TARGET\_ROOT} \xrightarrow{\text{MATCHES\_DOMAIN / TARGET\_SUBDOMAIN}} \text{DOMÍNIO / SUBDOMÍNIO} \xrightarrow{\text{HAS\_SUBDOMAIN}} \text{SUBDOMÍNIOS} \xrightarrow{\text{CONTAINS\_IP}} \text{IPs} \xrightarrow{\text{EXPOSES}} \text{SERVIÇOS} \xrightarrow{\text{HAS\_VULN}} \text{CVEs}$$
+8. **Stage 4: Graph Modeling & Relational Synthesis**:
+   - Binds assets into a structured, multi-tiered semantic hierarchical DAG topology:
+     $$\text{TARGET\_ROOT} \xrightarrow{\text{MATCHES\_ORG / MATCHES\_DOMAIN}} \text{ORG / ASN / DOMAIN} \xrightarrow{\text{BELONGS\_TO / HAS\_SUBDOMAIN}} \text{IPs / SUBDOMAINS} \xrightarrow{\text{EXPOSES}} \text{SERVICES} \xrightarrow{\text{HAS\_VULN}} \text{CVEs}$$
 
-8. **Stage 5: Persistence & Presentation**:
+9. **Stage 5: Persistence & Presentation**:
    - Stores all relationships in a relational SQLite database with auto-migration support.
    - Outputs formatted JSON, Executive Markdown, standalone HTML reports, and interactive web visualization graphs with direct references to [DetecTI Security](https://detecti.com.br).
 
@@ -137,14 +146,15 @@ flowchart TD
 ## ⚡ Key Features
 
 - **🌐 Infrastructure & Asset Mapping**:
-  - Direct IP, CIDR subnets (`192.168.1.0/24`), Domain, and custom search query support.
+  - Direct IP, CIDR subnets (`192.168.1.0/24`), Domain, Organization (`org:`), ASN (`asn:`), and custom search query support.
   - Port, service, product, version, and banner discovery.
   - Automatic web service URL construction (`http://` vs `https://`).
-  - **IP Geolocation & City/State Mapping**: Enriched with City, Region/State, Country, ASN, and geographic coordinates (Latitude/Longitude) with interactive Google Maps links in the Asset Inspector.
-- **🔍 Subdomain & Domain Correlation**:
+  - **Automatic BGP / RDAP Fallback Enrichment**: Unprofiled hosts are enriched in real-time with ASN, Organization, City, Region/State, Country, and geographic coordinates (Latitude/Longitude) with interactive Google Maps links in the Asset Inspector.
+- **🔍 Subdomain & Domain Correlation & Scope Governance**:
   - **Certificate Transparency (crt.sh)** for comprehensive subdomain enumeration.
   - **Reverse WHOIS**: Correlates domains by registrant email, organization name, or domain (WhoisFreaks API + HackerTarget fallback).
   - **Authoritative DNS Resolution Isolation (Subdomain ➔ IP)**: Every subdomain links strictly and exclusively to its directly resolved IP addresses in DNS/TLS certificates, preventing any cross-contamination or spurious associations between sibling subdomains.
+  - **Strict Scope Governance for Org / ASN Targets**: Guarantees that only infrastructure owned by the target is registered in the database, discarding external third-party IPs.
   - Shodan DNS historical record mapping.
 - **🛡️ Advanced Threat Intelligence & Risk Prioritization**:
   - **3D EASM Risk Matrix**: Intelligent sorting placing actively exploited CISA KEV flaws, weaponized PoCs, and high EPSS probability at the top.
@@ -153,8 +163,15 @@ flowchart TD
   - **CISA KEV**: Catalogs vulnerabilities actively exploited in real-world attacks & ransomware campaigns.
   - **ExploitDB & GitHub PoCs**: Direct links to public exploits and proof-of-concept repositories.
   - **Source Provenance Tracking**: Clear visibility of where each vulnerability was identified (`Nuclei`, `NVD`, etc.) in all graph views, node inspectors, and Risk Metrics accordions.
-- **💻 Interactive & Fully Responsive Web Dashboard**:
+- **💻 Interactive & Fully Responsive Web Dashboard (DetecTIHound)**:
   - Asynchronous FastAPI web server rendering rich EASM network graphs with Cytoscape.js.
+  - **Strict Attack Path Isolation in Filtering**: When applying risk or vulnerability filters (Critical, CISA KEV, High EPSS, 3D Risk Matrix), the graph isolates the exact single-lineage attack path (`Target Root ──► ASN ──► Host IP ──► Service / Port ──► CVE`), pruning 100% of unrelated sibling subdomains, non-vulnerable IPs, and background noise.
+  - **Bidirectional Inspector Navigation**:
+    - Inspecting a **Domain / Subdomain** displays its **Resolved IP** with a 1-click `[ ⌖ Focus ]` crosshair button.
+    - Inspecting a **Host IP** displays all active **Resolving Domains / Hosts** with dedicated focus buttons.
+  - **Multi-Tiered Semantic Hierarchical DAG Layout**: 6-tier vertical topological layout arranging Root Query $\rightarrow$ Org/ASN $\rightarrow$ Host IPs $\rightarrow$ Subdomains $\rightarrow$ Ports/Services $\rightarrow$ CVEs/PoCs, with multi-row matrix fan-out for dense enterprise ASN IP blocks.
+  - **Retractable Filters & Controls Drawer**: Smoothly collapse the left sidebar to liberate 100% of the screen for graph exploration across all desktop and mobile devices.
+  - **Clean & Focused Asset Inspector**: Dedicated strictly to technical metadata, CWE descriptions, affected ports, IP geolocation, associated domains, weaponized exploit URLs, banner metadata, and explicit vulnerability **Source** attribution.
   - **Intuitive Mouse Navigation & Node Organization**:
     - **Left-Click (Drag)**: Pan and navigate smoothly across the canvas.
     - **Left-Click (Node)**: Select single node and inspect deep asset metadata in the Asset Inspector.
