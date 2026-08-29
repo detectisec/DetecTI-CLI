@@ -182,6 +182,8 @@ flowchart TD
 - **🎯 Target Management & High-Speed Active Port Scanning (Masscan)**:
   - **Hybrid IP & FQDN Target Scanning**:
     - **FQDN Targets for Reverse Proxies / CDNs / Virtual Hosts**: In environments protected by Cloudflare, AWS CloudFront, Akamai, or Nginx/Apache Virtual Hosts, direct IP scanning fails due to TLS SNI requirements and HTTP `Host:` headers. DetecTIHound allows setting **Domains and Subdomains directly as scan targets** (**Set as Target (FQDN)**).
+    - **Dynamic FQDN-to-IP Service Reconciliation**: When an FQDN is scanned, the engine locates and resolves its connected IP address in the graph: existing passive ports on that IP are promoted to **`Confirmed Active`** (with `"Masscan"` appended to sources), and newly discovered active ports are dynamically created and bound directly to that IP.
+    - **Multi-Source Strict Service Deduplication**: Prevents duplicate service entries per `(IP, Port, Protocol)` across passive recon and active scanning. Merges sources (`Shodan`, `Censys`, `Masscan`, `Nuclei`), enriches banners and version details, and ensures a clean 1:1 service port visualization in Cytoscape.
     - **Right-Click Target Marking & Bulk Selection**: Mark/unmark any individual `IP Address`, `Domain`, or `Subdomain` node as a scan target directly from the Cytoscape graph context menu (**Set as Target** / **Remove Target**).
     - **Bulk Target Addition on Root Nodes**: Right-click on any `Organization`, `Network / ASN`, `Target Root`, or `Domain` node to instantly mark or unmark **all associated descendant IPs** as scan targets in a single click (**Set all N IPs as Targets** / **Remove all N IPs from Targets**).
   - **Active Verification Reset (Remove Verified Active)**: Right-click individual active services or parent root nodes to reset active verification back to passive status for targeted re-scans without losing existing asset metadata.
@@ -197,6 +199,7 @@ flowchart TD
     - Active scan service connections render as solid **Emerald Green relationship edges** (`#2ecc71`).
 - **🛡️ Active Vulnerability Scanning (Nuclei)**:
   - Integration with ProjectDiscovery's **Nuclei** engine for template-based vulnerability assessment against both raw IPs and FQDN endpoints (`https://<fqdn>`, `http://<fqdn>`).
+  - **FQDN Findings Resolution**: Vulnerabilities identified against FQDN endpoints automatically resolve and bind to the connected host IP and its corresponding port in the database and graph.
   - **Mandatory "Verified Active" Enforcement on Raw IPs**: IP scans are strictly targeted at ports confirmed open and active via Masscan. Unverified passive ports trigger a targeted Masscan pre-scan verification prior to template execution. If unverified or unavailable, Nuclei safely skips with explicit rationale logged.
   - Configurable severity filters (Critical, High, Medium, Low, Info), protocol/template tags, rate limits, concurrency, and custom flags.
   - Automated database merging, deduplication, and immediate Cytoscape graph node generation with weaponized PoC linkage.
