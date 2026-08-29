@@ -710,6 +710,75 @@ class ThreatTrackEngine:
             )
 
         # ----------------------------------------------------
+        # Stage 1.4: Automatic IP Enrichment Fallback (BGP / RDAP / IP WHOIS)
+        # (Enriches hosts lacking ASN/Org metadata when threat intel APIs return 0 results)
+        # ----------------------------------------------------
+        ips_needing_enrichment = [
+            ip for ip, h in hosts_map.items()
+            if not h.asn or not h.org
+        ]
+
+        if ips_needing_enrichment and target_type != "cve":
+            self._notify("engine", f"Enriching network metadata (ASN/Org/Geo) for {len(ips_needing_enrichment)} unresolved IP(s)...")
+            
+            enrich_semaphore = asyncio.Semaphore(15)
+            async def _enrich_single_ip(ip_addr: str):
+                async with enrich_semaphore:
+                    # Primary: ip-api.com
+                    try:
+                        async with httpx.AsyncClient(timeout=3.5, follow_redirects=True) as client:
+                            url = f"http://ip-api.com/json/{ip_addr}?fields=status,country,countryCode,city,regionName,org,as,asname,lat,lon,query"
+                            resp = await client.get(url, headers={"User-Agent": "DetecTI/1.0"})
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                if data.get("status") == "success":
+                                    return ip_addr, data
+                    except Exception as e:
+                        logger.debug(f"IP enrichment primary failed for {ip_addr}: {e}")
+
+                    # Secondary: RIPE Stat Network Info API
+                    try:
+                        async with httpx.AsyncClient(timeout=3.5, follow_redirects=True) as client:
+                            url = f"https://stat.ripe.net/data/network-info/data.json?resource={ip_addr}"
+                            resp = await client.get(url, headers={"User-Agent": "DetecTI/1.0"})
+                            if resp.status_code == 200:
+                                r_data = resp.json()
+                                if r_data and "data" in r_data:
+                                    asns = r_data["data"].get("asns", [])
+                                    asn_str = f"AS{asns[0]}" if asns else None
+                                    return ip_addr, {"as": asn_str, "org": asn_str}
+                    except Exception as e:
+                        logger.debug(f"IP enrichment secondary failed for {ip_addr}: {e}")
+
+                    return ip_addr, None
+
+            enrich_results = await asyncio.gather(*[_enrich_single_ip(ip) for ip in ips_needing_enrichment])
+            for ip_addr, meta in enrich_results:
+                if meta and ip_addr in hosts_map:
+                    h_obj = hosts_map[ip_addr]
+                    if not h_obj.asn and meta.get("as"):
+                        import re
+                        as_raw = meta.get("as", "")
+                        as_match = re.search(r"(AS\d+)", as_raw, re.IGNORECASE)
+                        h_obj.asn = as_match.group(1).upper() if as_match else as_raw
+                    if not h_obj.org:
+                        h_obj.org = meta.get("org") or meta.get("asname")
+                    if not h_obj.country_name and meta.get("country"):
+                        h_obj.country_name = meta.get("country")
+                    if not h_obj.country_code and meta.get("countryCode"):
+                        h_obj.country_code = meta.get("countryCode")
+                    if not h_obj.city and meta.get("city"):
+                        h_obj.city = meta.get("city")
+                    if not h_obj.region_code and meta.get("regionName"):
+                        h_obj.region_code = meta.get("regionName")
+                    if h_obj.latitude is None and meta.get("lat") is not None:
+                        h_obj.latitude = meta.get("lat")
+                    if h_obj.longitude is None and meta.get("lon") is not None:
+                        h_obj.longitude = meta.get("lon")
+                    if "BGP/RDAP Enrichment" not in h_obj.sources:
+                        h_obj.sources.append("BGP/RDAP Enrichment")
+
+        # ----------------------------------------------------
         # Stage 2: Threat Intelligence & Vulnerability Enrichment (NVD, EPSS, CISA KEV)
         # ----------------------------------------------------
         enriched_vulns: Dict[str, VulnerabilityData] = {}
