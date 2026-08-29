@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS ip_addresses (
     country TEXT,
     city TEXT,
     region_code TEXT,
+    postal_code TEXT,
+    latitude REAL,
+    longitude REAL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

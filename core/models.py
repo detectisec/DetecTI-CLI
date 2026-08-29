@@ -126,6 +126,9 @@ class HostInfoData(BaseModel):
     country_code: Optional[str] = Field(default=None, description="Country 2-letter code")
     city: Optional[str] = Field(default=None, description="City name")
     region_code: Optional[str] = Field(default=None, description="State/Region code")
+    postal_code: Optional[str] = Field(default=None, description="Postal / ZIP code")
+    latitude: Optional[float] = Field(default=None, description="Latitude coordinate")
+    longitude: Optional[float] = Field(default=None, description="Longitude coordinate")
     ports: List[int] = Field(default_factory=list, description="List of open port numbers")
     vulns: List[str] = Field(default_factory=list, description="List of CVE IDs identified")
 
@@ -144,6 +147,9 @@ class HostResult(BaseModel):
     country_code: Optional[str] = Field(default=None, description="Country code")
     city: Optional[str] = Field(default=None, description="City name")
     region_code: Optional[str] = Field(default=None, description="State/Region code")
+    postal_code: Optional[str] = Field(default=None, description="Postal / ZIP code")
+    latitude: Optional[float] = Field(default=None, description="Latitude coordinate")
+    longitude: Optional[float] = Field(default=None, description="Longitude coordinate")
     ports: List[PortData] = Field(default_factory=list, description="Open ports and running services")
     vulnerabilities: List[VulnerabilityData] = Field(
         default_factory=list,

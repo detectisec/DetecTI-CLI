@@ -76,6 +76,18 @@ class DatabaseManager:
                     conn.execute("ALTER TABLE vulnerabilities ADD COLUMN source TEXT")
             except Exception:
                 pass
+
+            # Auto-migrate: ensure postal_code, latitude, longitude exist in ip_addresses table
+            try:
+                ip_cols = [row[1] for row in conn.execute("PRAGMA table_info(ip_addresses)").fetchall()]
+                if "postal_code" not in ip_cols:
+                    conn.execute("ALTER TABLE ip_addresses ADD COLUMN postal_code TEXT")
+                if "latitude" not in ip_cols:
+                    conn.execute("ALTER TABLE ip_addresses ADD COLUMN latitude REAL")
+                if "longitude" not in ip_cols:
+                    conn.execute("ALTER TABLE ip_addresses ADD COLUMN longitude REAL")
+            except Exception:
+                pass
                 
             conn.commit()
 
@@ -105,109 +117,90 @@ class DatabaseManager:
                     org = COALESCE(?, org),
                     country = COALESCE(?, country),
                     city = COALESCE(?, city),
-                    region_code = COALESCE(?, region_code)
+                    region_code = COALESCE(?, region_code),
+                    postal_code = COALESCE(?, postal_code),
+                    latitude = COALESCE(?, latitude),
+                    longitude = COALESCE(?, longitude)
                 WHERE ip = ?
-            """, (host.asn, host.org, host.country_name, host.city, host.region_code, host.ip))
+            """, (host.asn, host.org, host.country_name, host.city, host.region_code, host.postal_code, host.latitude, host.longitude, host.ip))
             return row[0]
         
         ip_id = str(uuid.uuid4())
         conn.execute("""
-            INSERT INTO ip_addresses (id, ip, asn, org, country, city, region_code)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (ip_id, host.ip, host.asn, host.org, host.country_name, host.city, host.region_code))
+            INSERT INTO ip_addresses (id, ip, asn, org, country, city, region_code, postal_code, latitude, longitude)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (ip_id, host.ip, host.asn, host.org, host.country_name, host.city, host.region_code, host.postal_code, host.latitude, host.longitude))
         return ip_id
 
-    def _store_subdomains(self, conn: sqlite3.Connection, findings: List[Finding], target_scopes: Optional[Set[str]] = None) -> Dict[str, str]:
+    def _store_subdomains(
+        self,
+        conn: sqlite3.Connection,
+        findings: List[Finding],
+        target_scopes: Optional[Set[str]] = None,
+        hosts: Optional[List[HostResult]] = None,
+    ) -> Dict[str, str]:
         """Store subdomain findings in database and return subdomain_name -> subdomain_id mapping."""
         subdomain_map = {}
         
-        # 1. Register subdomains from FindingType.SUBDOMAIN
+        # Helper to register any candidate subdomain
+        def _register_subdomain_candidate(raw_name: str) -> None:
+            if not raw_name:
+                return
+            cand = raw_name.strip().lower()
+            if cand.startswith("*."):
+                cand = cand[2:]
+            
+            if target_scopes and not _is_in_scope(cand, target_scopes):
+                return
+
+            if '.' in cand and ' ' not in cand and not cand.replace('.', '').isdigit():
+                try:
+                    import tldextract
+                    ext = tldextract.extract(cand)
+                    domain = ext.registered_domain if ext.registered_domain else '.'.join(cand.split('.')[-2:])
+                except Exception:
+                    parts = cand.split('.')
+                    domain = '.'.join(parts[-2:]) if len(parts) >= 2 else cand
+                
+                if domain:
+                    if target_scopes and not _is_in_scope(domain, target_scopes):
+                        return
+
+                    domain_id = self._get_or_create_domain(conn, domain)
+                    
+                    # Only insert as a subdomain if it is not the root domain itself
+                    if cand != domain:
+                        cursor = conn.execute(
+                            "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
+                            (domain_id, cand)
+                        )
+                        row = cursor.fetchone()
+                        if row:
+                            subdomain_id = row[0]
+                        else:
+                            subdomain_id = str(uuid.uuid4())
+                            conn.execute("""
+                                INSERT INTO subdomains (id, domain_id, name)
+                                VALUES (?, ?, ?)
+                            """, (subdomain_id, domain_id, cand))
+                        subdomain_map[cand] = subdomain_id
+
+        # 1. Register subdomains from FindingType.SUBDOMAIN and targets
         for finding in findings:
             if finding.type == FindingType.SUBDOMAIN and finding.value:
-                subdomain = finding.value.strip().lower()
-                if subdomain.startswith("*."):
-                    subdomain = subdomain[2:]
-                
-                # Enforce in-scope check
-                if target_scopes and not _is_in_scope(subdomain, target_scopes):
-                    continue
-
-                if '.' in subdomain and ' ' not in subdomain and not subdomain.replace('.', '').isdigit():
-                    try:
-                        import tldextract
-                        ext = tldextract.extract(subdomain)
-                        domain = ext.registered_domain if ext.registered_domain else '.'.join(subdomain.split('.')[-2:])
-                    except Exception:
-                        parts = subdomain.split('.')
-                        domain = '.'.join(parts[-2:]) if len(parts) >= 2 else subdomain
-                    
-                    if domain:
-                        if target_scopes and not _is_in_scope(domain, target_scopes):
-                            continue
-
-                        domain_id = self._get_or_create_domain(conn, domain)
-                        
-                        # Only insert as a subdomain if it is not the root domain itself
-                        if subdomain != domain:
-                            cursor = conn.execute(
-                                "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
-                                (domain_id, subdomain)
-                            )
-                            row = cursor.fetchone()
-                            if row:
-                                subdomain_id = row[0]
-                            else:
-                                subdomain_id = str(uuid.uuid4())
-                                conn.execute("""
-                                    INSERT INTO subdomains (id, domain_id, name)
-                                    VALUES (?, ?, ?)
-                                """, (subdomain_id, domain_id, subdomain))
-                            subdomain_map[subdomain] = subdomain_id
-
-        # 2. Register subdomains from FindingType.HOST_INFO hostnames
-        for finding in findings:
+                _register_subdomain_candidate(finding.value)
+            if finding.target:
+                _register_subdomain_candidate(finding.target)
             if finding.type == FindingType.HOST_INFO and finding.host_info:
                 for hname in finding.host_info.hostnames:
-                    hname_clean = hname.strip().lower()
-                    if hname_clean.startswith("*."):
-                        hname_clean = hname_clean[2:]
-                    
-                    if target_scopes and not _is_in_scope(hname_clean, target_scopes):
-                        continue
+                    _register_subdomain_candidate(hname)
 
-                    if '.' in hname_clean and ' ' not in hname_clean and not hname_clean.replace('.', '').isdigit():
-                        try:
-                            import tldextract
-                            ext = tldextract.extract(hname_clean)
-                            domain = ext.registered_domain if ext.registered_domain else '.'.join(hname_clean.split('.')[-2:])
-                        except Exception:
-                            parts = hname_clean.split('.')
-                            domain = '.'.join(parts[-2:]) if len(parts) >= 2 else hname_clean
-                        
-                        if domain:
-                            if target_scopes and not _is_in_scope(domain, target_scopes):
-                                continue
-
-                            domain_id = self._get_or_create_domain(conn, domain)
-                            
-                            # Only insert as a subdomain if it is not the root domain itself
-                            if hname_clean != domain:
-                                cursor = conn.execute(
-                                    "SELECT id FROM subdomains WHERE domain_id = ? AND name = ?",
-                                    (domain_id, hname_clean)
-                                )
-                                row = cursor.fetchone()
-                                if row:
-                                    subdomain_id = row[0]
-                                else:
-                                    subdomain_id = str(uuid.uuid4())
-                                    conn.execute("""
-                                        INSERT INTO subdomains (id, domain_id, name)
-                                        VALUES (?, ?, ?)
-                                    """, (subdomain_id, domain_id, hname_clean))
-                                subdomain_map[hname_clean] = subdomain_id
-        
-        return subdomain_map
+        # 2. Register subdomains from hosts.hostnames
+        if hosts:
+            for host in hosts:
+                if host.hostnames:
+                    for hname in host.hostnames:
+                        _register_subdomain_candidate(hname)
         
         return subdomain_map
 
@@ -396,7 +389,7 @@ class DatabaseManager:
                             pass
 
             # Store subdomain findings and get mapping
-            subdomain_map = self._store_subdomains(conn, result.findings, target_scopes)
+            subdomain_map = self._store_subdomains(conn, result.findings, target_scopes, result.hosts)
             
             # Store host data
             ip_map = {}  # ip -> ip_id mapping
@@ -406,28 +399,47 @@ class DatabaseManager:
                 
                 service_ids = self._store_services(conn, ip_id, host)
                 self._store_vulnerabilities(conn, ip_id, host, service_ids)
-            
-            # Map specific authoritative DNS resolutions (subdomain -> IP)
-            for finding in result.findings:
-                hip = finding.host_ip or (finding.host_info.ip if finding.host_info else None)
-                if hip and hip in ip_map:
-                    # DNS Resolution specifically associates finding.target (subdomain) with finding.value (IP)
-                    if finding.source == "DNS Resolution" and finding.type == FindingType.HOST_INFO:
-                        sub_target = finding.target.strip().lower()
-                        if sub_target in subdomain_map and finding.value == hip:
+
+                # Link all hostnames associated with this host to the IP
+                if host.hostnames:
+                    for hname in host.hostnames:
+                        hname_clean = hname.strip().lower()
+                        if hname_clean.startswith("*."):
+                            hname_clean = hname_clean[2:]
+                        if hname_clean in subdomain_map:
                             conn.execute("""
                                 INSERT OR IGNORE INTO subdomain_ips (subdomain_id, ip_id)
                                 VALUES (?, ?)
-                            """, (subdomain_map[sub_target], ip_map[hip]))
+                            """, (subdomain_map[hname_clean], ip_id))
+            
+            # Map specific authoritative DNS resolutions & finding associations (subdomain -> IP)
+            for finding in result.findings:
+                hip = finding.host_ip or (finding.host_info.ip if finding.host_info else None)
+                if hip and hip in ip_map:
+                    target_ip_id = ip_map[hip]
+
+                    # 1. Authoritative hostnames tied to this specific host finding
+                    if finding.host_info and finding.host_info.hostnames:
+                        for hname in finding.host_info.hostnames:
+                            hname_clean = hname.strip().lower()
+                            if hname_clean.startswith("*."):
+                                hname_clean = hname_clean[2:]
+                            if hname_clean in subdomain_map:
+                                conn.execute("""
+                                    INSERT OR IGNORE INTO subdomain_ips (subdomain_id, ip_id)
+                                    VALUES (?, ?)
+                                """, (subdomain_map[hname_clean], target_ip_id))
                     
-                    # Subdomain finding with explicit host_ip
-                    elif finding.type == FindingType.SUBDOMAIN and finding.value and finding.host_ip == hip:
+                    # 2. Subdomain finding with explicit host_ip
+                    if finding.type == FindingType.SUBDOMAIN and finding.value and finding.host_ip == hip:
                         sub_val = finding.value.strip().lower()
+                        if sub_val.startswith("*."):
+                            sub_val = sub_val[2:]
                         if sub_val in subdomain_map:
                             conn.execute("""
                                 INSERT OR IGNORE INTO subdomain_ips (subdomain_id, ip_id)
                                 VALUES (?, ?)
-                            """, (subdomain_map[sub_val], ip_map[hip]))
+                            """, (subdomain_map[sub_val], target_ip_id))
 
             conn.commit()
 

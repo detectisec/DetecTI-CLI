@@ -595,6 +595,11 @@ class CensysModule(BaseModule):
             if cve_id and isinstance(cve_id, str) and cve_id.upper().startswith("CVE-"):
                 identified_cves.append(cve_id.upper())
 
+        coordinates = location.get("coordinates", {}) if isinstance(location.get("coordinates"), dict) else {}
+        latitude = coordinates.get("latitude")
+        longitude = coordinates.get("longitude")
+        postal_code = location.get("postal_code")
+
         host_info = HostInfoData(
             ip=ip,
             hostnames=sorted(list(set(hostnames))),
@@ -607,6 +612,9 @@ class CensysModule(BaseModule):
             country_code=country_code,
             city=city,
             region_code=region_code,
+            postal_code=postal_code,
+            latitude=latitude,
+            longitude=longitude,
             ports=sorted(list(set(port_numbers))),
             vulns=sorted(list(set(identified_cves))),
         )

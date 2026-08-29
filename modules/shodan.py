@@ -219,6 +219,9 @@ class ShodanModule(BaseModule):
             country_code=data.get("country_code"),
             city=data.get("city"),
             region_code=data.get("region_code"),
+            postal_code=data.get("postal_code"),
+            latitude=data.get("latitude"),
+            longitude=data.get("longitude"),
             ports=ports,
             vulns=vulns,
         )

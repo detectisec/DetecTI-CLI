@@ -544,9 +544,10 @@ class ThreatTrackEngine:
         for f in raw_recon_findings:
             clean_src = _clean_source(f.source)
 
-            if f.type in (FindingType.SUBDOMAIN, FindingType.ASSOCIATED_DOMAIN) and not f.host_ip:
+            if f.type in (FindingType.SUBDOMAIN, FindingType.ASSOCIATED_DOMAIN):
                 domain_findings.append(f)
-                continue
+                if not f.host_ip:
+                    continue
 
             host_ip = f.host_ip or (f.host_info.ip if f.host_info else None)
             if not host_ip and f.type == FindingType.VULNERABILITY and target_type == "cve":
@@ -577,6 +578,9 @@ class ThreatTrackEngine:
                     host_obj.country_code = hi.country_code or host_obj.country_code
                     host_obj.city = hi.city or host_obj.city
                     host_obj.region_code = hi.region_code or host_obj.region_code
+                    host_obj.postal_code = hi.postal_code or host_obj.postal_code
+                    host_obj.latitude = hi.latitude if hi.latitude is not None else host_obj.latitude
+                    host_obj.longitude = hi.longitude if hi.longitude is not None else host_obj.longitude
                     if hi.vulns:
                         for v in hi.vulns:
                             if v.upper().startswith("CVE-"):
@@ -730,6 +734,9 @@ class ThreatTrackEngine:
                         country_name=host_obj.country_name,
                         city=host_obj.city,
                         region_code=host_obj.region_code,
+                        postal_code=host_obj.postal_code,
+                        latitude=host_obj.latitude,
+                        longitude=host_obj.longitude,
                         ports=[p.port for p in host_obj.ports],
                         vulns=[v.cve_id for v in host_obj.vulnerabilities],
                     ),

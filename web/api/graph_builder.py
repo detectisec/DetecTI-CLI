@@ -410,14 +410,21 @@ class GraphBuilder:
         nodes = []
         edges = []
         
-        cursor = conn.execute("""
-            SELECT id, ip, org, country, asn 
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(ip_addresses)").fetchall()]
+        has_geo = "latitude" in cols and "longitude" in cols
+        has_post = "postal_code" in cols
+        
+        select_geo = ", latitude, longitude" if has_geo else ", NULL as latitude, NULL as longitude"
+        select_post = ", postal_code" if has_post else ", NULL as postal_code"
+
+        cursor = conn.execute(f"""
+            SELECT id, ip, org, country, city, region_code, asn {select_post} {select_geo}
             FROM ip_addresses
         """)
         
         connected_ips = set()
         
-        for ip_id, ip, org, country, asn in cursor.fetchall():
+        for ip_id, ip, org, country, city, region_code, asn, postal_code, latitude, longitude in cursor.fetchall():
             label = ip
             
             nodes.append({
@@ -428,6 +435,11 @@ class GraphBuilder:
                     "ip": ip,
                     "org": org or "Unknown",
                     "country": country or "Unknown",
+                    "city": city or "",
+                    "region_code": region_code or "",
+                    "postal_code": postal_code or "",
+                    "latitude": latitude,
+                    "longitude": longitude,
                     "asn": asn or "Unknown"
                 }
             })

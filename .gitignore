@@ -39,6 +39,7 @@ testeip
 Villa11_Ext
 vila11*
 Villa11*
+validar*
 *.log
 
 # Databases: Ignore all test/scan databases except the default example dataset

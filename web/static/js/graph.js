@@ -4126,6 +4126,33 @@ class EASMDashboard {
             const ipVal = String(data.ip || data.label || data.name || data.id || '').replace(/^ip_/, '').trim();
             const isMarked = this.isTargetMarked(ipVal);
 
+            let cityHtml = '';
+            if (data.city || data.region_code) {
+                const cityRegion = [data.city, data.region_code].filter(Boolean).join(', ');
+                cityHtml = `
+                <div class="property">
+                    <span class="key">City / State:</span>
+                    <span class="value">${cityRegion}</span>
+                </div>`;
+            }
+
+            let geoHtml = '';
+            const lat = (data.latitude !== null && data.latitude !== undefined && data.latitude !== '') ? Number(data.latitude) : null;
+            const lon = (data.longitude !== null && data.longitude !== undefined && data.longitude !== '') ? Number(data.longitude) : null;
+            if (lat !== null && lon !== null && !isNaN(lat) && !isNaN(lon)) {
+                const mapsUrl = `https://www.google.com/maps?q=${lat},${lon}`;
+                geoHtml = `
+                <div class="property">
+                    <span class="key">Geolocation:</span>
+                    <span class="value" style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+                        <span>${lat.toFixed(4)}, ${lon.toFixed(4)}</span>
+                        <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.72rem; color: #00d4ff; background: rgba(0, 212, 255, 0.1); border: 1px solid rgba(0, 212, 255, 0.3); border-radius: 4px; padding: 0.15rem 0.45rem; text-decoration: none; transition: all 0.2s;" onmouseover="this.style.background='rgba(0,212,255,0.2)'" onmouseout="this.style.background='rgba(0,212,255,0.1)'">
+                            <i data-lucide="map-pin" style="width: 11px; height: 11px;"></i> Map
+                        </a>
+                    </span>
+                </div>`;
+            }
+
             html = `
                 <h4>IP Address Information</h4>
                 <div class="property">
@@ -4136,10 +4163,12 @@ class EASMDashboard {
                     <span class="key">Organization:</span>
                     <span class="value">${data.org || 'Unknown'}</span>
                 </div>
+                ${cityHtml}
                 <div class="property">
                     <span class="key">Country:</span>
                     <span class="value">${data.country || 'Unknown'}</span>
                 </div>
+                ${geoHtml}
                 <div class="property">
                     <span class="key">ASN:</span>
                     <span class="value">${data.asn || 'Unknown'}</span>
