@@ -222,7 +222,7 @@ class GraphBuilder:
             if target_scopes and (not _is_in_scope(sub_name) or not _is_in_scope(domain_name)):
                 continue
 
-            # If sub_name is the root domain itself (e.g. vila11.com.br == vila11.com.br), do not create duplicate subdomain node
+            # If sub_name is the root domain itself (e.g. example.com == example.com), do not create duplicate subdomain node
             if sub_name.strip().lower() == domain_name.strip().lower():
                 if ip_id and ip_address:
                     domain_to_ips.setdefault(domain_id, set()).add(ip_id)
