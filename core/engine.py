@@ -450,6 +450,10 @@ class ThreatTrackEngine:
                 if sub_val.startswith("*."):
                     sub_val = sub_val[2:]
                 if sub_val and "." in sub_val and " " not in sub_val and not sub_val.startswith("@"):
+                    # Scope enforcement for domain targets: Only resolve and expand subdomains belonging to the target domain hierarchy
+                    if target_type == "domain" and root_domain:
+                        if not (sub_val == root_domain or sub_val.endswith(f".{root_domain}")):
+                            continue
                     discovered_subdomains.add(sub_val)
                     subdomain_finding_refs.setdefault(sub_val, []).append(f)
 

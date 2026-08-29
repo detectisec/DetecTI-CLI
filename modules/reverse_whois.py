@@ -130,19 +130,65 @@ class ReverseWhoisModule(BaseModule):
         discovered_domains: Set[str] = set()
 
         # 1. If target is an IP or Domain: HackerTarget Reverse IP lookup
+        # (Skip if the target IP / domain resolves to a shared CDN/Anycast proxy like Cloudflare, Fastly, Akamai)
+        skip_reverse_ip = False
+        target_ip = None
         try:
-            url = settings.hackertarget_reverse_ip_url
-            params = {"q": target}
-            resp = await self.http_client.get(url=url, params=params, timeout=15.0, raise_for_status=False)
-            if resp.status_code == 200:
-                text = resp.text.strip()
-                if text and "API count exceeded" not in text and "No records" not in text and "error" not in text.lower():
-                    for line in text.splitlines():
-                        candidate = line.strip().lower()
-                        if candidate and self.DOMAIN_REGEX.match(candidate):
-                            discovered_domains.add(candidate)
+            import ipaddress, socket
+            # If target is already an IP
+            try:
+                ipaddress.ip_address(target)
+                target_ip = target
+            except ValueError:
+                # If target is a domain, resolve its current IP
+                try:
+                    target_ip = socket.gethostbyname(target)
+                except Exception:
+                    pass
+
+            if target_ip:
+                ip_obj = ipaddress.ip_address(target_ip)
+                # Known shared CDN/Anycast IP networks
+                cdn_nets = [
+                    ipaddress.ip_network("104.16.0.0/12"),
+                    ipaddress.ip_network("172.64.0.0/13"),
+                    ipaddress.ip_network("162.158.0.0/15"),
+                    ipaddress.ip_network("198.41.128.0/17"),
+                    ipaddress.ip_network("197.234.240.0/22"),
+                    ipaddress.ip_network("188.114.96.0/20"),
+                    ipaddress.ip_network("190.93.240.0/20"),
+                    ipaddress.ip_network("108.162.192.0/18"),
+                    ipaddress.ip_network("131.0.72.0/22"),
+                    ipaddress.ip_network("141.101.64.0/18"),
+                    ipaddress.ip_network("103.21.244.0/22"),
+                    ipaddress.ip_network("103.22.200.0/22"),
+                    ipaddress.ip_network("103.31.4.0/22"),
+                    ipaddress.ip_network("173.245.48.0/20"),
+                    ipaddress.ip_network("151.101.0.0/16"),   # Fastly
+                    ipaddress.ip_network("199.232.0.0/16"),   # Fastly
+                    ipaddress.ip_network("199.83.128.0/21"),  # Imperva
+                    ipaddress.ip_network("198.143.32.0/19"),  # Imperva
+                ]
+                if any(ip_obj in net for net in cdn_nets):
+                    skip_reverse_ip = True
+                    logger.info(f"Target {target} ({target_ip}) resides on a shared CDN/Anycast proxy (Cloudflare/Fastly/Imperva). Skipping Reverse IP to prevent tenant noise.")
         except Exception as exc:
-            logger.debug(f"HackerTarget Reverse IP error for {target}: {exc}")
+            logger.debug(f"CDN detection check error for {target}: {exc}")
+
+        if not skip_reverse_ip:
+            try:
+                url = settings.hackertarget_reverse_ip_url
+                params = {"q": target}
+                resp = await self.http_client.get(url=url, params=params, timeout=15.0, raise_for_status=False)
+                if resp.status_code == 200:
+                    text = resp.text.strip()
+                    if text and "API count exceeded" not in text and "No records" not in text and "error" not in text.lower():
+                        for line in text.splitlines():
+                            candidate = line.strip().lower()
+                            if candidate and self.DOMAIN_REGEX.match(candidate):
+                                discovered_domains.add(candidate)
+            except Exception as exc:
+                logger.debug(f"HackerTarget Reverse IP error for {target}: {exc}")
 
         # 2. If target is a Domain: Query WHOIS to extract organization and emails for context
         if self.DOMAIN_REGEX.match(target):

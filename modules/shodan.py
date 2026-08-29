@@ -358,8 +358,8 @@ class ShodanModule(BaseModule):
                 )
             )
 
-            # If the record resolves to an IP address, query host info
-            if value:
+            # If the record resolves to an IP address (A or AAAA), query host info
+            if value and rec_type in ("A", "AAAA"):
                 try:
                     ipaddress.ip_address(value)
                     host_findings = await self.get_host_info(value)
