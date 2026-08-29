@@ -140,9 +140,11 @@ flowchart TD
   - Direct IP, CIDR subnets (`192.168.1.0/24`), Domain, and custom search query support.
   - Port, service, product, version, and banner discovery.
   - Automatic web service URL construction (`http://` vs `https://`).
+  - **IP Geolocation & City/State Mapping**: Enriched with City, Region/State, Country, ASN, and geographic coordinates (Latitude/Longitude) with interactive Google Maps links in the Asset Inspector.
 - **🔍 Subdomain & Domain Correlation**:
   - **Certificate Transparency (crt.sh)** for comprehensive subdomain enumeration.
   - **Reverse WHOIS**: Correlates domains by registrant email, organization name, or domain (WhoisFreaks API + HackerTarget fallback).
+  - **Authoritative DNS Resolution Isolation (Subdomain ➔ IP)**: Every subdomain links strictly and exclusively to its directly resolved IP addresses in DNS/TLS certificates, preventing any cross-contamination or spurious associations between sibling subdomains.
   - Shodan DNS historical record mapping.
 - **🛡️ Advanced Threat Intelligence & Risk Prioritization**:
   - **3D EASM Risk Matrix**: Intelligent sorting placing actively exploited CISA KEV flaws, weaponized PoCs, and high EPSS probability at the top.
@@ -157,10 +159,11 @@ flowchart TD
     - **Left-Click (Drag)**: Pan and navigate smoothly across the canvas.
     - **Left-Click (Node)**: Select single node and inspect deep asset metadata in the Asset Inspector.
     - **Ctrl + Left-Click (Node)** / **Cmd + Left-Click**: Additive sequential multi-selection of target nodes.
-    - **Right-Click (Node)**: Custom Context Menu to Collapse/Uncollapse Services or Vulnerabilities, Set/Remove Targets, Remove Verified Active, Focus Node, or Copy Domain/IP/CVE identifiers.
+    - **Right-Click (Node)**: Custom Context Menu to Collapse/Uncollapse Services or Vulnerabilities, Set/Remove Targets (IPs and FQDNs), Remove Verified Active, Focus Node, or Copy Domain/IP/CVE identifiers.
     - **Right-Click (Drag)**: Box area selection to group and reposition multiple nodes together.
     - **Smooth Scroll Wheel**: Seamless zoom in/out centered directly at the cursor position.
   - **Retractable Filters & Controls Drawer**: Smoothly collapse the left sidebar to liberate 100% of the screen for graph exploration across all desktop and mobile devices.
+  - **Clean & Focused Asset Inspector**: Dedicated strictly to technical metadata, CWE descriptions, affected ports, IP geolocation, associated domains, weaponized exploit URLs, banner metadata, and explicit vulnerability **Source** attribution.
   - **Granular Graph Filters**:
     - `CISA KEV (Known Exploited)`
     - `High EPSS (>50% Exploit Probability)`
@@ -176,26 +179,25 @@ flowchart TD
   - **Export Data Menu**: One-click download of active scan data in **JSON**, **Executive Markdown**, and **Standalone HTML** formats.
   - **Floating Action Controls**: Instant access to `📐 Fit to Screen`, `🔍 Reset Zoom`, `🔄 Re-layout`, and **Layout Selector** (`🌳 Hierarchical (Top-Down, Default)`, `🌐 Force-Directed`, `🎯 Concentric`, `▦ Grid`).
   - **Smart Collapsible Clusters (High Fan-Out Optimization)**: Group high-density services or vulnerabilities into clean, collapsible cluster nodes with a dashed border.
-  - **Asset Inspector & Risk Metrics Accordions**: Deep-dive into technical properties, CWE descriptions, affected ports, associated domains, weaponized exploit URLs, banner metadata, and explicit vulnerability **Source** attribution.
 - **🎯 Target Management & High-Speed Active Port Scanning (Masscan)**:
-  - **Right-Click Target Marking & Bulk Selection**:
-    - Mark/unmark any individual `IP Address` node as a scan target directly from the Cytoscape graph context menu (**Set as Target** / **Remove Target**).
+  - **Hybrid IP & FQDN Target Scanning**:
+    - **FQDN Targets for Reverse Proxies / CDNs / Virtual Hosts**: In environments protected by Cloudflare, AWS CloudFront, Akamai, or Nginx/Apache Virtual Hosts, direct IP scanning fails due to TLS SNI requirements and HTTP `Host:` headers. DetecTIHound allows setting **Domains and Subdomains directly as scan targets** (**Set as Target (FQDN)**).
+    - **Right-Click Target Marking & Bulk Selection**: Mark/unmark any individual `IP Address`, `Domain`, or `Subdomain` node as a scan target directly from the Cytoscape graph context menu (**Set as Target** / **Remove Target**).
     - **Bulk Target Addition on Root Nodes**: Right-click on any `Organization`, `Network / ASN`, `Target Root`, or `Domain` node to instantly mark or unmark **all associated descendant IPs** as scan targets in a single click (**Set all N IPs as Targets** / **Remove all N IPs from Targets**).
   - **Active Verification Reset (Remove Verified Active)**: Right-click individual active services or parent root nodes to reset active verification back to passive status for targeted re-scans without losing existing asset metadata.
   - **Smart Port Exclusion**: Automatically filters out ports already marked `Confirmed Active` to avoid duplicate scanning and save network bandwidth.
   - **2-Phase Pipeline for All Ports (0-65535)**: Phase 1 prioritizes unverified passive ports for immediate 1-2s visual confirmation, followed by Phase 2 batch sweep of remaining ports.
-  - **Inspector Direct Actions**: Toggle individual or bulk target states directly from the **Asset Inspector** drawer for both IP nodes and parent Organization/Domain roots.
   - **Target Management Drawer**: Right-side sliding panel providing real-time target status (`Idle`, `Scanning`, `Completed`, `Failed`), discovered open port counts, port chips with banner tooltips, individual or bulk scan execution, and a live console output stream.
   - **Live Scan Indicator**: Pulsing **`Scanning...`** badge and visual status indicators on the Targets header button while port or vulnerability scans are executing in the background.
   - **Flexible Scan Presets & Rate Control**: Quick port profiles (*Top 100*, *Web Ports*, *All Ports 0-65535*, *Custom*), packet rate slider (100 to 10,000 pps), `-Pn` (disable ping), and `--banners` (banner grabbing & service detection).
   - **Visual Topology Differentiation**:
-    - Marked IP nodes display a discreet **Crosshair badge overlay** in the upper-right corner.
+    - Marked target nodes display a pulsing **Neon Cyan (.is-target)** glow and active target status in Cytoscape.
     - Services awaiting active verification render in dark slate with dashed amber borders (`#f59e0b`).
     - Confirmed active services render in solid **Emerald Green (#27ae60)** with an emerald border and glow.
     - Active scan service connections render as solid **Emerald Green relationship edges** (`#2ecc71`).
 - **🛡️ Active Vulnerability Scanning (Nuclei)**:
-  - Integration with ProjectDiscovery's **Nuclei** engine for template-based vulnerability assessment.
-  - **Mandatory "Verified Active" Enforcement**: Scans are strictly targeted at ports confirmed open and active via Masscan. Unverified passive ports trigger a targeted Masscan pre-scan verification prior to template execution. If unverified or unavailable, Nuclei safely skips with explicit rationale logged.
+  - Integration with ProjectDiscovery's **Nuclei** engine for template-based vulnerability assessment against both raw IPs and FQDN endpoints (`https://<fqdn>`, `http://<fqdn>`).
+  - **Mandatory "Verified Active" Enforcement on Raw IPs**: IP scans are strictly targeted at ports confirmed open and active via Masscan. Unverified passive ports trigger a targeted Masscan pre-scan verification prior to template execution. If unverified or unavailable, Nuclei safely skips with explicit rationale logged.
   - Configurable severity filters (Critical, High, Medium, Low, Info), protocol/template tags, rate limits, concurrency, and custom flags.
   - Automated database merging, deduplication, and immediate Cytoscape graph node generation with weaponized PoC linkage.
 - **🎯 Target Anchoring & Active Recon Staging**:
