@@ -4087,41 +4087,6 @@ class EASMDashboard {
                 }
             }
 
-            const fqdnVal = String(data.name || data.label || data.id || '').replace(/^(dom_|sub_|target_)/, '').trim();
-            const isFqdnMarked = this.isTargetMarked(fqdnVal);
-            const isFqdnType = ['domain', 'subdomain', 'target'].includes(data.type);
-
-            let fqdnTargetBtnHtml = '';
-            if (isFqdnType && fqdnVal) {
-                fqdnTargetBtnHtml = `
-                    <div class="property" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
-                        <button type="button" class="btn-primary-action" id="inspector-toggle-target-btn" data-target="${this.escapeHtml(fqdnVal)}" style="width: 100%; font-size: 0.82rem; padding: 0.5rem 0.8rem; background: ${isFqdnMarked ? 'rgba(239, 68, 68, 0.2)' : 'linear-gradient(135deg, #00f0ff 0%, #0284c7 100%)'}; border-color: ${isFqdnMarked ? '#ef4444' : '#00f0ff'}; color: ${isFqdnMarked ? '#ef4444' : '#fff'};">
-                            <i data-lucide="crosshair" style="width: 14px; height: 14px;"></i>
-                            <span>${isFqdnMarked ? `Remove ${fqdnVal} from Targets` : `Add ${fqdnVal} to Scan Targets (FQDN)`}</span>
-                        </button>
-                    </div>
-                `;
-            }
-
-            const associatedIps = this.getAssociatedIpNodes(node);
-            let rootTargetBtnHtml = '';
-            if (associatedIps.length > 0) {
-                const totalCount = associatedIps.length;
-                const markedCount = associatedIps.filter(ipN => {
-                    const rawIp = ipN.data('ip') || ipN.data('label') || ipN.data('name') || ipN.id();
-                    return this.isTargetMarked(rawIp);
-                }).length;
-                const allMarked = markedCount === totalCount;
-                rootTargetBtnHtml = `
-                    <div class="property" style="${fqdnTargetBtnHtml ? 'margin-top: 0.4rem;' : 'margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);'}">
-                        <button type="button" class="btn-primary-action" id="inspector-toggle-root-targets-btn" style="width: 100%; font-size: 0.78rem; padding: 0.4rem 0.7rem; background: ${allMarked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 240, 255, 0.12)'}; border-color: ${allMarked ? 'rgba(239, 68, 68, 0.4)' : 'rgba(0, 240, 255, 0.35)'}; color: ${allMarked ? '#ef4444' : '#00f0ff'};">
-                            <i data-lucide="layers" style="width: 13px; height: 13px;"></i>
-                            <span>${allMarked ? `Remove all ${totalCount} IPs from Targets` : `Add all ${totalCount} resolved IPs to Targets (${markedCount}/${totalCount})`}</span>
-                        </button>
-                    </div>
-                `;
-            }
-
             html = `
                 <h4>${sectionTitle}</h4>
                 <div class="property">
@@ -4132,8 +4097,6 @@ class EASMDashboard {
                     <span class="key">Type:</span>
                     <span class="value">${data.target_type ? `${data.type.toUpperCase()} (${data.target_type.toUpperCase()})` : data.type.toUpperCase()}</span>
                 </div>
-                ${fqdnTargetBtnHtml}
-                ${rootTargetBtnHtml}
                 ${fileTargetsHtml}
                 ${subdomainsAccordionHtml}
                 ${riskMetricsHtml}
@@ -4189,12 +4152,6 @@ class EASMDashboard {
                 <div class="property">
                     <span class="key">ASN:</span>
                     <span class="value">${data.asn || 'Unknown'}</span>
-                </div>
-                <div class="property" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
-                    <button type="button" class="btn-primary-action" id="inspector-toggle-target-btn" style="width: 100%; font-size: 0.82rem; padding: 0.5rem 0.8rem; background: ${isMarked ? 'rgba(239, 68, 68, 0.2)' : 'linear-gradient(135deg, #00f0ff 0%, #0284c7 100%)'}; border-color: ${isMarked ? '#ef4444' : '#00f0ff'}; color: ${isMarked ? '#ef4444' : '#fff'};">
-                        <i data-lucide="crosshair" style="width: 14px; height: 14px;"></i>
-                        <span>${isMarked ? 'Remove from Scan Targets' : 'Add to Scan Targets'}</span>
-                    </button>
                 </div>
                 ${riskMetricsHtml}
             `;
@@ -4549,41 +4506,6 @@ class EASMDashboard {
         }
 
         content.innerHTML = html;
-
-        // Wire Inspector Target Button if present on IP, Domain, Subdomain, or Target node
-        const inspectorTargetBtn = content.querySelector('#inspector-toggle-target-btn');
-        if (inspectorTargetBtn) {
-            const targetVal = inspectorTargetBtn.getAttribute('data-target') || 
-                              String(data.ip || data.name || data.label || data.id || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
-            inspectorTargetBtn.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                await this.toggleTargetMark(targetVal, node);
-                // Re-render inspector to update button state
-                this.showNodeInspector(node);
-            });
-        }
-
-        // Wire Inspector Target Button for Root / Org / Domain nodes with associated IPs
-        const inspectorRootTargetBtn = content.querySelector('#inspector-toggle-root-targets-btn');
-        if (inspectorRootTargetBtn) {
-            inspectorRootTargetBtn.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                const associatedIps = this.getAssociatedIpNodes(node);
-                const ipStrings = associatedIps.map(ipN => {
-                    const rawIp = ipN.data('ip') || ipN.data('label') || ipN.data('name') || ipN.id();
-                    return String(rawIp || '').replace(/^ip_/, '').trim();
-                }).filter(Boolean);
-
-                const markedCount = ipStrings.filter(ip => this.isTargetMarked(ip)).length;
-                if (markedCount === ipStrings.length) {
-                    await this.removeTargetsBulk(ipStrings);
-                } else {
-                    await this.setTargetsBulk(ipStrings, associatedIps);
-                }
-                // Re-render inspector to update button state
-                this.showNodeInspector(node);
-            });
-        }
 
         drawer.classList.add('open');
         const inspectorBackdrop = document.getElementById('inspector-backdrop');
