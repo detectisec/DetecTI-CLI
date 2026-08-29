@@ -4462,12 +4462,60 @@ class EASMDashboard {
                 </div>`;
             }
 
+            // Find resolving domains/subdomains for this IP
+            const resolvingDomains = [];
+            if (this.cy) {
+                const ipNode = this.cy.getElementById(data.id);
+                if (ipNode.length > 0) {
+                    ipNode.incomers('node[type="subdomain"], node[type="domain"]').forEach(dNode => {
+                        const dData = dNode.data();
+                        const dName = dData.name || dData.label;
+                        if (dName && !resolvingDomains.some(r => r.name === dName)) {
+                            resolvingDomains.push({ id: dNode.id(), name: dName, type: dData.type });
+                        }
+                    });
+                }
+            }
+            if (resolvingDomains.length === 0 && elements && elements.edges) {
+                const inEdges = this.inEdges ? (this.inEdges.get(data.id) || []) : [];
+                inEdges.forEach(edgeData => {
+                    if (['RESOLVES_TO', 'HOSTS_IP', 'CONTAINS_IP'].includes(edgeData.label)) {
+                        const srcData = this.nodeIndex ? this.nodeIndex.get(edgeData.source) : null;
+                        if (srcData && (srcData.type === 'domain' || srcData.type === 'subdomain')) {
+                            const dName = srcData.name || srcData.label;
+                            if (dName && !resolvingDomains.some(r => r.name === dName)) {
+                                resolvingDomains.push({ id: edgeData.source, name: dName, type: srcData.type });
+                            }
+                        }
+                    }
+                });
+            }
+
+            let resolvingDomainsHtml = '';
+            if (resolvingDomains.length > 0) {
+                const domBadges = resolvingDomains.map(item => `
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; margin-bottom: 3px; background: rgba(78, 205, 196, 0.08); border: 1px solid rgba(78, 205, 196, 0.25); border-radius: 4px; font-family: monospace; font-size: 0.8rem;">
+                        <span style="color: #4ecdc4; font-weight: 500; word-break: break-all;">${item.name}</span>
+                        <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.7rem; background: rgba(78, 205, 196, 0.2); color: #4ecdc4; border-color: rgba(78, 205, 196, 0.4);" onclick="event.stopPropagation(); window.dashboard.focusNode('${item.id}')" title="Focus domain in graph"><i data-lucide="crosshair" class="badge-icon"></i> Focus</button>
+                    </div>
+                `).join('');
+
+                resolvingDomainsHtml = `
+                <div class="property" style="flex-direction: column; align-items: flex-start; gap: 4px;">
+                    <span class="key" style="margin-bottom: 2px;">${resolvingDomains.length === 1 ? 'Resolving Domain / Host:' : `Resolving Domains / Hosts (${resolvingDomains.length}):`}</span>
+                    <div style="width: 100%; max-height: 180px; overflow-y: auto;">
+                        ${domBadges}
+                    </div>
+                </div>`;
+            }
+
             html = `
                 <h4>IP Address Information</h4>
                 <div class="property">
                     <span class="key">IP Address:</span>
                     <span class="value">${data.ip || ipVal}</span>
                 </div>
+                ${resolvingDomainsHtml}
                 <div class="property">
                     <span class="key">Organization:</span>
                     <span class="value">${data.org || 'Unknown'}</span>
