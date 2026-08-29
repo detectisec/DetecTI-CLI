@@ -405,8 +405,8 @@ class GraphBuilder:
         
         return nodes, edges, root_target_node, subdomain_to_ips, domain_to_ips
     
-    def _build_ip_nodes(self, conn: sqlite3.Connection, subdomain_to_ips: Dict[str, set], domain_to_ips: Dict[str, set] | None = None, root_target_node: Dict | None = None) -> tuple[List[Dict], List[Dict]]:
-        """Build IP address nodes connected to Subdomains/Domains or Root Target."""
+    def _build_ip_nodes(self, conn: sqlite3.Connection, subdomain_to_ips: Dict[str, set], domain_to_ips: Dict[str, set], root_target_node: Dict | None) -> tuple[List[Dict], List[Dict]]:
+        """Build IP nodes, Organization/ASN network clusters, and hierarchy edges."""
         nodes = []
         edges = []
         
@@ -422,15 +422,64 @@ class GraphBuilder:
             FROM ip_addresses
         """)
         
-        connected_ips = set()
+        ip_rows = cursor.fetchall()
         
-        for ip_id, ip, org, country, city, region_code, asn, postal_code, latitude, longitude in cursor.fetchall():
-            label = ip
+        # 1. Build Organization / ASN Network Cluster Nodes
+        # Extract unique (asn, org) pairs across all IPs
+        net_cluster_map = {}  # (asn, org) -> net_node_id
+        for _, _, org, _, _, _, asn, _, _, _ in ip_rows:
+            clean_asn = str(asn).strip() if asn else ""
+            clean_org = str(org).strip() if org else ""
+            if clean_asn.lower() == "unknown":
+                clean_asn = ""
+            if clean_org.lower() == "unknown":
+                clean_org = ""
             
+            if clean_asn or clean_org:
+                net_key = (clean_asn, clean_org)
+                if net_key not in net_cluster_map:
+                    cluster_slug = f"{clean_asn}_{clean_org}".replace(" ", "_").replace("/", "_").replace(":", "_")
+                    net_id = f"net_{abs(hash(cluster_slug)) % 10000000}"
+                    net_cluster_map[net_key] = net_id
+                    
+                    if clean_org and clean_asn:
+                        net_label = f"{clean_org}\n({clean_asn})"
+                    elif clean_org:
+                        net_label = clean_org
+                    else:
+                        net_label = clean_asn
+
+                    nodes.append({
+                        "data": {
+                            "id": net_id,
+                            "label": net_label,
+                            "type": "network",
+                            "name": clean_org or clean_asn,
+                            "org": clean_org,
+                            "asn": clean_asn,
+                            "is_root": False
+                        }
+                    })
+
+                    # Connect Target Root -> Organization / ASN (MATCHES_ORG / MATCHES_ASN)
+                    if root_target_node:
+                        edge_label = "MATCHES_ORG" if clean_org else "MATCHES_ASN"
+                        edges.append({
+                            "data": {
+                                "id": f"e_root_net_{net_id}",
+                                "source": "target_root",
+                                "target": net_id,
+                                "label": edge_label
+                            }
+                        })
+
+        # 2. Build IP Nodes and connect to ASN / Org networks
+        connected_ips = set()
+        for ip_id, ip, org, country, city, region_code, asn, postal_code, latitude, longitude in ip_rows:
             nodes.append({
                 "data": {
                     "id": f"ip_{ip_id}",
-                    "label": label,
+                    "label": ip,
                     "type": "ip",
                     "ip": ip,
                     "org": org or "Unknown",
@@ -443,8 +492,28 @@ class GraphBuilder:
                     "asn": asn or "Unknown"
                 }
             })
+
+            # Connect IP -> Organization / ASN (BELONGS_TO)
+            clean_asn = str(asn).strip() if asn else ""
+            clean_org = str(org).strip() if org else ""
+            if clean_asn.lower() == "unknown":
+                clean_asn = ""
+            if clean_org.lower() == "unknown":
+                clean_org = ""
+            net_key = (clean_asn, clean_org)
+            if net_key in net_cluster_map:
+                net_id = net_cluster_map[net_key]
+                edges.append({
+                    "data": {
+                        "id": f"e_ip_net_{ip_id}_{net_id}",
+                        "source": f"ip_{ip_id}",
+                        "target": net_id,
+                        "label": "BELONGS_TO"
+                    }
+                })
+                connected_ips.add(ip_id)
         
-        # Connect Subdomains -> IPs (RESOLVES_TO)
+        # 3. Connect Subdomains -> IPs (RESOLVES_TO) from verified DNS resolutions
         for sub_id, ip_ids in subdomain_to_ips.items():
             for ip_id in ip_ids:
                 edges.append({
@@ -457,63 +526,10 @@ class GraphBuilder:
                 })
                 connected_ips.add(ip_id)
 
-        # Connect Domains -> IPs (RESOLVES_TO for root domain resolutions)
+        # 4. Connect Domains -> IPs (RESOLVES_TO for root domain resolutions)
         if domain_to_ips:
             for dom_id, ip_ids in domain_to_ips.items():
                 for ip_id in ip_ids:
-                    if ip_id not in connected_ips:
-                        edges.append({
-                            "data": {
-                                "id": f"e_dom_ip_{dom_id}_{ip_id}",
-                                "source": f"dom_{dom_id}",
-                                "target": f"ip_{ip_id}",
-                                "label": "RESOLVES_TO"
-                            }
-                        })
-                        connected_ips.add(ip_id)
-        
-        # For any IPs not linked via subdomains (e.g. file targets, IP lists, direct IP targets):
-        cursor = conn.execute("SELECT id, ip, org FROM ip_addresses")
-        orphaned_ips = []
-        for ip_id, ip, org in cursor.fetchall():
-            if ip_id not in connected_ips:
-                orphaned_ips.append((ip_id, ip, org))
-        
-        if orphaned_ips:
-            cursor_dom = conn.execute("SELECT id FROM domains LIMIT 1")
-            dom_row = cursor_dom.fetchone()
-            
-            targets_list = root_target_node["data"].get("targets_list", []) if root_target_node else []
-            explicit_targets = {str(t).strip().lower() for t in targets_list if t}
-            is_file_target = bool(root_target_node and (root_target_node["data"].get("target_type") == "file" or len(targets_list) > 1))
-            
-            # When target_root is available:
-            if root_target_node:
-                for ip_id, ip, org in orphaned_ips:
-                    ip_clean = str(ip).strip().lower()
-                    # If this IP was an explicit item in the target list, or if there are no domains in the scan:
-                    if (is_file_target and ip_clean in explicit_targets) or not dom_row:
-                        edges.append({
-                            "data": {
-                                "id": f"e_root_ip_{ip_id}",
-                                "source": "target_root",
-                                "target": f"ip_{ip_id}",
-                                "label": "CONTAINS_IP"
-                            }
-                        })
-                    elif dom_row:
-                        dom_id = dom_row[0]
-                        edges.append({
-                            "data": {
-                                "id": f"e_dom_ip_{dom_id}_{ip_id}",
-                                "source": f"dom_{dom_id}",
-                                "target": f"ip_{ip_id}",
-                                "label": "RESOLVES_TO"
-                            }
-                        })
-            elif dom_row:
-                dom_id = dom_row[0]
-                for ip_id, ip, org in orphaned_ips:
                     edges.append({
                         "data": {
                             "id": f"e_dom_ip_{dom_id}_{ip_id}",
@@ -522,6 +538,21 @@ class GraphBuilder:
                             "label": "RESOLVES_TO"
                         }
                     })
+                    connected_ips.add(ip_id)
+        
+        # 5. Connect any remaining completely unlinked IPs directly to target_root (CONTAINS_IP)
+        if root_target_node:
+            for ip_id, ip, org, _, _, _, asn, _, _, _ in ip_rows:
+                if ip_id not in connected_ips:
+                    edges.append({
+                        "data": {
+                            "id": f"e_root_ip_{ip_id}",
+                            "source": "target_root",
+                            "target": f"ip_{ip_id}",
+                            "label": "CONTAINS_IP"
+                        }
+                    })
+                    connected_ips.add(ip_id)
         
         return nodes, edges
     

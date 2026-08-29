@@ -505,6 +505,15 @@ class EASMDashboard {
                 if (edgeData.label === 'MATCHES_DOMAIN') {
                     visitedDomIds.add(edgeData.target);
                 }
+                if (edgeData.label === 'MATCHES_ORG' || edgeData.label === 'MATCHES_ASN') {
+                    const netId = edgeData.target;
+                    const netIn = this.inEdges.get(netId) || [];
+                    netIn.forEach(e => {
+                        if (e.label === 'BELONGS_TO' || e.label === 'ORGANIZATION_OF') {
+                            connectedIpIds.add(e.source);
+                        }
+                    });
+                }
                 if (edgeData.label === 'CONTAINS_IP' || edgeData.label === 'HOSTS_IP' || edgeData.label === 'RESOLVES_TO') {
                     connectedIpIds.add(edgeData.target);
                 }
@@ -2033,7 +2042,7 @@ class EASMDashboard {
                 },
                 
                 {
-                    selector: 'edge[label="MATCHES_DOMAIN"]',
+                    selector: 'edge[label="MATCHES_DOMAIN"], edge[label="MATCHES_ORG"], edge[label="MATCHES_ASN"]',
                     style: {
                         'line-color': '#8c52ff',
                         'target-arrow-color': '#8c52ff',
