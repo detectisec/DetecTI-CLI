@@ -735,26 +735,72 @@ async def start_active_scan(
                 ipaddress.ip_address(ip_to_scan)
             except ValueError:
                 resolved_ip = None
+                try:
+                    addr_info = socket.getaddrinfo(ip_to_scan, None, socket.AF_UNSPEC)
+                    if addr_info:
+                        resolved_ip = addr_info[0][4][0]
+                except Exception:
+                    pass
+
                 if active_db and Path(active_db.db_path).exists():
                     with sqlite3.connect(active_db.db_path) as conn:
-                        row = conn.execute("""
-                            SELECT ip_addresses.ip FROM ip_addresses
-                            JOIN subdomain_ips ON subdomain_ips.ip_id = ip_addresses.id
-                            JOIN subdomains ON subdomains.id = subdomain_ips.subdomain_id
-                            WHERE LOWER(subdomains.name) = LOWER(?)
-                        """, (ip_to_scan,)).fetchone()
-                        if row:
-                            resolved_ip = row[0]
-                if not resolved_ip:
-                    try:
-                        addr_info = socket.getaddrinfo(ip_to_scan, None, socket.AF_INET)
-                        if addr_info:
-                            resolved_ip = addr_info[0][4][0]
-                    except Exception:
-                        pass
+                        if not resolved_ip:
+                            row = conn.execute("""
+                                SELECT ip_addresses.ip FROM ip_addresses
+                                JOIN subdomain_ips ON subdomain_ips.ip_id = ip_addresses.id
+                                JOIN subdomains ON subdomains.id = subdomain_ips.subdomain_id
+                                WHERE LOWER(subdomains.name) = LOWER(?)
+                            """, (ip_to_scan,)).fetchone()
+                            if row:
+                                resolved_ip = row[0]
+                        
+                        # If resolved via DNS, immediately persist and bind in database
+                        if resolved_ip:
+                            # 1. Ensure subdomain node exists
+                            sub_row = conn.execute("SELECT id FROM subdomains WHERE LOWER(name) = LOWER(?)", (ip_to_scan,)).fetchone()
+                            if sub_row:
+                                sub_id = sub_row[0]
+                            else:
+                                dom_id = None
+                                for d_id, d_name in conn.execute("SELECT id, name FROM domains").fetchall():
+                                    d_clean = d_name.lower().strip()
+                                    if ip_to_scan.lower() == d_clean or ip_to_scan.lower().endswith(f".{d_clean}"):
+                                        dom_id = d_id
+                                        break
+                                if not dom_id:
+                                    dom_id = str(uuid.uuid4())
+                                    conn.execute("INSERT OR IGNORE INTO domains (id, name) VALUES (?, ?)", (dom_id, ip_to_scan))
+                                    d_fetch = conn.execute("SELECT id FROM domains WHERE LOWER(name) = LOWER(?)", (ip_to_scan,)).fetchone()
+                                    if d_fetch:
+                                        dom_id = d_fetch[0]
+
+                                sub_id = str(uuid.uuid4())
+                                conn.execute("INSERT OR IGNORE INTO subdomains (id, domain_id, name) VALUES (?, ?, ?)", (sub_id, dom_id, ip_to_scan))
+                                s_fetch = conn.execute("SELECT id FROM subdomains WHERE LOWER(name) = LOWER(?)", (ip_to_scan,)).fetchone()
+                                if s_fetch:
+                                    sub_id = s_fetch[0]
+
+                            # 2. Ensure IP exists
+                            ip_row = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (resolved_ip,)).fetchone()
+                            if ip_row:
+                                cur_ip_id = ip_row[0]
+                            else:
+                                cur_ip_id = str(uuid.uuid4())
+                                conn.execute("""
+                                    INSERT INTO ip_addresses (id, ip, org, country, asn)
+                                    VALUES (?, ?, ?, ?, ?)
+                                """, (cur_ip_id, resolved_ip, "Active Target", "Unknown", "Unknown"))
+
+                            # 3. Ensure direct RESOLVES_TO link in subdomain_ips
+                            conn.execute("""
+                                INSERT OR IGNORE INTO subdomain_ips (subdomain_id, ip_id)
+                                VALUES (?, ?)
+                            """, (sub_id, cur_ip_id))
+                            conn.commit()
+
                 if resolved_ip:
                     scan_ip = resolved_ip
-                    _append_scan_log("info", f"[Masscan] Target FQDN '{ip_to_scan}' mapped to IP {scan_ip} for active port scanning.", target=ip_to_scan)
+                    _append_scan_log("info", f"[Masscan] Target FQDN '{ip_to_scan}' resolved to IP {scan_ip} (persisted & linked in graph).", target=ip_to_scan)
 
             # 1. Inspect existing ports for target in database
             verified_ports, unverified_passive_ports = _get_target_ports_partition(ip_to_scan, active_db)

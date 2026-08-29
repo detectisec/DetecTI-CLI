@@ -859,66 +859,71 @@ class DatabaseManager:
                     """, (new_ip_id, target, "Active Target", "Unknown", "Unknown"))
                     ip_ids.append(new_ip_id)
             else:
-                # 1. Find all IP IDs already connected to this subdomain
-                sub_cursor = conn.execute("""
-                    SELECT ip_addresses.id, ip_addresses.ip FROM ip_addresses
-                    JOIN subdomain_ips ON subdomain_ips.ip_id = ip_addresses.id
-                    JOIN subdomains ON subdomains.id = subdomain_ips.subdomain_id
-                    WHERE LOWER(subdomains.name) = LOWER(?)
-                """, (target,))
-                for r in sub_cursor.fetchall():
-                    ip_ids.append(r[0])
-
-                # 2. If not found in subdomains, check domain root
-                if not ip_ids:
-                    dom_cursor = conn.execute("""
-                        SELECT ip_addresses.id, ip_addresses.ip FROM ip_addresses
-                        JOIN subdomain_ips ON subdomain_ips.ip_id = ip_addresses.id
-                        JOIN subdomains ON subdomains.id = subdomain_ips.subdomain_id
-                        JOIN domains ON domains.id = subdomains.domain_id
-                        WHERE LOWER(domains.name) = LOWER(?)
-                    """, (target,))
-                    for r in dom_cursor.fetchall():
-                        ip_ids.append(r[0])
-
-                # 3. Resolve DNS for FQDN if no IPs mapped or to ensure resolved IP is linked
+                # 1. Authoritative DNS resolution for FQDN
+                resolved_raw_ips = []
                 try:
-                    addr_info = socket.getaddrinfo(target, None, socket.AF_INET)
+                    addr_info = socket.getaddrinfo(target, None, socket.AF_UNSPEC)
                     if addr_info:
                         resolved_raw_ips = list(dict.fromkeys([ai[4][0] for ai in addr_info if ai and ai[4]]))
-                        # Ensure subdomains table has entry for target
-                        sub_row = conn.execute("SELECT id FROM subdomains WHERE LOWER(name) = LOWER(?)", (target,)).fetchone()
-                        sub_id = sub_row[0] if sub_row else None
-                        if not sub_id:
-                            # Try finding matching domain
-                            dom_id = None
-                            for d_id, d_name in conn.execute("SELECT id, name FROM domains").fetchall():
-                                if target.endswith(d_name):
-                                    dom_id = d_id
-                                    break
-                            sub_id = str(uuid.uuid4())
-                            conn.execute("INSERT INTO subdomains (id, domain_id, name) VALUES (?, ?, ?)", (sub_id, dom_id, target))
-
-                        for res_ip in resolved_raw_ips:
-                            ip_row = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (res_ip,)).fetchone()
-                            if ip_row:
-                                cur_ip_id = ip_row[0]
-                            else:
-                                cur_ip_id = str(uuid.uuid4())
-                                conn.execute("""
-                                    INSERT INTO ip_addresses (id, ip, org, country, asn)
-                                    VALUES (?, ?, ?, ?, ?)
-                                """, (cur_ip_id, res_ip, "Active Target", "Unknown", "Unknown"))
-
-                            if cur_ip_id not in ip_ids:
-                                ip_ids.append(cur_ip_id)
-
-                            # Ensure link in subdomain_ips
-                            link_row = conn.execute("SELECT id FROM subdomain_ips WHERE subdomain_id = ? AND ip_id = ?", (sub_id, cur_ip_id)).fetchone()
-                            if not link_row:
-                                conn.execute("INSERT INTO subdomain_ips (id, subdomain_id, ip_id) VALUES (?, ?, ?)", (str(uuid.uuid4()), sub_id, cur_ip_id))
                 except Exception:
                     pass
+
+                # 2. Ensure subdomain node exists in database
+                sub_row = conn.execute("SELECT id, domain_id FROM subdomains WHERE LOWER(name) = LOWER(?)", (target,)).fetchone()
+                if sub_row:
+                    sub_id, dom_id = sub_row[0], sub_row[1]
+                else:
+                    # Find matching parent domain
+                    dom_id = None
+                    for d_id, d_name in conn.execute("SELECT id, name FROM domains").fetchall():
+                        d_clean = d_name.lower().strip()
+                        if target.lower() == d_clean or target.lower().endswith(f".{d_clean}"):
+                            dom_id = d_id
+                            break
+                    if not dom_id:
+                        dom_id = str(uuid.uuid4())
+                        conn.execute("INSERT OR IGNORE INTO domains (id, name) VALUES (?, ?)", (dom_id, target))
+                        d_fetch = conn.execute("SELECT id FROM domains WHERE LOWER(name) = LOWER(?)", (target,)).fetchone()
+                        if d_fetch:
+                            dom_id = d_fetch[0]
+
+                    sub_id = str(uuid.uuid4())
+                    conn.execute("INSERT OR IGNORE INTO subdomains (id, domain_id, name) VALUES (?, ?, ?)", (sub_id, dom_id, target))
+                    s_fetch = conn.execute("SELECT id FROM subdomains WHERE LOWER(name) = LOWER(?)", (target,)).fetchone()
+                    if s_fetch:
+                        sub_id = s_fetch[0]
+
+                # 3. For each resolved IP: create IP node if new, and bind RESOLVES_TO via subdomain_ips
+                for res_ip in resolved_raw_ips:
+                    ip_row = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (res_ip,)).fetchone()
+                    if ip_row:
+                        cur_ip_id = ip_row[0]
+                    else:
+                        cur_ip_id = str(uuid.uuid4())
+                        conn.execute("""
+                            INSERT INTO ip_addresses (id, ip, org, country, asn)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (cur_ip_id, res_ip, "Active Target", "Unknown", "Unknown"))
+
+                    if cur_ip_id not in ip_ids:
+                        ip_ids.append(cur_ip_id)
+
+                    # Ensure direct link between FQDN and IP
+                    conn.execute("""
+                        INSERT OR IGNORE INTO subdomain_ips (subdomain_id, ip_id)
+                        VALUES (?, ?)
+                    """, (sub_id, cur_ip_id))
+
+                # 4. If DNS resolution was offline/empty, fallback to any existing database links
+                if not ip_ids:
+                    sub_cursor = conn.execute("""
+                        SELECT ip_addresses.id FROM ip_addresses
+                        JOIN subdomain_ips ON subdomain_ips.ip_id = ip_addresses.id
+                        JOIN subdomains ON subdomains.id = subdomain_ips.subdomain_id
+                        WHERE LOWER(subdomains.name) = LOWER(?)
+                    """, (target,))
+                    for r in sub_cursor.fetchall():
+                        ip_ids.append(r[0])
 
             # 4. Iterate through discovered ports for each associated IP
             for ip_id in set(ip_ids):
@@ -1172,6 +1177,34 @@ class DatabaseManager:
                         """, (clean_candidate,)).fetchone()
                         if sub_ip_row:
                             ip_id = sub_ip_row[0]
+                        else:
+                            try:
+                                addr_info = socket.getaddrinfo(clean_candidate, None, socket.AF_UNSPEC)
+                                if addr_info:
+                                    res_ip = addr_info[0][4][0]
+                                    ip_row = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (res_ip,)).fetchone()
+                                    if ip_row:
+                                        ip_id = ip_row[0]
+                                    else:
+                                        ip_id = str(uuid.uuid4())
+                                        conn.execute("""
+                                            INSERT INTO ip_addresses (id, ip, org, country, asn)
+                                            VALUES (?, ?, ?, ?, ?)
+                                        """, (ip_id, res_ip, "Active Target", "Unknown", "Unknown"))
+                                    ip_row_map[res_ip] = ip_id
+                                    
+                                    # Ensure subdomain and link
+                                    s_row = conn.execute("SELECT id FROM subdomains WHERE LOWER(name) = LOWER(?)", (clean_candidate,)).fetchone()
+                                    if s_row:
+                                        s_id = s_row[0]
+                                    else:
+                                        s_id = str(uuid.uuid4())
+                                        d_row = conn.execute("SELECT id FROM domains LIMIT 1").fetchone()
+                                        d_id = d_row[0] if d_row else None
+                                        conn.execute("INSERT OR IGNORE INTO subdomains (id, domain_id, name) VALUES (?, ?, ?)", (s_id, d_id, clean_candidate))
+                                    conn.execute("INSERT OR IGNORE INTO subdomain_ips (subdomain_id, ip_id) VALUES (?, ?)", (s_id, ip_id))
+                            except Exception:
+                                pass
 
                 if not ip_id and len(ip_row_map) == 1:
                     ip_id = list(ip_row_map.values())[0]
