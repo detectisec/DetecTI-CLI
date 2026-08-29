@@ -85,23 +85,23 @@ class APIClient {
         return this.request('/targets');
     }
 
-    async setTarget(ip) {
+    async setTarget(target) {
         return this.request('/targets/set', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ ip: ip })
+            body: JSON.stringify({ target: target, ip: target })
         });
     }
 
-    async removeTarget(ip) {
+    async removeTarget(target) {
         return this.request('/targets/remove', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ ip: ip })
+            body: JSON.stringify({ target: target, ip: target })
         });
     }
 

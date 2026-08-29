@@ -4087,6 +4087,22 @@ class EASMDashboard {
                 }
             }
 
+            const fqdnVal = String(data.name || data.label || data.id || '').replace(/^(dom_|sub_|target_)/, '').trim();
+            const isFqdnMarked = this.isTargetMarked(fqdnVal);
+            const isFqdnType = ['domain', 'subdomain', 'target'].includes(data.type);
+
+            let fqdnTargetBtnHtml = '';
+            if (isFqdnType && fqdnVal) {
+                fqdnTargetBtnHtml = `
+                    <div class="property" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
+                        <button type="button" class="btn-primary-action" id="inspector-toggle-target-btn" data-target="${this.escapeHtml(fqdnVal)}" style="width: 100%; font-size: 0.82rem; padding: 0.5rem 0.8rem; background: ${isFqdnMarked ? 'rgba(239, 68, 68, 0.2)' : 'linear-gradient(135deg, #00f0ff 0%, #0284c7 100%)'}; border-color: ${isFqdnMarked ? '#ef4444' : '#00f0ff'}; color: ${isFqdnMarked ? '#ef4444' : '#fff'};">
+                            <i data-lucide="crosshair" style="width: 14px; height: 14px;"></i>
+                            <span>${isFqdnMarked ? `Remove ${fqdnVal} from Targets` : `Add ${fqdnVal} to Scan Targets (FQDN)`}</span>
+                        </button>
+                    </div>
+                `;
+            }
+
             const associatedIps = this.getAssociatedIpNodes(node);
             let rootTargetBtnHtml = '';
             if (associatedIps.length > 0) {
@@ -4097,10 +4113,10 @@ class EASMDashboard {
                 }).length;
                 const allMarked = markedCount === totalCount;
                 rootTargetBtnHtml = `
-                    <div class="property" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
-                        <button type="button" class="btn-primary-action" id="inspector-toggle-root-targets-btn" style="width: 100%; font-size: 0.82rem; padding: 0.5rem 0.8rem; background: ${allMarked ? 'rgba(239, 68, 68, 0.2)' : 'linear-gradient(135deg, #00f0ff 0%, #0284c7 100%)'}; border-color: ${allMarked ? '#ef4444' : '#00f0ff'}; color: ${allMarked ? '#ef4444' : '#fff'};">
-                            <i data-lucide="crosshair" style="width: 14px; height: 14px;"></i>
-                            <span>${allMarked ? `Remove all ${totalCount} IPs from Targets` : `Add all ${totalCount} IPs to Targets (${markedCount}/${totalCount})`}</span>
+                    <div class="property" style="${fqdnTargetBtnHtml ? 'margin-top: 0.4rem;' : 'margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);'}">
+                        <button type="button" class="btn-primary-action" id="inspector-toggle-root-targets-btn" style="width: 100%; font-size: 0.78rem; padding: 0.4rem 0.7rem; background: ${allMarked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 240, 255, 0.12)'}; border-color: ${allMarked ? 'rgba(239, 68, 68, 0.4)' : 'rgba(0, 240, 255, 0.35)'}; color: ${allMarked ? '#ef4444' : '#00f0ff'};">
+                            <i data-lucide="layers" style="width: 13px; height: 13px;"></i>
+                            <span>${allMarked ? `Remove all ${totalCount} IPs from Targets` : `Add all ${totalCount} resolved IPs to Targets (${markedCount}/${totalCount})`}</span>
                         </button>
                     </div>
                 `;
@@ -4116,6 +4132,7 @@ class EASMDashboard {
                     <span class="key">Type:</span>
                     <span class="value">${data.target_type ? `${data.type.toUpperCase()} (${data.target_type.toUpperCase()})` : data.type.toUpperCase()}</span>
                 </div>
+                ${fqdnTargetBtnHtml}
                 ${rootTargetBtnHtml}
                 ${fileTargetsHtml}
                 ${subdomainsAccordionHtml}
@@ -4533,13 +4550,14 @@ class EASMDashboard {
 
         content.innerHTML = html;
 
-        // Wire Inspector Target Button if present on IP node
+        // Wire Inspector Target Button if present on IP, Domain, Subdomain, or Target node
         const inspectorTargetBtn = content.querySelector('#inspector-toggle-target-btn');
-        if (inspectorTargetBtn && data.type === 'ip') {
-            const ipVal = String(data.ip || data.label || data.name || data.id || '').replace(/^ip_/, '').trim();
+        if (inspectorTargetBtn) {
+            const targetVal = inspectorTargetBtn.getAttribute('data-target') || 
+                              String(data.ip || data.name || data.label || data.id || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
             inspectorTargetBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                await this.toggleTargetMark(ipVal, node);
+                await this.toggleTargetMark(targetVal, node);
                 // Re-render inspector to update button state
                 this.showNodeInspector(node);
             });
@@ -5137,19 +5155,20 @@ class EASMDashboard {
         this.cy.batch(() => {
             this.cy.nodes().forEach(node => {
                 const nodeType = node.data('type');
-                if (nodeType === 'ip') {
-                    const rawIp = node.data('ip') || node.data('label') || node.data('name') || node.id();
-                    const cleanIp = String(rawIp || '').replace(/^ip_/, '').trim();
-                    const isTarget = this.markedTargets.has(cleanIp) || 
-                                     (node.data('ip') && this.markedTargets.has(node.data('ip').trim())) || 
-                                     (node.data('label') && this.markedTargets.has(node.data('label').trim()));
-                    if (isTarget) {
-                        node.addClass('is-target');
-                        node.data('is_target', 'true');
-                    } else {
-                        node.removeClass('is-target');
-                        node.data('is_target', 'false');
-                    }
+                const rawName = node.data('name') || node.data('label') || node.data('ip') || node.id();
+                const cleanName = String(rawName || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
+
+                const isTarget = this.markedTargets.has(cleanName) || 
+                                 (node.data('ip') && this.markedTargets.has(node.data('ip').trim())) || 
+                                 (node.data('name') && this.markedTargets.has(node.data('name').trim())) || 
+                                 (node.data('label') && this.markedTargets.has(node.data('label').trim()));
+
+                if (isTarget) {
+                    node.addClass('is-target');
+                    node.data('is_target', 'true');
+                } else {
+                    node.removeClass('is-target');
+                    node.data('is_target', 'false');
                 }
             });
         });
@@ -5281,23 +5300,24 @@ class EASMDashboard {
         }
     }
 
-    async setTargetsBulk(ips, nodes = []) {
-        if (!Array.isArray(ips) || ips.length === 0) return;
+    async setTargetsBulk(targets, nodes = []) {
+        if (!Array.isArray(targets) || targets.length === 0) return;
         try {
-            const cleanIps = [];
-            for (const rawIp of ips) {
-                const cleanIp = String(rawIp || '').replace(/^ip_/, '').trim();
-                if (cleanIp) {
-                    this.markedTargets.add(cleanIp);
-                    if (!this.targetStatuses[cleanIp]) {
-                        this.targetStatuses[cleanIp] = {
-                            ip: cleanIp,
+            const cleanTargets = [];
+            for (const raw of targets) {
+                const clean = String(raw || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
+                if (clean) {
+                    this.markedTargets.add(clean);
+                    if (!this.targetStatuses[clean]) {
+                        this.targetStatuses[clean] = {
+                            ip: clean,
                             status: 'idle',
+                            nuclei_status: 'idle',
                             ports_count: 0,
                             ports: []
                         };
                     }
-                    cleanIps.push(cleanIp);
+                    cleanTargets.push(clean);
                 }
             }
             this.syncTargetNodesStyling();
@@ -5308,41 +5328,43 @@ class EASMDashboard {
             }
             this.updateTargetBadgeCount();
             this.renderTargetsList();
-            await Promise.all(cleanIps.map(ip => window.api.setTarget(ip)));
+            await Promise.all(cleanTargets.map(t => window.api.setTarget(t)));
         } catch (err) {
             console.error('Failed to set targets bulk:', err);
         }
     }
 
-    async removeTargetsBulk(ips) {
-        if (!Array.isArray(ips) || ips.length === 0) return;
+    async removeTargetsBulk(targets) {
+        if (!Array.isArray(targets) || targets.length === 0) return;
         try {
-            const cleanIps = [];
-            for (const rawIp of ips) {
-                const cleanIp = String(rawIp || '').replace(/^ip_/, '').trim();
-                if (cleanIp) {
-                    this.markedTargets.delete(cleanIp);
-                    delete this.targetStatuses[cleanIp];
-                    cleanIps.push(cleanIp);
+            const cleanTargets = [];
+            for (const raw of targets) {
+                const clean = String(raw || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
+                if (clean) {
+                    this.markedTargets.delete(clean);
+                    delete this.targetStatuses[clean];
+                    cleanTargets.push(clean);
                 }
             }
             this.syncTargetNodesStyling();
             this.updateTargetBadgeCount();
             this.renderTargetsList();
-            await Promise.all(cleanIps.map(ip => window.api.removeTarget(ip)));
+            await Promise.all(cleanTargets.map(t => window.api.removeTarget(t)));
         } catch (err) {
             console.error('Failed to remove targets bulk:', err);
         }
     }
 
-    async setTarget(ip, node = null) {
+    async setTarget(target, node = null) {
         try {
-            ip = String(ip || '').replace(/^ip_/, '').trim();
-            this.markedTargets.add(ip);
-            if (!this.targetStatuses[ip]) {
-                this.targetStatuses[ip] = {
-                    ip: ip,
+            target = String(target || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
+            if (!target) return;
+            this.markedTargets.add(target);
+            if (!this.targetStatuses[target]) {
+                this.targetStatuses[target] = {
+                    ip: target,
                     status: 'idle',
+                    nuclei_status: 'idle',
                     ports_count: 0,
                     ports: []
                 };
@@ -5353,23 +5375,24 @@ class EASMDashboard {
             }
             this.updateTargetBadgeCount();
             this.renderTargetsList();
-            await window.api.setTarget(ip);
+            await window.api.setTarget(target);
         } catch (err) {
-            console.error(`Failed to set target ${ip}:`, err);
+            console.error(`Failed to set target ${target}:`, err);
         }
     }
 
-    async removeTarget(ip, node = null) {
+    async removeTarget(target, node = null) {
         try {
-            ip = String(ip || '').replace(/^ip_/, '').trim();
-            this.markedTargets.delete(ip);
-            delete this.targetStatuses[ip];
+            target = String(target || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
+            if (!target) return;
+            this.markedTargets.delete(target);
+            delete this.targetStatuses[target];
             this.syncTargetNodesStyling();
             this.updateTargetBadgeCount();
             this.renderTargetsList();
-            await window.api.removeTarget(ip);
+            await window.api.removeTarget(target);
         } catch (err) {
-            console.error(`Failed to remove target ${ip}:`, err);
+            console.error(`Failed to remove target ${target}:`, err);
         }
     }
 

@@ -1,7 +1,10 @@
 """REST API routes for DetecTI-CLI EASM dashboard."""
 
 import asyncio
+import ipaddress
 import json
+import socket
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -382,8 +385,8 @@ _running_nuclei_tasks: Dict[str, asyncio.Task] = {}
 _scan_log_history: List[Dict] = []
 
 
-def _get_target_ports_partition(ip: str, db: Optional[DatabaseManager]) -> tuple[set[int], set[int]]:
-    """Retrieve verified active ports and unverified passive ports for an IP from database.
+def _get_target_ports_partition(target: str, db: Optional[DatabaseManager]) -> tuple[set[int], set[int]]:
+    """Retrieve verified active ports and unverified passive ports for an IP or FQDN/Domain/Subdomain from database.
     
     Returns:
         (verified_ports_set, unverified_passive_ports_set)
@@ -391,11 +394,37 @@ def _get_target_ports_partition(ip: str, db: Optional[DatabaseManager]) -> tuple
     verified_ports: set[int] = set()
     unverified_passive_ports: set[int] = set()
     if db and Path(db.db_path).exists():
-        import sqlite3
         with sqlite3.connect(db.db_path) as conn:
-            ip_row = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (ip,)).fetchone()
-            if ip_row:
-                services = conn.execute("SELECT port, sources FROM services WHERE ip_id = ?", (ip_row[0],)).fetchall()
+            is_ip = False
+            try:
+                ipaddress.ip_address(target)
+                is_ip = True
+            except ValueError:
+                is_ip = False
+
+            ip_ids = []
+            if is_ip:
+                ip_row = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (target,)).fetchone()
+                if ip_row:
+                    ip_ids = [ip_row[0]]
+            else:
+                cursor = conn.execute("""
+                    SELECT ip_id FROM subdomain_ips 
+                    JOIN subdomains ON subdomains.id = subdomain_ips.subdomain_id
+                    WHERE LOWER(subdomains.name) = LOWER(?)
+                """, (target,))
+                ip_ids = [r[0] for r in cursor.fetchall()]
+                if not ip_ids:
+                    cursor = conn.execute("""
+                        SELECT ip_id FROM subdomain_ips
+                        JOIN subdomains ON subdomains.id = subdomain_ips.subdomain_id
+                        JOIN domains ON domains.id = subdomains.domain_id
+                        WHERE LOWER(domains.name) = LOWER(?)
+                    """, (target,))
+                    ip_ids = [r[0] for r in cursor.fetchall()]
+
+            for ip_id in ip_ids:
+                services = conn.execute("SELECT port, sources FROM services WHERE ip_id = ?", (ip_id,)).fetchall()
                 for p_num, s_sources in services:
                     try:
                         p_val = int(p_num)
@@ -422,7 +451,12 @@ def _get_target_ports_partition(ip: str, db: Optional[DatabaseManager]) -> tuple
 
 
 class TargetActionRequest(BaseModel):
-    ip: str
+    ip: Optional[str] = None
+    target: Optional[str] = None
+
+    @property
+    def target_val(self) -> str:
+        return (self.target or self.ip or "").strip()
 
 
 class ActiveScanRequest(BaseModel):
@@ -471,7 +505,7 @@ def _append_scan_log(level: str, message: str, target: Optional[str] = None):
 
 @router.get("/targets")
 async def list_targets() -> Dict:
-    """List all currently marked IP targets with their scan statuses."""
+    """List all currently marked targets (IPs and FQDNs) with their scan statuses."""
     return {
         "targets": list(_target_registry.values()),
         "count": len(_target_registry),
@@ -480,14 +514,21 @@ async def list_targets() -> Dict:
 
 @router.post("/targets/set")
 async def set_target(req: TargetActionRequest) -> Dict:
-    """Mark an IP address as an active target."""
-    ip = req.ip.strip()
-    if not ip:
-        raise HTTPException(status_code=400, detail="Invalid IP address")
+    """Mark an IP or FQDN/Domain/Subdomain as an active target."""
+    target = req.target_val
+    if not target:
+        raise HTTPException(status_code=400, detail="Invalid target address or hostname")
     
-    if ip not in _target_registry:
-        _target_registry[ip] = {
-            "ip": ip,
+    target_type = "ip"
+    try:
+        ipaddress.ip_address(target)
+    except ValueError:
+        target_type = "fqdn"
+
+    if target not in _target_registry:
+        _target_registry[target] = {
+            "ip": target,
+            "target_type": target_type,
             "status": "idle",
             "nuclei_status": "idle",
             "ports_count": 0,
@@ -498,38 +539,38 @@ async def set_target(req: TargetActionRequest) -> Dict:
             "last_scan": None,
             "last_nuclei_scan": None,
         }
-        _append_scan_log("info", f"IP {ip} added to active targets.", target=ip)
+        _append_scan_log("info", f"Target {target} ({target_type.upper()}) added to active targets.", target=target)
     
     return {
         "success": True,
-        "target": _target_registry[ip],
+        "target": _target_registry[target],
         "total_targets": len(_target_registry),
     }
 
 
 @router.post("/targets/remove")
 async def remove_target(req: TargetActionRequest) -> Dict:
-    """Remove an IP address from the marked targets list."""
-    ip = req.ip.strip()
-    if ip in _running_scan_tasks:
-        task = _running_scan_tasks[ip]
+    """Remove a target from the marked targets list."""
+    target = req.target_val
+    if target in _running_scan_tasks:
+        task = _running_scan_tasks[target]
         if not task.done():
             task.cancel()
-        _running_scan_tasks.pop(ip, None)
+        _running_scan_tasks.pop(target, None)
 
-    if ip in _running_nuclei_tasks:
-        task = _running_nuclei_tasks[ip]
+    if target in _running_nuclei_tasks:
+        task = _running_nuclei_tasks[target]
         if not task.done():
             task.cancel()
-        _running_nuclei_tasks.pop(ip, None)
+        _running_nuclei_tasks.pop(target, None)
 
-    if ip in _target_registry:
-        del _target_registry[ip]
-        _append_scan_log("info", f"IP {ip} removed from targets.", target=ip)
+    if target in _target_registry:
+        del _target_registry[target]
+        _append_scan_log("info", f"Target {target} removed from targets.", target=target)
     
     return {
         "success": True,
-        "removed": ip,
+        "removed": target,
         "total_targets": len(_target_registry),
     }
 
@@ -931,8 +972,45 @@ def _get_verified_active_services_for_ip(ip: str, db: Optional[DatabaseManager])
                     "SELECT port, protocol, service_name, url, ssl, sources, banner FROM services WHERE ip_id = ?",
                     (ip_id,)
                 ).fetchall()
+def _get_verified_active_services_for_target(target: str, db: Optional[DatabaseManager]) -> List[Dict[str, Any]]:
+    """Retrieve all verified active services for an IP or FQDN/Domain/Subdomain from database."""
+    active_services = []
+    if db and Path(db.db_path).exists():
+        with sqlite3.connect(db.db_path) as conn:
+            is_ip = False
+            try:
+                ipaddress.ip_address(target)
+                is_ip = True
+            except ValueError:
+                is_ip = False
+
+            ip_ids = []
+            if is_ip:
+                ip_row = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (target,)).fetchone()
+                if ip_row:
+                    ip_ids = [ip_row[0]]
+            else:
+                cursor = conn.execute("""
+                    SELECT ip_id FROM subdomain_ips 
+                    JOIN subdomains ON subdomains.id = subdomain_ips.subdomain_id
+                    WHERE LOWER(subdomains.name) = LOWER(?)
+                """, (target,))
+                ip_ids = [r[0] for r in cursor.fetchall()]
+                if not ip_ids:
+                    cursor = conn.execute("""
+                        SELECT ip_id FROM subdomain_ips
+                        JOIN subdomains ON subdomains.id = subdomain_ips.subdomain_id
+                        JOIN domains ON domains.id = subdomains.domain_id
+                        WHERE LOWER(domains.name) = LOWER(?)
+                    """, (target,))
+                    ip_ids = [r[0] for r in cursor.fetchall()]
+
+            for ip_id in ip_ids:
+                services = conn.execute(
+                    "SELECT port, protocol, service_name, url, ssl, sources, banner FROM services WHERE ip_id = ?",
+                    (ip_id,)
+                ).fetchall()
                 for port, proto, s_name, s_url, s_ssl, s_sources, s_banner in services:
-                    # Parse sources to verify active validation
                     sources_list = []
                     if s_sources:
                         try:
@@ -960,9 +1038,16 @@ def _get_verified_active_services_for_ip(ip: str, db: Optional[DatabaseManager])
     return active_services
 
 
-def _format_nuclei_targets_from_services(ip: str, services: List[Dict[str, Any]]) -> List[str]:
-    """Format verified active services into Nuclei endpoint URLs/host-ports."""
+def _get_verified_active_services_for_ip(ip: str, db: Optional[DatabaseManager]) -> List[Dict[str, Any]]:
+    return _get_verified_active_services_for_target(ip, db)
+
+
+def _format_nuclei_targets_from_services(target: str, services: List[Dict[str, Any]]) -> List[str]:
+    """Format verified active services or FQDN into Nuclei endpoint URLs/host-ports."""
     formatted_targets: List[str] = []
+    if target.startswith("http://") or target.startswith("https://"):
+        formatted_targets.append(target.strip())
+
     for svc in services:
         port = svc["port"]
         s_url = svc.get("url")
@@ -970,18 +1055,25 @@ def _format_nuclei_targets_from_services(ip: str, services: List[Dict[str, Any]]
         if s_url and str(s_url).startswith("http"):
             formatted_targets.append(str(s_url).strip())
         elif s_ssl or port in [443, 8443, 9443]:
-            formatted_targets.append(f"https://{ip}:{port}")
+            formatted_targets.append(f"https://{target}:{port}")
         elif port in [80, 8080, 8000, 8888]:
-            formatted_targets.append(f"http://{ip}:{port}")
+            formatted_targets.append(f"http://{target}:{port}")
         else:
-            formatted_targets.append(f"{ip}:{port}")
+            formatted_targets.append(f"{target}:{port}")
+
+    # Fallback for FQDNs / URLs if no explicit ports are mapped
+    if not formatted_targets and not target.startswith("http"):
+        try:
+            ipaddress.ip_address(target)
+        except ValueError:
+            formatted_targets = [f"https://{target}", f"http://{target}"]
 
     return list(dict.fromkeys(formatted_targets))
 
 
 def _format_nuclei_targets_for_ip(ip: str, db: Optional[DatabaseManager]) -> List[str]:
-    """Format an IP and its verified active services into Nuclei scan targets."""
-    active_services = _get_verified_active_services_for_ip(ip, db)
+    """Format a target and its verified active services into Nuclei scan targets."""
+    active_services = _get_verified_active_services_for_target(ip, db)
     return _format_nuclei_targets_from_services(ip, active_services)
 
 
@@ -1001,7 +1093,7 @@ async def start_nuclei_scan(
 
     target_ips = req.targets if req.targets else list(_target_registry.keys())
     if not target_ips:
-        raise HTTPException(status_code=400, detail="No IP targets selected or marked for Nuclei scan.")
+        raise HTTPException(status_code=400, detail="No targets selected or marked for Nuclei scan.")
 
     # Resolve active database
     active_db = db
@@ -1019,105 +1111,123 @@ async def start_nuclei_scan(
                     request.app.state.db_manager = active_db
                     request.app.state.db_path = str(existing_dbs[0].resolve())
 
-    async def _run_single_nuclei_scan(ip_to_scan: str):
+    async def _run_single_nuclei_scan(target_to_scan: str):
         try:
-            if ip_to_scan in _target_registry:
-                _target_registry[ip_to_scan]["nuclei_status"] = "scanning"
+            if target_to_scan in _target_registry:
+                _target_registry[target_to_scan]["nuclei_status"] = "scanning"
+
+            is_ip = False
+            try:
+                ipaddress.ip_address(target_to_scan)
+                is_ip = True
+            except ValueError:
+                is_ip = False
 
             # 1. Check if there are already verified active services discovered by Masscan / active scan
-            active_services = _get_verified_active_services_for_ip(ip_to_scan, active_db)
+            active_services = _get_verified_active_services_for_target(target_to_scan, active_db)
 
             if not active_services:
-                # 2. Check if target has unverified passive ports mapped in database
-                verified_ports, unverified_passive_ports = _get_target_ports_partition(ip_to_scan, active_db)
-
-                if not unverified_passive_ports:
-                    # Target has NO passive ports mapped in database -> Skip Nuclei directly (no blind top-ports scan)
-                    if ip_to_scan in _target_registry:
-                        _target_registry[ip_to_scan]["nuclei_status"] = "completed"
-                        _target_registry[ip_to_scan]["vulns_count"] = 0
+                if not is_ip:
+                    # FQDN target behind CDN/Reverse Proxy -> Scan web endpoints directly with Nuclei
+                    formatted_endpoints = _format_nuclei_targets_from_services(target_to_scan, [])
                     _append_scan_log(
-                        "warning",
-                        f"[Nuclei Smart Skip] Skipped vulnerability scan on {ip_to_scan}: Target has no 'Confirmed Active' services and 0 mapped passive ports in database. Nuclei will not execute blind scans without known services. Run a Masscan port scan first or add services to enable Nuclei scanning.",
-                        target=ip_to_scan
+                        "info",
+                        f"[Nuclei] FQDN target {target_to_scan} (Reverse Proxy / Virtual Host). Dispatching web scan directly against {', '.join(formatted_endpoints)}...",
+                        target=target_to_scan
                     )
-                    return
+                else:
+                    # 2. Check if IP target has unverified passive ports mapped in database
+                    verified_ports, unverified_passive_ports = _get_target_ports_partition(target_to_scan, active_db)
 
-                # Target has unverified passive ports -> Request Masscan verification strictly on these passive ports
-                ports_to_verify = ",".join(str(p) for p in sorted(unverified_passive_ports))
-                _append_scan_log(
-                    "info",
-                    f"[Nuclei Pre-Scan] Target {ip_to_scan} has {len(unverified_passive_ports)} unverified passive port(s) [{ports_to_verify}]. Requesting Masscan verification strictly on these ports before Nuclei execution...",
-                    target=ip_to_scan
-                )
-
-                masscan_runner = MasscanRunner()
-                if masscan_runner.is_available():
-                    if ip_to_scan in _target_registry:
-                        _target_registry[ip_to_scan]["status"] = "scanning"
-
-                    m_res = await masscan_runner.scan_target(
-                        target_ip=ip_to_scan,
-                        ports=ports_to_verify,
-                        rate=1000,
-                        disable_ping=True,
-                        banners=True,
-                    )
-
-                    open_ports = m_res.get("ports") or m_res.get("open_ports") or []
-                    if open_ports:
-                        if ip_to_scan in _target_registry:
-                            _target_registry[ip_to_scan]["status"] = "completed"
-                            _target_registry[ip_to_scan]["ports_count"] = len(open_ports)
-                            _target_registry[ip_to_scan]["ports"] = open_ports
-                            _target_registry[ip_to_scan]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                        if active_db and Path(active_db.db_path).exists():
-                            active_db.merge_active_scan_services(ip_to_scan, open_ports)
-                        
-                        _append_scan_log(
-                            "success",
-                            f"[Nuclei Pre-Scan] Masscan verified {len(open_ports)} of {len(unverified_passive_ports)} passive port(s) as Confirmed Active on {ip_to_scan}. Proceeding with Nuclei vulnerability scan.",
-                            target=ip_to_scan
-                        )
-                    else:
-                        if ip_to_scan in _target_registry:
-                            _target_registry[ip_to_scan]["status"] = "completed"
+                    if not unverified_passive_ports:
+                        if target_to_scan in _target_registry:
+                            _target_registry[target_to_scan]["nuclei_status"] = "completed"
+                            _target_registry[target_to_scan]["vulns_count"] = 0
                         _append_scan_log(
                             "warning",
-                            f"[Nuclei Pre-Scan] Masscan verification returned 0 open ports for passive ports [{ports_to_verify}] on {ip_to_scan}.",
-                            target=ip_to_scan
+                            f"[Nuclei Smart Skip] Skipped vulnerability scan on {target_to_scan}: IP has no 'Confirmed Active' services and 0 mapped passive ports in database. Run a Masscan port scan first or add services to enable Nuclei scanning.",
+                            target=target_to_scan
                         )
-                else:
+                        return
+
+                    # Target has unverified passive ports -> Request Masscan verification strictly on these passive ports
+                    ports_to_verify = ",".join(str(p) for p in sorted(unverified_passive_ports))
                     _append_scan_log(
-                        "warning",
-                        f"[Nuclei Pre-Scan] Masscan binary not available to verify passive ports [{ports_to_verify}] on {ip_to_scan}.",
-                        target=ip_to_scan
+                        "info",
+                        f"[Nuclei Pre-Scan] Target {target_to_scan} has {len(unverified_passive_ports)} unverified passive port(s) [{ports_to_verify}]. Requesting Masscan verification strictly on these ports before Nuclei execution...",
+                        target=target_to_scan
                     )
 
-                # Re-query verified active services after Masscan execution
-                active_services = _get_verified_active_services_for_ip(ip_to_scan, active_db)
+                    masscan_runner = MasscanRunner()
+                    if masscan_runner.is_available():
+                        if target_to_scan in _target_registry:
+                            _target_registry[target_to_scan]["status"] = "scanning"
 
-            if not active_services:
-                if ip_to_scan in _target_registry:
-                    _target_registry[ip_to_scan]["nuclei_status"] = "completed"
-                    _target_registry[ip_to_scan]["vulns_count"] = 0
-                _append_scan_log(
-                    "warning",
-                    f"[Nuclei Smart Skip] Skipped vulnerability scan on {ip_to_scan}: None of the target's passive ports responded as 'Confirmed Active' during Masscan verification. Nuclei requires live active services to prevent sending blind template requests.",
-                    target=ip_to_scan
-                )
-                return
+                        m_res = await masscan_runner.scan_target(
+                            target_ip=target_to_scan,
+                            ports=ports_to_verify,
+                            rate=1000,
+                            disable_ping=True,
+                            banners=True,
+                        )
 
-            formatted_endpoints = _format_nuclei_targets_from_services(ip_to_scan, active_services)
+                        open_ports = m_res.get("ports") or m_res.get("open_ports") or []
+                        if open_ports:
+                            if target_to_scan in _target_registry:
+                                _target_registry[target_to_scan]["status"] = "completed"
+                                _target_registry[target_to_scan]["ports_count"] = len(open_ports)
+                                _target_registry[target_to_scan]["ports"] = open_ports
+                                _target_registry[target_to_scan]["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                            if active_db and Path(active_db.db_path).exists():
+                                active_db.merge_active_scan_services(target_to_scan, open_ports)
+                            
+                            _append_scan_log(
+                                "success",
+                                f"[Nuclei Pre-Scan] Masscan verified {len(open_ports)} of {len(unverified_passive_ports)} passive port(s) as Confirmed Active on {target_to_scan}. Proceeding with Nuclei vulnerability scan.",
+                                target=target_to_scan
+                            )
+                        else:
+                            if target_to_scan in _target_registry:
+                                _target_registry[target_to_scan]["status"] = "completed"
+                            _append_scan_log(
+                                "warning",
+                                f"[Nuclei Pre-Scan] Masscan verification returned 0 open ports for passive ports [{ports_to_verify}] on {target_to_scan}.",
+                                target=target_to_scan
+                            )
+                    else:
+                        _append_scan_log(
+                            "warning",
+                            f"[Nuclei Pre-Scan] Masscan binary not available to verify passive ports [{ports_to_verify}] on {target_to_scan}.",
+                            target=target_to_scan
+                        )
+
+                    # Re-query verified active services after Masscan execution
+                    active_services = _get_verified_active_services_for_target(target_to_scan, active_db)
+
+                    if not active_services:
+                        if target_to_scan in _target_registry:
+                            _target_registry[target_to_scan]["nuclei_status"] = "completed"
+                            _target_registry[target_to_scan]["vulns_count"] = 0
+                        _append_scan_log(
+                            "warning",
+                            f"[Nuclei Smart Skip] Skipped vulnerability scan on {target_to_scan}: None of the target's passive ports responded as 'Confirmed Active' during Masscan verification.",
+                            target=target_to_scan
+                        )
+                        return
+
+                    formatted_endpoints = _format_nuclei_targets_from_services(target_to_scan, active_services)
+            else:
+                formatted_endpoints = _format_nuclei_targets_from_services(target_to_scan, active_services)
+
             _append_scan_log(
                 "info",
-                f"[Nuclei] Dispatching scan on {ip_to_scan} ({len(formatted_endpoints)} verified active endpoint(s): {', '.join(formatted_endpoints[:3])})...",
-                target=ip_to_scan
+                f"[Nuclei] Dispatching scan on {target_to_scan} ({len(formatted_endpoints)} endpoint(s): {', '.join(formatted_endpoints[:3])})...",
+                target=target_to_scan
             )
 
             def _log_stream(level: str, msg: str):
-                _append_scan_log(level, f"[Nuclei] {msg}", target=ip_to_scan)
+                _append_scan_log(level, f"[Nuclei] {msg}", target=target_to_scan)
 
             scan_res = await runner.scan_targets(
                 targets=formatted_endpoints,
@@ -1133,40 +1243,40 @@ async def start_nuclei_scan(
 
             if scan_res.get("success"):
                 findings = scan_res.get("findings", [])
-                if ip_to_scan in _target_registry:
-                    _target_registry[ip_to_scan]["nuclei_status"] = "completed"
-                    _target_registry[ip_to_scan]["vulns_count"] = len(findings)
-                    _target_registry[ip_to_scan]["last_nuclei_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                if target_to_scan in _target_registry:
+                    _target_registry[target_to_scan]["nuclei_status"] = "completed"
+                    _target_registry[target_to_scan]["vulns_count"] = len(findings)
+                    _target_registry[target_to_scan]["last_nuclei_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 if active_db and Path(active_db.db_path).exists() and findings:
-                    merge_info = active_db.merge_nuclei_findings(findings, fallback_ip=ip_to_scan)
+                    merge_info = active_db.merge_nuclei_findings(findings, fallback_ip=target_to_scan)
                     _append_scan_log(
                         "success",
-                        f"[Nuclei] Scan on {ip_to_scan} completed: {len(findings)} vulnerability issue(s) discovered. ({merge_info.get('added_vulnerabilities', 0)} new, {merge_info.get('updated_vulnerabilities', 0)} updated in graph).",
-                        target=ip_to_scan
+                        f"[Nuclei] Scan on {target_to_scan} completed: {len(findings)} vulnerability issue(s) discovered. ({merge_info.get('added_vulnerabilities', 0)} new, {merge_info.get('updated_vulnerabilities', 0)} updated in graph).",
+                        target=target_to_scan
                     )
                 else:
                     _append_scan_log(
                         "success",
-                        f"[Nuclei] Scan on {ip_to_scan} completed. {len(findings)} vulnerability issue(s) identified.",
-                        target=ip_to_scan
+                        f"[Nuclei] Scan on {target_to_scan} completed. {len(findings)} vulnerability issue(s) identified.",
+                        target=target_to_scan
                     )
             else:
                 err_msg = scan_res.get("error", "Unknown Nuclei execution error")
-                if ip_to_scan in _target_registry:
-                    _target_registry[ip_to_scan]["nuclei_status"] = "failed"
-                _append_scan_log("error", f"[Nuclei] Scan on {ip_to_scan} failed: {err_msg}", target=ip_to_scan)
+                if target_to_scan in _target_registry:
+                    _target_registry[target_to_scan]["nuclei_status"] = "failed"
+                _append_scan_log("error", f"[Nuclei] Scan on {target_to_scan} failed: {err_msg}", target=target_to_scan)
 
         except asyncio.CancelledError:
-            if ip_to_scan in _target_registry:
-                _target_registry[ip_to_scan]["nuclei_status"] = "idle"
-            _append_scan_log("warning", f"[Nuclei] Scan on {ip_to_scan} cancelled.", target=ip_to_scan)
+            if target_to_scan in _target_registry:
+                _target_registry[target_to_scan]["nuclei_status"] = "idle"
+            _append_scan_log("warning", f"[Nuclei] Scan on {target_to_scan} cancelled.", target=target_to_scan)
         except Exception as ex:
-            if ip_to_scan in _target_registry:
-                _target_registry[ip_to_scan]["nuclei_status"] = "failed"
-            _append_scan_log("error", f"[Nuclei] Unexpected error scanning {ip_to_scan}: {str(ex)}", target=ip_to_scan)
+            if target_to_scan in _target_registry:
+                _target_registry[target_to_scan]["nuclei_status"] = "failed"
+            _append_scan_log("error", f"[Nuclei] Unexpected error scanning {target_to_scan}: {str(ex)}", target=target_to_scan)
         finally:
-            _running_nuclei_tasks.pop(ip_to_scan, None)
+            _running_nuclei_tasks.pop(target_to_scan, None)
 
     # Ensure Nuclei community templates are updated safely (once with mutex lock + cooldown)
     if runner.is_available():
