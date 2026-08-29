@@ -177,10 +177,10 @@ class GraphBuilder:
             nodes.append({"data": node_data})
             processed_domains.add(domain_id)
 
-            # Connect Target Root -> Domain (if domain was explicitly in targets_list or general scan)
+            # Connect Target Root -> Domain (if domain was explicitly in targets_list or matches a domain query)
             if root_target_node:
                 if is_file_target and explicit_targets:
-                    if dname_lower in explicit_targets:
+                    if dname_lower in explicit_targets or (target_scopes and dname_lower in target_scopes):
                         edges.append({
                             "data": {
                                 "id": f"e_target_dom_{domain_id}",
@@ -189,7 +189,18 @@ class GraphBuilder:
                                 "label": "MATCHES_DOMAIN"
                             }
                         })
-                else:
+                elif target_scopes:
+                    # Domain target query (e.g. example.com)
+                    if dname_lower in target_scopes or is_main_domain:
+                        edges.append({
+                            "data": {
+                                "id": f"e_target_dom_{domain_id}",
+                                "source": "target_root",
+                                "target": f"dom_{domain_id}",
+                                "label": "MATCHES_DOMAIN"
+                            }
+                        })
+                elif not (target_name and (target_name.startswith("org:") or target_name.startswith("asn:"))):
                     edges.append({
                         "data": {
                             "id": f"e_target_dom_{domain_id}",
