@@ -698,97 +698,170 @@ class DatabaseManager:
             result.calculate_summary()
             return result
 
-    def merge_active_scan_services(self, ip_address: str, open_ports: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def merge_active_scan_services(self, target: str, open_ports: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Merge Masscan active scan results into the database with deduplication.
         
-        - If service exists: updates sources (appends 'Masscan') and updates banner if empty.
-        - If service is new: creates new service entry with source 'Masscan'.
+        - If target is FQDN/domain/subdomain: locates or resolves associated IP(s) and applies open ports.
+        - If service exists on the IP: updates sources (appends 'Masscan' to mark as Confirmed Active) and updates banner.
+        - If service is new on the IP: creates new service entry with source 'Masscan' (Confirmed Active).
         """
         import uuid
         import json
+        import ipaddress
+        import socket
         
         added_services = 0
         updated_services = 0
-        ip_address = ip_address.strip()
+        target = target.strip()
         
         with sqlite3.connect(self.db_path) as conn:
-            # 1. Ensure IP address exists in ip_addresses table
-            cursor = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (ip_address,))
-            row = cursor.fetchone()
-            if row:
-                ip_id = row[0]
+            is_ip = False
+            try:
+                ipaddress.ip_address(target)
+                is_ip = True
+            except ValueError:
+                is_ip = False
+
+            ip_ids = []
+            if is_ip:
+                cursor = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (target,))
+                row = cursor.fetchone()
+                if row:
+                    ip_ids.append(row[0])
+                else:
+                    new_ip_id = str(uuid.uuid4())
+                    conn.execute("""
+                        INSERT INTO ip_addresses (id, ip, org, country, asn)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (new_ip_id, target, "Active Target", "Unknown", "Unknown"))
+                    ip_ids.append(new_ip_id)
             else:
-                ip_id = str(uuid.uuid4())
-                conn.execute("""
-                    INSERT INTO ip_addresses (id, ip, org, country, asn)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (ip_id, ip_address, "Active Target", "Unknown", "Unknown"))
-            
-            # 2. Iterate through discovered ports
-            for p in open_ports:
-                port_num = int(p.get("port", 0))
-                if port_num <= 0:
-                    continue
-                proto = (p.get("protocol") or "tcp").lower()
-                service_name = p.get("service_name") or f"service-{port_num}"
-                product = p.get("product") or ""
-                version = p.get("version") or ""
-                banner = p.get("banner") or ""
-                ssl_flag = bool(p.get("ssl", False) or port_num == 443)
-                
-                # Check if this service already exists for this IP (case-insensitive on protocol or port match)
-                s_cursor = conn.execute("""
-                    SELECT id, sources, banner, service_name, product, version, ssl 
-                    FROM services 
-                    WHERE ip_id = ? AND port = ? AND (LOWER(protocol) = LOWER(?) OR protocol IS NULL OR protocol = '')
-                """, (ip_id, port_num, proto))
-                existing_svc = s_cursor.fetchone()
-                
-                # If not matched, try matching just ip_id and port
-                if not existing_svc:
+                # 1. Find all IP IDs already connected to this subdomain
+                sub_cursor = conn.execute("""
+                    SELECT ip_addresses.id, ip_addresses.ip FROM ip_addresses
+                    JOIN subdomain_ips ON subdomain_ips.ip_id = ip_addresses.id
+                    JOIN subdomains ON subdomains.id = subdomain_ips.subdomain_id
+                    WHERE LOWER(subdomains.name) = LOWER(?)
+                """, (target,))
+                for r in sub_cursor.fetchall():
+                    ip_ids.append(r[0])
+
+                # 2. If not found in subdomains, check domain root
+                if not ip_ids:
+                    dom_cursor = conn.execute("""
+                        SELECT ip_addresses.id, ip_addresses.ip FROM ip_addresses
+                        JOIN subdomain_ips ON subdomain_ips.ip_id = ip_addresses.id
+                        JOIN subdomains ON subdomains.id = subdomain_ips.subdomain_id
+                        JOIN domains ON domains.id = subdomains.domain_id
+                        WHERE LOWER(domains.name) = LOWER(?)
+                    """, (target,))
+                    for r in dom_cursor.fetchall():
+                        ip_ids.append(r[0])
+
+                # 3. Resolve DNS for FQDN if no IPs mapped or to ensure resolved IP is linked
+                try:
+                    addr_info = socket.getaddrinfo(target, None, socket.AF_INET)
+                    if addr_info:
+                        resolved_raw_ips = list(dict.fromkeys([ai[4][0] for ai in addr_info if ai and ai[4]]))
+                        # Ensure subdomains table has entry for target
+                        sub_row = conn.execute("SELECT id FROM subdomains WHERE LOWER(name) = LOWER(?)", (target,)).fetchone()
+                        sub_id = sub_row[0] if sub_row else None
+                        if not sub_id:
+                            # Try finding matching domain
+                            dom_id = None
+                            for d_id, d_name in conn.execute("SELECT id, name FROM domains").fetchall():
+                                if target.endswith(d_name):
+                                    dom_id = d_id
+                                    break
+                            sub_id = str(uuid.uuid4())
+                            conn.execute("INSERT INTO subdomains (id, domain_id, name) VALUES (?, ?, ?)", (sub_id, dom_id, target))
+
+                        for res_ip in resolved_raw_ips:
+                            ip_row = conn.execute("SELECT id FROM ip_addresses WHERE ip = ?", (res_ip,)).fetchone()
+                            if ip_row:
+                                cur_ip_id = ip_row[0]
+                            else:
+                                cur_ip_id = str(uuid.uuid4())
+                                conn.execute("""
+                                    INSERT INTO ip_addresses (id, ip, org, country, asn)
+                                    VALUES (?, ?, ?, ?, ?)
+                                """, (cur_ip_id, res_ip, "Active Target", "Unknown", "Unknown"))
+
+                            if cur_ip_id not in ip_ids:
+                                ip_ids.append(cur_ip_id)
+
+                            # Ensure link in subdomain_ips
+                            link_row = conn.execute("SELECT id FROM subdomain_ips WHERE subdomain_id = ? AND ip_id = ?", (sub_id, cur_ip_id)).fetchone()
+                            if not link_row:
+                                conn.execute("INSERT INTO subdomain_ips (id, subdomain_id, ip_id) VALUES (?, ?, ?)", (str(uuid.uuid4()), sub_id, cur_ip_id))
+                except Exception:
+                    pass
+
+            # 4. Iterate through discovered ports for each associated IP
+            for ip_id in set(ip_ids):
+                for p in open_ports:
+                    port_num = int(p.get("port", 0))
+                    if port_num <= 0:
+                        continue
+                    proto = (p.get("protocol") or "tcp").lower()
+                    service_name = p.get("service_name") or f"service-{port_num}"
+                    product = p.get("product") or ""
+                    version = p.get("version") or ""
+                    banner = p.get("banner") or ""
+                    ssl_flag = bool(p.get("ssl", False) or port_num == 443)
+                    
+                    # Check if this service already exists for this IP
                     s_cursor = conn.execute("""
                         SELECT id, sources, banner, service_name, product, version, ssl 
                         FROM services 
-                        WHERE ip_id = ? AND port = ?
-                    """, (ip_id, port_num))
+                        WHERE ip_id = ? AND port = ? AND (LOWER(protocol) = LOWER(?) OR protocol IS NULL OR protocol = '')
+                    """, (ip_id, port_num, proto))
                     existing_svc = s_cursor.fetchone()
-                
-                if existing_svc:
-                    svc_id, cur_sources_raw, cur_banner, cur_name, cur_prod, cur_ver, cur_ssl = existing_svc
-                    sources_list = []
-                    if cur_sources_raw:
-                        try:
-                            sources_list = json.loads(cur_sources_raw)
-                            if not isinstance(sources_list, list):
-                                sources_list = [str(sources_list)]
-                        except Exception:
-                            sources_list = [cur_sources_raw]
                     
-                    if "Masscan" not in sources_list:
-                        sources_list.append("Masscan")
+                    if not existing_svc:
+                        s_cursor = conn.execute("""
+                            SELECT id, sources, banner, service_name, product, version, ssl 
+                            FROM services 
+                            WHERE ip_id = ? AND port = ?
+                        """, (ip_id, port_num))
+                        existing_svc = s_cursor.fetchone()
                     
-                    # Update banner if active scan discovered a banner (override if new banner found)
-                    new_banner = banner if banner else (cur_banner or "")
-                    new_name = cur_name if (cur_name and not cur_name.startswith("service-")) else service_name
-                    new_prod = product if product else (cur_prod or "")
-                    new_ver = version if version else (cur_ver or "")
-                    new_ssl = cur_ssl or (1 if ssl_flag else 0)
-                    
-                    conn.execute("""
-                        UPDATE services 
-                        SET sources = ?, banner = ?, service_name = ?, product = ?, version = ?, ssl = ?
-                        WHERE id = ?
-                    """, (json.dumps(sources_list), new_banner, new_name, new_prod, new_ver, new_ssl, svc_id))
-                    updated_services += 1
-                else:
-                    # Insert new service
-                    new_svc_id = str(uuid.uuid4())
-                    sources_json = json.dumps(["Masscan"])
-                    conn.execute("""
-                        INSERT INTO services (id, ip_id, port, protocol, service_name, product, version, banner, ssl, sources)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (new_svc_id, ip_id, port_num, proto, service_name, product, version, banner, 1 if ssl_flag else 0, sources_json))
-                    added_services += 1
+                    if existing_svc:
+                        svc_id, cur_sources_raw, cur_banner, cur_name, cur_prod, cur_ver, cur_ssl = existing_svc
+                        sources_list = []
+                        if cur_sources_raw:
+                            try:
+                                sources_list = json.loads(cur_sources_raw)
+                                if not isinstance(sources_list, list):
+                                    sources_list = [str(sources_list)]
+                            except Exception:
+                                sources_list = [cur_sources_raw]
+                        
+                        if "Masscan" not in sources_list:
+                            sources_list.append("Masscan")
+                        
+                        # Update banner if active scan discovered a banner (override if new banner found)
+                        new_banner = banner if banner else (cur_banner or "")
+                        new_name = cur_name if (cur_name and not cur_name.startswith("service-")) else service_name
+                        new_prod = product if product else (cur_prod or "")
+                        new_ver = version if version else (cur_ver or "")
+                        new_ssl = cur_ssl or (1 if ssl_flag else 0)
+                        
+                        conn.execute("""
+                            UPDATE services 
+                            SET sources = ?, banner = ?, service_name = ?, product = ?, version = ?, ssl = ?
+                            WHERE id = ?
+                        """, (json.dumps(sources_list), new_banner, new_name, new_prod, new_ver, new_ssl, svc_id))
+                        updated_services += 1
+                    else:
+                        # Insert new service
+                        new_svc_id = str(uuid.uuid4())
+                        sources_json = json.dumps(["Masscan"])
+                        conn.execute("""
+                            INSERT INTO services (id, ip_id, port, protocol, service_name, product, version, banner, ssl, sources)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (new_svc_id, ip_id, port_num, proto, service_name, product, version, banner, 1 if ssl_flag else 0, sources_json))
+                        added_services += 1
             
             # 3. Update scan_results metadata if present
             try:
@@ -828,7 +901,8 @@ class DatabaseManager:
             conn.commit()
             
         return {
-            "ip": ip_address,
+            "target": target,
+            "ip": target,
             "added_services": added_services,
             "updated_services": updated_services,
             "total_open": len(open_ports),
@@ -962,13 +1036,42 @@ class DatabaseManager:
                     ip_id = ip_row_map[raw_ip]
                 elif fallback_ip and fallback_ip in ip_row_map:
                     ip_id = ip_row_map[fallback_ip]
-                elif len(ip_row_map) == 1:
+                
+                if not ip_id:
+                    target_candidate = raw_ip or fallback_ip or host
+                    if target_candidate:
+                        clean_candidate = target_candidate.replace("https://", "").replace("http://", "").split(":")[0].strip()
+                        sub_ip_row = conn.execute("""
+                            SELECT ip_addresses.id FROM ip_addresses
+                            JOIN subdomain_ips ON subdomain_ips.ip_id = ip_addresses.id
+                            JOIN subdomains ON subdomains.id = subdomain_ips.subdomain_id
+                            WHERE LOWER(subdomains.name) = LOWER(?)
+                        """, (clean_candidate,)).fetchone()
+                        if sub_ip_row:
+                            ip_id = sub_ip_row[0]
+
+                if not ip_id and len(ip_row_map) == 1:
                     ip_id = list(ip_row_map.values())[0]
 
                 # Match service_id if port is known
                 service_id = None
                 if ip_id and port:
                     service_id = service_row_map.get((ip_id, port))
+                    if not service_id:
+                        # Try matching just port in services table
+                        s_row = conn.execute("SELECT id FROM services WHERE ip_id = ? AND port = ?", (ip_id, port)).fetchone()
+                        if s_row:
+                            service_id = s_row[0]
+                        else:
+                            # Create service dynamically so finding is anchored to port
+                            new_svc_id = str(uuid.uuid4())
+                            conn.execute("""
+                                INSERT INTO services (id, ip_id, port, protocol, service_name, ssl, sources)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, (new_svc_id, ip_id, port, "tcp", f"service-{port}", 1 if port == 443 else 0, json.dumps(["Nuclei"])))
+                            service_id = new_svc_id
+                            service_row_map[(ip_id, port)] = new_svc_id
+
                     if service_id:
                         # Ensure service sources include active verification
                         svc_row = conn.execute("SELECT sources FROM services WHERE id = ?", (service_id,)).fetchone()

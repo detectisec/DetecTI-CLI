@@ -729,6 +729,33 @@ async def start_active_scan(
                             request.app.state.db_manager = active_db
                             request.app.state.db_path = str(existing_dbs[0].resolve())
 
+            # Resolve target to IP if FQDN
+            scan_ip = ip_to_scan
+            try:
+                ipaddress.ip_address(ip_to_scan)
+            except ValueError:
+                resolved_ip = None
+                if active_db and Path(active_db.db_path).exists():
+                    with sqlite3.connect(active_db.db_path) as conn:
+                        row = conn.execute("""
+                            SELECT ip_addresses.ip FROM ip_addresses
+                            JOIN subdomain_ips ON subdomain_ips.ip_id = ip_addresses.id
+                            JOIN subdomains ON subdomains.id = subdomain_ips.subdomain_id
+                            WHERE LOWER(subdomains.name) = LOWER(?)
+                        """, (ip_to_scan,)).fetchone()
+                        if row:
+                            resolved_ip = row[0]
+                if not resolved_ip:
+                    try:
+                        addr_info = socket.getaddrinfo(ip_to_scan, None, socket.AF_INET)
+                        if addr_info:
+                            resolved_ip = addr_info[0][4][0]
+                    except Exception:
+                        pass
+                if resolved_ip:
+                    scan_ip = resolved_ip
+                    _append_scan_log("info", f"[Masscan] Target FQDN '{ip_to_scan}' mapped to IP {scan_ip} for active port scanning.", target=ip_to_scan)
+
             # 1. Inspect existing ports for target in database
             verified_ports, unverified_passive_ports = _get_target_ports_partition(ip_to_scan, active_db)
 
@@ -754,7 +781,7 @@ async def start_active_scan(
                         target=ip_to_scan
                     )
                     p1_res = await runner.scan_target(
-                        target_ip=ip_to_scan,
+                        target_ip=scan_ip,
                         ports=p1_spec,
                         rate=rate_arg,
                         disable_ping=pn_arg,
@@ -801,7 +828,7 @@ async def start_active_scan(
                     )
 
                     p2_res = await runner.scan_target(
-                        target_ip=ip_to_scan,
+                        target_ip=scan_ip,
                         ports=p2_spec,
                         rate=rate_arg,
                         disable_ping=pn_arg,
@@ -884,7 +911,7 @@ async def start_active_scan(
                     )
 
                 scan_res = await runner.scan_target(
-                    target_ip=ip_to_scan,
+                    target_ip=scan_ip,
                     ports=filtered_ports,
                     rate=rate_arg,
                     disable_ping=pn_arg,
