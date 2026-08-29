@@ -4784,36 +4784,48 @@ class EASMDashboard {
 
         const displayName = data.label || data.name || data.ip || data.cve_id || nodeId;
 
-        // 3. Target Management Action for IP Nodes and Root/Org/Domain Nodes
+        // 3. Target Management Action for IP Nodes and FQDN (Domain/Subdomain/Target) Nodes
         let targetBtnHtml = '';
-        let ipTargetValue = null;
+        let targetValue = null;
         let rootAssociatedIps = [];
 
+        const isFqdnNode = ['domain', 'subdomain', 'target'].includes(nodeType);
         if (nodeType === 'ip') {
-            ipTargetValue = data.ip || data.name || data.label || nodeId;
-            const isMarked = this.isTargetMarked(ipTargetValue);
+            targetValue = String(data.ip || data.name || data.label || nodeId).replace(/^ip_/, '').trim();
+            const isMarked = this.isTargetMarked(targetValue);
             targetBtnHtml = `
                 <button type="button" class="cy-context-menu-item" id="ctx-action-target" style="color: ${isMarked ? '#ef4444' : '#00f0ff'};">
                     <i data-lucide="crosshair" class="ui-icon" style="color: ${isMarked ? '#ef4444' : '#00f0ff'};"></i>
                     <span>${isMarked ? 'Remove Target' : 'Set as Target'}</span>
                 </button>
             `;
-        } else {
-            rootAssociatedIps = this.getAssociatedIpNodes(node);
-            if (rootAssociatedIps.length > 0) {
-                const totalCount = rootAssociatedIps.length;
-                const markedCount = rootAssociatedIps.filter(ipN => {
-                    const rawIp = ipN.data('ip') || ipN.data('label') || ipN.data('name') || ipN.id();
-                    return this.isTargetMarked(rawIp);
-                }).length;
-                const allMarked = markedCount === totalCount;
+        } else if (isFqdnNode) {
+            targetValue = String(data.name || data.label || nodeId).replace(/^(dom_|sub_|target_)/, '').trim();
+            if (targetValue) {
+                const isMarked = this.isTargetMarked(targetValue);
                 targetBtnHtml = `
-                    <button type="button" class="cy-context-menu-item" id="ctx-action-root-target" style="color: ${allMarked ? '#ef4444' : '#00f0ff'};">
-                        <i data-lucide="crosshair" class="ui-icon" style="color: ${allMarked ? '#ef4444' : '#00f0ff'};"></i>
-                        <span>${allMarked ? `Remove all ${totalCount} IPs from Targets` : `Set all ${totalCount} IPs as Targets (${markedCount}/${totalCount})`}</span>
+                    <button type="button" class="cy-context-menu-item" id="ctx-action-target" style="color: ${isMarked ? '#ef4444' : '#00f0ff'};">
+                        <i data-lucide="crosshair" class="ui-icon" style="color: ${isMarked ? '#ef4444' : '#00f0ff'};"></i>
+                        <span>${isMarked ? `Remove ${targetValue} from Targets` : `Set as Target (FQDN)`}</span>
                     </button>
                 `;
             }
+        }
+
+        rootAssociatedIps = this.getAssociatedIpNodes(node);
+        if (rootAssociatedIps.length > 0) {
+            const totalCount = rootAssociatedIps.length;
+            const markedCount = rootAssociatedIps.filter(ipN => {
+                const rawIp = ipN.data('ip') || ipN.data('label') || ipN.data('name') || ipN.id();
+                return this.isTargetMarked(rawIp);
+            }).length;
+            const allMarked = markedCount === totalCount;
+            targetBtnHtml += `
+                <button type="button" class="cy-context-menu-item" id="ctx-action-root-target" style="color: ${allMarked ? '#ef4444' : '#00f0ff'};">
+                    <i data-lucide="layers" class="ui-icon" style="color: ${allMarked ? '#ef4444' : '#00f0ff'};"></i>
+                    <span>${allMarked ? `Remove all ${totalCount} IPs from Targets` : `Set all ${totalCount} resolved IPs as Targets (${markedCount}/${totalCount})`}</span>
+                </button>
+            `;
         }
 
         // 4. Unverify Active Status Action (Single service node with Verified Active or Root/Parent with associated active services)
@@ -4896,13 +4908,13 @@ class EASMDashboard {
             }
         });
 
-        // Wire single IP target button action
+        // Wire target button action (IP or FQDN)
         const targetBtn = menu.querySelector('#ctx-action-target');
-        if (targetBtn && ipTargetValue) {
+        if (targetBtn && targetValue) {
             targetBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 this.hideContextMenu();
-                await this.toggleTargetMark(ipTargetValue, node);
+                await this.toggleTargetMark(targetValue, node);
             });
         }
 
