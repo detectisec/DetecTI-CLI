@@ -534,12 +534,14 @@ class GraphBuilder:
         cursor = conn.execute("""
             SELECT id, ip_id, port, protocol, service_name, product, version, banner, ssl, url, sources
             FROM services
+            ORDER BY rowid ASC
         """)
         
+        seen_services = {}
+        
         for service_id, ip_id, port, protocol, service_name, product, version, banner, ssl, url, sources_raw in cursor.fetchall():
-            # Build clean service label: e.g. 80/tcp, 443/tcp, 53/udp
             proto_str = (protocol or "tcp").lower()
-            label = f"{port}/{proto_str}"
+            key = (ip_id, port, proto_str)
             
             # Parse sources
             sources_list = []
@@ -555,9 +557,25 @@ class GraphBuilder:
             
             has_masscan = any("masscan" in str(s).lower() for s in sources_list)
             
+            if key in seen_services:
+                # Merge into existing node data
+                existing_node = seen_services[key]
+                cur_sources = set(existing_node["data"]["sources"])
+                cur_sources.update(sources_list)
+                existing_node["data"]["sources"] = sorted(list(cur_sources))
+                if has_masscan:
+                    existing_node["data"]["is_active_scan"] = True
+                    existing_node["data"]["verified_active"] = True
+                if banner and not existing_node["data"]["banner"]:
+                    existing_node["data"]["banner"] = banner
+                if service_name and (not existing_node["data"]["service"] or existing_node["data"]["service"] == "unknown"):
+                    existing_node["data"]["service"] = service_name
+                continue
+            
+            label = f"{port}/{proto_str}"
             service_type = "https" if ssl else "http" if port in [80, 8080, 8000] else "service"
             
-            nodes.append({
+            node_obj = {
                 "data": {
                     "id": f"srv_{service_id}",
                     "label": label,
@@ -574,9 +592,11 @@ class GraphBuilder:
                     "is_active_scan": has_masscan,
                     "verified_active": has_masscan,
                 }
-            })
+            }
+            seen_services[key] = node_obj
+            nodes.append(node_obj)
             
-            # Edge from IP to service (solid green if active scan / confirmed active, dotted green if passive / awaiting active confirmation)
+            # Edge from IP to service
             edges.append({
                 "data": {
                     "id": f"e_ip_srv_{ip_id}_{service_id}",

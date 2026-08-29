@@ -88,8 +88,89 @@ class DatabaseManager:
                     conn.execute("ALTER TABLE ip_addresses ADD COLUMN longitude REAL")
             except Exception:
                 pass
+
+            # Auto-clean: deduplicate any existing redundant services per (ip_id, port, protocol)
+            self._deduplicate_services(conn)
                 
             conn.commit()
+
+    def _deduplicate_services(self, conn: sqlite3.Connection) -> None:
+        """Merge and clean up duplicate service entries for the same (ip_id, port, protocol)."""
+        try:
+            duplicates = conn.execute("""
+                SELECT ip_id, port, LOWER(protocol), COUNT(*)
+                FROM services
+                GROUP BY ip_id, port, LOWER(protocol)
+                HAVING COUNT(*) > 1
+            """).fetchall()
+
+            for ip_id, port, proto, cnt in duplicates:
+                rows = conn.execute("""
+                    SELECT id, sources, banner, service_name, product, version, url, ssl
+                    FROM services
+                    WHERE ip_id = ? AND port = ? AND LOWER(protocol) = ?
+                    ORDER BY rowid ASC
+                """, (ip_id, port, proto)).fetchall()
+
+                if not rows:
+                    continue
+
+                primary_id = rows[0][0]
+                merged_sources = set()
+                merged_banner = ""
+                merged_name = ""
+                merged_prod = ""
+                merged_ver = ""
+                merged_url = ""
+                merged_ssl = 0
+                dup_ids = [r[0] for r in rows[1:]]
+
+                for r in rows:
+                    cur_id, cur_sources_raw, cur_banner, cur_name, cur_prod, cur_ver, cur_url, cur_ssl = r
+                    if cur_sources_raw:
+                        try:
+                            s_list = json.loads(cur_sources_raw)
+                            if isinstance(s_list, list):
+                                merged_sources.update(s_list)
+                            else:
+                                merged_sources.add(str(s_list))
+                        except Exception:
+                            merged_sources.add(cur_sources_raw)
+                    if cur_banner and not merged_banner:
+                        merged_banner = cur_banner
+                    if cur_name and not merged_name and not str(cur_name).startswith("service-"):
+                        merged_name = cur_name
+                    if cur_prod and not merged_prod:
+                        merged_prod = cur_prod
+                    if cur_ver and not merged_ver:
+                        merged_ver = cur_ver
+                    if cur_url and not merged_url:
+                        merged_url = cur_url
+                    if cur_ssl:
+                        merged_ssl = 1
+
+                # Re-link vulnerabilities from duplicate service rows to primary_id
+                if dup_ids:
+                    placeholders = ",".join("?" for _ in dup_ids)
+                    conn.execute(f"UPDATE vulnerabilities SET service_id = ? WHERE service_id IN ({placeholders})", [primary_id] + dup_ids)
+                    conn.execute(f"DELETE FROM services WHERE id IN ({placeholders})", dup_ids)
+
+                conn.execute("""
+                    UPDATE services
+                    SET sources = ?, banner = ?, service_name = ?, product = ?, version = ?, url = ?, ssl = ?
+                    WHERE id = ?
+                """, (
+                    json.dumps(sorted(list(merged_sources))) if merged_sources else None,
+                    merged_banner,
+                    merged_name or f"service-{port}",
+                    merged_prod,
+                    merged_ver,
+                    merged_url,
+                    merged_ssl,
+                    primary_id
+                ))
+        except Exception:
+            pass
 
     def _get_or_create_domain(self, conn: sqlite3.Connection, domain_name: str) -> str:
         """Get existing domain ID or create new domain record."""
@@ -205,22 +286,64 @@ class DatabaseManager:
         return subdomain_map
 
     def _store_services(self, conn: sqlite3.Connection, ip_id: str, host: HostResult) -> Dict[str, str]:
-        """Store services for a host and return service_id mapping."""
+        """Store services for a host and return service_id mapping with strict deduplication."""
         service_ids = {}
+        seen_ports = set()
         
         for port in host.ports:
-            service_id = str(uuid.uuid4())
-            sources_json = json.dumps(port.sources) if port.sources else None
+            port_key = (port.port, (port.transport or "tcp").lower())
+            if port_key in seen_ports:
+                continue
+            seen_ports.add(port_key)
             
-            conn.execute("""
-                INSERT INTO services (id, ip_id, port, protocol, service_name, product, version, banner, url, ssl, sources)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                service_id, ip_id, port.port, port.transport, port.service,
-                port.product, port.version, port.banner, port.url, port.ssl, sources_json
-            ))
+            # Check if this service already exists for this IP
+            cursor = conn.execute("""
+                SELECT id, sources, banner, service_name, product, version, url, ssl 
+                FROM services 
+                WHERE ip_id = ? AND port = ? AND LOWER(protocol) = LOWER(?)
+            """, (ip_id, port.port, port.transport or "tcp"))
+            existing = cursor.fetchone()
+            
+            if existing:
+                service_id, cur_sources_raw, cur_banner, cur_name, cur_prod, cur_ver, cur_url, cur_ssl = existing
+                merged_sources = set()
+                if cur_sources_raw:
+                    try:
+                        p_sources = json.loads(cur_sources_raw)
+                        if isinstance(p_sources, list):
+                            merged_sources.update(p_sources)
+                        else:
+                            merged_sources.add(str(p_sources))
+                    except Exception:
+                        merged_sources.add(cur_sources_raw)
+                if port.sources:
+                    merged_sources.update(port.sources)
+                
+                new_banner = port.banner if port.banner else (cur_banner or "")
+                new_name = port.service if (port.service and not str(port.service).startswith("service-")) else (cur_name or "")
+                new_prod = port.product if port.product else (cur_prod or "")
+                new_ver = port.version if port.version else (cur_ver or "")
+                new_url = port.url if port.url else (cur_url or "")
+                new_ssl = 1 if (port.ssl or cur_ssl) else 0
+                
+                conn.execute("""
+                    UPDATE services
+                    SET sources = ?, banner = ?, service_name = ?, product = ?, version = ?, url = ?, ssl = ?
+                    WHERE id = ?
+                """, (json.dumps(sorted(list(merged_sources))), new_banner, new_name, new_prod, new_ver, new_url, new_ssl, service_id))
+            else:
+                service_id = str(uuid.uuid4())
+                sources_json = json.dumps(port.sources) if port.sources else None
+                conn.execute("""
+                    INSERT INTO services (id, ip_id, port, protocol, service_name, product, version, banner, url, ssl, sources)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    service_id, ip_id, port.port, port.transport, port.service,
+                    port.product, port.version, port.banner, port.url, port.ssl, sources_json
+                ))
             
             service_ids[f"{port.port}/{port.transport}"] = service_id
+            service_ids[f"{port.port}"] = service_id
         
         return service_ids
 
