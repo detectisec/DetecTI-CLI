@@ -108,10 +108,12 @@ flowchart TD
    - **Shodan**: Primary discovery engine for custom queries, CIDR subnets, direct IP lookups, and host profiles.
    - **Certificate Transparency (crt.sh)**: Discovers issued TLS/SSL certificates to uncover wildcards and hidden subdomains.
    - **Reverse WHOIS (WhoisFreaks API + HackerTarget fallback)**: Identifies associated parent/child domains registered by the same organization.
+   - **Shared CDN / Anycast Reverse IP Bypass**: Automatically detects if the target domain or IP resides on shared CDN/Anycast edge proxies (Cloudflare, Fastly, Akamai, Imperva) and skips Reverse IP Lookups, preventing unrelated tenant websites from polluting the reconnaissance inventory.
    - **Censys (Direct IP Lookups)**: Queries host profiles for direct single IP targets or primary fallback.
 
 3. **Stage 1.2 & 1.3: DNS Resolution & Recursive Threat Intel Feedback Loop**:
    - Asynchronously resolves discovered subdomains and domains to their active `A`/`AAAA` IP addresses.
+   - **Target Domain Tree Scope Enforcement**: When scanning domain targets, DNS resolution and host node creation are strictly confined to the target domain's registered tree (`target.com` and `*.target.com`), ensuring third-party hosting infrastructures never spawn extraneous network nodes.
    - In-scope IPs are fed into a recursive intelligence feedback loop (Shodan & Censys) to uncover full open port maps, services, and passive CVEs.
 
 4. **Stage 1.4: Automatic BGP / RDAP Fallback Enrichment**:
@@ -152,7 +154,8 @@ flowchart TD
   - **Automatic BGP / RDAP Fallback Enrichment**: Unprofiled hosts are enriched in real-time with ASN, Organization, City, Region/State, Country, and geographic coordinates (Latitude/Longitude) with interactive Google Maps links in the Asset Inspector.
 - **🔍 Subdomain & Domain Correlation & Scope Governance**:
   - **Certificate Transparency (crt.sh)** for comprehensive subdomain enumeration.
-  - **Reverse WHOIS**: Correlates domains by registrant email, organization name, or domain (WhoisFreaks API + HackerTarget fallback).
+  - **Reverse WHOIS & CDN Proxy Bypass**: Correlates domains by registrant email, organization name, or domain (WhoisFreaks API + HackerTarget fallback), automatically bypassing Reverse IP queries on shared CDN edge proxies to eliminate tenant noise.
+  - **Target Domain Tree Scope Enforcement**: Strictly bounds DNS resolution and host network synthesis to the target domain's registered tree (`*.target.com`).
   - **Authoritative DNS Resolution Isolation (Subdomain ➔ IP)**: Every subdomain links strictly and exclusively to its directly resolved IP addresses in DNS/TLS certificates, preventing any cross-contamination or spurious associations between sibling subdomains.
   - **Strict Scope Governance for Org / ASN Targets**: Guarantees that only infrastructure owned by the target is registered in the database, discarding external third-party IPs.
   - Shodan DNS historical record mapping.
