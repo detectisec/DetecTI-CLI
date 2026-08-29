@@ -1156,7 +1156,7 @@ class EASMDashboard {
         // 2. Its downstream descendants (Services -> Vulnerabilities -> Exploits / IP resolutions)
         // This prevents pulling in unrelated sibling domains, subdomains, or other IPs!
         
-        // Add ancestors towards root (incomers)
+        // Add ancestors towards root (incomers + network clusters)
         const addAncestors = (nodeId, visited = new Set()) => {
             if (visited.has(nodeId)) return;
             visited.add(nodeId);
@@ -1164,11 +1164,32 @@ class EASMDashboard {
             const node = this.cy.getElementById(nodeId);
             if (!node.length) return;
             
+            // Standard incomers (Domain -> Subdomain, Target -> Network, Target -> Domain, etc.)
             node.incomers('node').forEach(parentNode => {
                 const parentId = parentNode.id();
                 visibleNodes.add(parentId);
                 addAncestors(parentId, visited);
             });
+
+            // IP -> Network cluster (BELONGS_TO is an outgoing edge from IP to Network cluster)
+            if (node.data('type') === 'ip') {
+                node.outgoers('node[type="network"]').forEach(netNode => {
+                    const netId = netNode.id();
+                    visibleNodes.add(netId);
+                    addAncestors(netId, visited);
+                });
+            }
+
+            // Domain -> IP (for domains in Org scans that resolve to IPs)
+            if (node.data('type') === 'domain' || node.data('type') === 'subdomain') {
+                node.outgoers('node[type="ip"]').forEach(ipNode => {
+                    ipNode.outgoers('node[type="network"]').forEach(netNode => {
+                        const netId = netNode.id();
+                        visibleNodes.add(netId);
+                        addAncestors(netId, visited);
+                    });
+                });
+            }
         };
 
         // Add downstream descendants (outgoers: services, vulns, etc.)
@@ -1191,6 +1212,12 @@ class EASMDashboard {
             addAncestors(leadId);
             addDescendants(leadId);
         });
+
+        // Always ensure target_root is visible if any lead is selected
+        const rootNode = this.cy.getElementById('target_root');
+        if (rootNode.length > 0) {
+            visibleNodes.add('target_root');
+        }
 
         // Third pass: Smart Clustering / Collapsing for high fan-out nodes (>15 services or vulns)
         // Group overwhelming numbers of services or vulnerabilities into clean cluster nodes
@@ -3160,6 +3187,28 @@ class EASMDashboard {
                     addAllAncestors(parent, targetSet, visited);
                 }
             });
+
+            // IP -> Network cluster (BELONGS_TO)
+            if (startNode.data('type') === 'ip') {
+                startNode.outgoers('node[type="network"]').forEach(netNode => {
+                    const netId = netNode.id();
+                    if (!this.visibleLeadNodes || this.visibleLeadNodes.has(netId)) {
+                        addAllAncestors(netNode, targetSet, visited);
+                    }
+                });
+            }
+
+            // Domain -> IP (for domains in Org scans that resolve to IPs)
+            if (startNode.data('type') === 'domain' || startNode.data('type') === 'subdomain') {
+                startNode.outgoers('node[type="ip"]').forEach(ipNode => {
+                    ipNode.outgoers('node[type="network"]').forEach(netNode => {
+                        const netId = netNode.id();
+                        if (!this.visibleLeadNodes || this.visibleLeadNodes.has(netId)) {
+                            addAllAncestors(netNode, targetSet, visited);
+                        }
+                    });
+                });
+            }
         };
 
         // Helper to trace full descendant subtree downwards (children services, vulns, clusters)
@@ -3505,6 +3554,12 @@ class EASMDashboard {
             });
             nodesToKeep.clear();
             finalSearchKept.forEach(id => nodesToKeep.add(id));
+        }
+
+        // Always preserve target_root if it was visible in the Lead Filter
+        const rootNode = this.cy.getElementById('target_root');
+        if (rootNode.length > 0 && (!this.visibleLeadNodes || this.visibleLeadNodes.has('target_root'))) {
+            nodesToKeep.add('target_root');
         }
 
         // Apply final visibility to all nodes
