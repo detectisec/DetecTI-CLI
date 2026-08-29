@@ -38,6 +38,208 @@ class EASMDashboard {
         return 'breadthfirst';
     }
 
+    computeSemanticHierarchicalPositions(targetElements = null) {
+        if (!this.cy) return {};
+        const elements = targetElements || this.cy.elements(':visible');
+        const nodes = elements.nodes ? elements.nodes() : elements.filter('node');
+        if (nodes.length === 0) return {};
+
+        const positions = {};
+
+        // 1. Partition nodes into Semantic Tiers
+        const tier0_target = [];
+        const tier1_network = [];
+        const tier1_domain = [];
+        const tier2_subdomain = [];
+        const tier3_ip = [];
+        const tier4_service = [];
+        const tier5_vuln = [];
+
+        nodes.forEach(node => {
+            const data = node.data();
+            const type = data.type;
+
+            if (type === 'target' || data.id === 'target_root' || data.is_root === true) {
+                tier0_target.push(node);
+            } else if (type === 'network') {
+                tier1_network.push(node);
+            } else if (type === 'domain') {
+                tier1_domain.push(node);
+            } else if (type === 'subdomain') {
+                tier2_subdomain.push(node);
+            } else if (type === 'ip') {
+                tier3_ip.push(node);
+            } else if (['service', 'http', 'https', 'cluster_services'].includes(type)) {
+                tier4_service.push(node);
+            } else if (['vulnerability', 'cluster_vulns'].includes(type)) {
+                tier5_vuln.push(node);
+            } else {
+                tier3_ip.push(node);
+            }
+        });
+
+        const Y_TIER_GAP = 240;
+
+        // Tier 0: Center Target Root at (0, 0)
+        tier0_target.forEach((node, i) => {
+            positions[node.id()] = { x: (i - (tier0_target.length - 1) / 2) * 240, y: 0 };
+        });
+
+        // Tier 1: Networks on Left, Domains on Right
+        const tier1Y = Y_TIER_GAP;
+        const netSpacing = Math.max(320, 1600 / Math.max(1, tier1_network.length));
+        const domSpacing = Math.max(280, 1400 / Math.max(1, tier1_domain.length));
+
+        tier1_network.forEach((node, i) => {
+            let x;
+            if (tier1_domain.length > 0) {
+                x = - ((tier1_network.length - i - 0.5) * netSpacing) - 150;
+            } else {
+                x = (i - (tier1_network.length - 1) / 2) * netSpacing;
+            }
+            positions[node.id()] = { x, y: tier1Y };
+        });
+
+        tier1_domain.forEach((node, i) => {
+            let x;
+            if (tier1_network.length > 0) {
+                x = ((i + 0.5) * domSpacing) + 150;
+            } else {
+                x = (i - (tier1_domain.length - 1) / 2) * domSpacing;
+            }
+            positions[node.id()] = { x, y: tier1Y };
+        });
+
+        // Tier 2: Subdomains (beneath their parent domain)
+        const tier2Y = tier1Y + Y_TIER_GAP;
+        const subsByDomain = new Map();
+        tier2_subdomain.forEach(node => {
+            let domId = node.data('domain_id');
+            if (!domId) {
+                const parentDom = node.incomers('node[type="domain"]').first();
+                if (parentDom.length > 0) domId = parentDom.data('domain_id') || parentDom.id().replace('dom_', '');
+            }
+            domId = domId || 'unknown';
+            if (!subsByDomain.has(domId)) subsByDomain.set(domId, []);
+            subsByDomain.get(domId).push(node);
+        });
+
+        subsByDomain.forEach((subs, domId) => {
+            const parentPos = positions[`dom_${domId}`] || positions[domId];
+            const baseX = parentPos ? parentPos.x : 0;
+            const maxCols = Math.min(6, Math.max(1, Math.ceil(Math.sqrt(subs.length * 1.5))));
+            const cols = Math.min(subs.length, maxCols);
+            
+            subs.forEach((node, idx) => {
+                const r = Math.floor(idx / cols);
+                const c = idx % cols;
+                const rowCount = Math.min(cols, subs.length - r * cols);
+                const x = baseX + (c - (rowCount - 1) / 2) * 160;
+                const y = tier2Y + (r * 75);
+                positions[node.id()] = { x, y };
+            });
+        });
+
+        // Tier 3: Host IPs (grouped under their parent ASN/Network or beneath subdomains)
+        let maxTier2Y = tier2Y;
+        tier2_subdomain.forEach(node => {
+            if (positions[node.id()]) maxTier2Y = Math.max(maxTier2Y, positions[node.id()].y);
+        });
+        const tier3Y = tier2_subdomain.length > 0 ? maxTier2Y + Y_TIER_GAP : tier1Y + Y_TIER_GAP;
+
+        const ipsByNetwork = new Map();
+        tier3_ip.forEach(node => {
+            const netEdge = node.connectedEdges('edge[label="BELONGS_TO"]').first();
+            let netId = netEdge.length > 0 ? netEdge.target().id() : null;
+            if (!netId) {
+                const netOut = node.outgoers('node[type="network"]').first();
+                if (netOut.length > 0) netId = netOut.id();
+            }
+            netId = netId || 'unassigned';
+            if (!ipsByNetwork.has(netId)) ipsByNetwork.set(netId, []);
+            ipsByNetwork.get(netId).push(node);
+        });
+
+        let unassignedOffset = 0;
+        ipsByNetwork.forEach((ipList, netId) => {
+            const netPos = positions[netId];
+            const baseX = netPos ? netPos.x : unassignedOffset;
+            if (!netPos) unassignedOffset += 200;
+
+            const maxCols = Math.min(8, Math.max(2, Math.ceil(Math.sqrt(ipList.length * 2))));
+            const cols = Math.min(ipList.length, maxCols);
+
+            ipList.forEach((node, idx) => {
+                const r = Math.floor(idx / cols);
+                const c = idx % cols;
+                const rowCount = Math.min(cols, ipList.length - r * cols);
+                const x = baseX + (c - (rowCount - 1) / 2) * 135;
+                const y = tier3Y + (r * 70);
+                positions[node.id()] = { x, y };
+            });
+        });
+
+        // Tier 4: Services & Service Clusters (directly below their parent Host IP)
+        const srvsByIp = new Map();
+        tier4_service.forEach(node => {
+            let parentIpId = node.data('parent_ip') || node.data('ip_id');
+            if (!parentIpId) {
+                const ipIncomer = node.incomers('node[type="ip"]').first();
+                if (ipIncomer.length > 0) parentIpId = ipIncomer.id();
+            }
+            parentIpId = parentIpId ? (parentIpId.startsWith('ip_') ? parentIpId : `ip_${parentIpId}`) : 'other';
+            if (!srvsByIp.has(parentIpId)) srvsByIp.set(parentIpId, []);
+            srvsByIp.get(parentIpId).push(node);
+        });
+
+        srvsByIp.forEach((srvList, ipId) => {
+            const ipPos = positions[ipId];
+            const baseX = ipPos ? ipPos.x : 0;
+            const baseY = ipPos ? ipPos.y + 110 : tier3Y + 140;
+
+            const cols = Math.min(srvList.length, 5);
+            srvList.forEach((node, idx) => {
+                const r = Math.floor(idx / cols);
+                const c = idx % cols;
+                const rowCount = Math.min(cols, srvList.length - r * cols);
+                const x = baseX + (c - (rowCount - 1) / 2) * 95;
+                const y = baseY + (r * 60);
+                positions[node.id()] = { x, y };
+            });
+        });
+
+        // Tier 5: Vulnerabilities & Vuln Clusters (directly below their parent Service or IP)
+        const vulnsByParent = new Map();
+        tier5_vuln.forEach(node => {
+            let parentId = node.data('parent_srv') || node.data('service_id');
+            if (!parentId) {
+                const pIncomer = node.incomers('node').first();
+                if (pIncomer.length > 0) parentId = pIncomer.id();
+            }
+            parentId = parentId || 'other';
+            if (!vulnsByParent.has(parentId)) vulnsByParent.set(parentId, []);
+            vulnsByParent.get(parentId).push(node);
+        });
+
+        vulnsByParent.forEach((vulnList, parentId) => {
+            const parentPos = positions[parentId] || positions[`srv_${parentId}`];
+            const baseX = parentPos ? parentPos.x : 0;
+            const baseY = parentPos ? parentPos.y + 90 : tier3Y + 260;
+
+            const cols = Math.min(vulnList.length, 4);
+            vulnList.forEach((node, idx) => {
+                const r = Math.floor(idx / cols);
+                const c = idx % cols;
+                const rowCount = Math.min(cols, vulnList.length - r * cols);
+                const x = baseX + (c - (rowCount - 1) / 2) * 80;
+                const y = baseY + (r * 55);
+                positions[node.id()] = { x, y };
+            });
+        });
+
+        return positions;
+    }
+
     getLayoutOptions(layoutName, targetElements = null) {
         const baseOptions = {
             animate: true,
@@ -52,6 +254,16 @@ class EASMDashboard {
             : (this.cy ? this.cy.nodes(':visible').length : 50);
 
         switch (layoutName) {
+            case 'breadthfirst':
+            case 'hierarchical':
+                const computedPositions = this.computeSemanticHierarchicalPositions(targetElements);
+                return {
+                    ...baseOptions,
+                    name: 'preset',
+                    positions: computedPositions,
+                    fit: true,
+                    padding: 40
+                };
             case 'cose-bilkent':
                 return {
                     ...baseOptions,
@@ -83,24 +295,6 @@ class EASMDashboard {
                     nestingFactor: 1.2,
                     gravity: 120,
                     numIter: 500
-                };
-            case 'breadthfirst':
-                return {
-                    ...baseOptions,
-                    name: 'breadthfirst',
-                    directed: true,
-                    spacingFactor: 0.6,
-                    nodeDimensionsIncludeLabels: true,
-                    padding: 25,
-                    roots: function(nodes) {
-                        const visiblePool = nodes.filter(':visible');
-                        const pool = visiblePool.length > 0 ? visiblePool : nodes;
-                        let roots = pool.filter('[type="target"], [is_root="true"]');
-                        if (roots.length === 0) roots = pool.filter('[type="domain"]');
-                        if (roots.length === 0) roots = pool.filter('[type="ip"]');
-                        if (roots.length === 0) roots = pool.filter(n => n.incomers('node:visible').length === 0);
-                        return roots.length > 0 ? roots : pool.first();
-                    }
                 };
             case 'concentric':
                 return {
@@ -1656,8 +1850,8 @@ class EASMDashboard {
                     }
                     const layoutOptions = this.getLayoutOptions(layoutName, visibleElements);
                     const layout = visibleElements.layout({
-                        name: layoutName,
                         ...layoutOptions,
+                        name: layoutOptions.name || layoutName,
                         animate: true,
                         animationDuration: 500,
                         animationEasing: 'ease-in-out',
@@ -2607,7 +2801,7 @@ class EASMDashboard {
             // Run layout with animated transition
             const layout = target.layout({
                 ...layoutOptions,
-                name: layoutName,
+                name: layoutOptions.name || layoutName,
                 fit: true,
                 padding: 40,
                 animate: true,
