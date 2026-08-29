@@ -4347,6 +4347,53 @@ class EASMDashboard {
                 }
             }
 
+            let resolvedIpsHtml = '';
+            if (data.type === 'domain' || data.type === 'subdomain') {
+                const resolvedIps = [];
+                if (this.cy) {
+                    const nodeEle = this.cy.getElementById(data.id);
+                    if (nodeEle.length > 0) {
+                        nodeEle.outgoers('node[type="ip"]').forEach(ipNode => {
+                            const ipData = ipNode.data();
+                            const ipVal = ipData.ip || ipData.label || ipData.name;
+                            if (ipVal && !resolvedIps.some(r => r.ip === ipVal)) {
+                                resolvedIps.push({ id: ipNode.id(), ip: ipVal });
+                            }
+                        });
+                    }
+                }
+                if (resolvedIps.length === 0) {
+                    const connected = this.findConnectedIPs(data.id, elements);
+                    connected.forEach(item => {
+                        const ipVal = item.ip || item.label || item.name;
+                        if (ipVal && !resolvedIps.some(r => r.ip === ipVal)) {
+                            resolvedIps.push({ id: item.id, ip: ipVal });
+                        }
+                    });
+                }
+
+                if (resolvedIps.length > 0) {
+                    const ipsBadges = resolvedIps.map(item => `
+                        <span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; font-family: monospace; font-size: 0.8rem; color: #60a5fa; margin-right: 4px; margin-bottom: 2px;">
+                            ${item.ip}
+                            <button type="button" class="risk-focus-btn" style="margin: 0; padding: 1px 4px; font-size: 0.65rem; background: rgba(59, 130, 246, 0.25); color: #93c5fd; border: none; border-radius: 2px; cursor: pointer;" onclick="event.stopPropagation(); window.dashboard.focusNode('${item.id}')" title="Focus IP in graph"><i data-lucide="crosshair" style="width: 10px; height: 10px;"></i></button>
+                        </span>
+                    `).join('');
+
+                    resolvedIpsHtml = `
+                    <div class="property">
+                        <span class="key">${resolvedIps.length === 1 ? 'Resolved IP:' : 'Resolved IPs:'}</span>
+                        <div class="value" style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">${ipsBadges}</div>
+                    </div>`;
+                } else {
+                    resolvedIpsHtml = `
+                    <div class="property">
+                        <span class="key">Resolved IP:</span>
+                        <span class="value" style="color: #94a3b8; font-style: italic;">Unresolved / None</span>
+                    </div>`;
+                }
+            }
+
             let mainPropertiesHtml = '';
             if (data.type === 'network') {
                 mainPropertiesHtml = `
@@ -4369,6 +4416,7 @@ class EASMDashboard {
                     <span class="key">${data.type === 'target' ? 'Target Query:' : 'Domain / Host:'}</span>
                     <span class="value">${data.name || data.label}</span>
                 </div>
+                ${resolvedIpsHtml}
                 <div class="property">
                     <span class="key">Type:</span>
                     <span class="value">${data.target_type ? `${data.type.toUpperCase()} (${data.target_type.toUpperCase()})` : data.type.toUpperCase()}</span>
