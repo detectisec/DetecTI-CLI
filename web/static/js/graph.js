@@ -3355,7 +3355,7 @@ class EASMDashboard {
             return; // Lead filter already hid everything
         }
 
-        // Helper to trace full ancestor lineage up to target_root
+        // Helper to trace full ancestor lineage up to target_root (Strict Attack Path: strictly upwards towards root)
         const addAllAncestors = (startNode, targetSet, visited = new Set()) => {
             if (!startNode || startNode.length === 0) return;
             const nodeId = startNode.id();
@@ -3363,48 +3363,89 @@ class EASMDashboard {
             visited.add(nodeId);
             
             targetSet.add(nodeId);
-            startNode.incomers('node').forEach(parent => {
-                const pId = parent.id();
-                const pType = parent.data('type');
-                
-                // When 3D Risk Matrix or Verified Services filter is active, do NOT trace through unverified/passive services!
-                if (this.filters.matrix3d || this.filters.verifiedServicesOnly) {
-                    if (pType === 'service' || pType === 'http' || pType === 'https') {
-                        const sData = parent.data();
-                        const isSrvActive = sData.verified_active === true || sData.is_active_scan === true ||
-                            (Array.isArray(sData.sources) && sData.sources.some(s => typeof s === 'string' && (s.toLowerCase().includes('masscan') || s.toLowerCase().includes('active'))));
-                        if (!isSrvActive) {
-                            return; // Skip tracing into unverified / passive service
+            const nodeType = startNode.data('type');
+
+            // 1. Vulnerability -> Service / IP
+            if (nodeType === 'vulnerability' || nodeType === 'exploit') {
+                startNode.incomers('node').forEach(parent => {
+                    const pType = parent.data('type');
+                    // When 3D Risk Matrix is active, only trace through verified active services
+                    if (this.filters.matrix3d || this.filters.verifiedServicesOnly) {
+                        if (['service', 'http', 'https'].includes(pType)) {
+                            const sData = parent.data();
+                            const isSrvActive = sData.verified_active === true || sData.is_active_scan === true ||
+                                (Array.isArray(sData.sources) && sData.sources.some(s => typeof s === 'string' && (s.toLowerCase().includes('masscan') || s.toLowerCase().includes('active'))));
+                            if (!isSrvActive) return;
                         }
                     }
-                }
-                
-                if (!this.visibleLeadNodes || this.visibleLeadNodes.has(pId)) {
-                    addAllAncestors(parent, targetSet, visited);
-                }
-            });
+                    if (!this.visibleLeadNodes || this.visibleLeadNodes.has(parent.id())) {
+                        addAllAncestors(parent, targetSet, visited);
+                    }
+                });
+                return;
+            }
 
-            // IP -> Network cluster (BELONGS_TO)
-            if (startNode.data('type') === 'ip') {
+            // 2. Service -> IP
+            if (['service', 'http', 'https', 'cluster_services'].includes(nodeType)) {
+                startNode.incomers('node[type="ip"]').forEach(parentIp => {
+                    if (!this.visibleLeadNodes || this.visibleLeadNodes.has(parentIp.id())) {
+                        addAllAncestors(parentIp, targetSet, visited);
+                    }
+                });
+                return;
+            }
+
+            // 3. IP -> Network (ASN) + Direct Resolving Subdomains -> Target Root
+            if (nodeType === 'ip') {
+                // IP -> Network (ASN) -> Target Root
                 startNode.outgoers('node[type="network"]').forEach(netNode => {
                     const netId = netNode.id();
                     if (!this.visibleLeadNodes || this.visibleLeadNodes.has(netId)) {
                         addAllAncestors(netNode, targetSet, visited);
                     }
                 });
+
+                // IP -> Direct Incomer Subdomain / Domain -> Target Root
+                startNode.incomers('node[type="subdomain"], node[type="domain"]').forEach(subNode => {
+                    const subId = subNode.id();
+                    if (!this.visibleLeadNodes || this.visibleLeadNodes.has(subId)) {
+                        addAllAncestors(subNode, targetSet, visited);
+                    }
+                });
+
+                // Direct link from Target Root
+                startNode.incomers('node[type="target"]').forEach(targetNode => {
+                    targetSet.add(targetNode.id());
+                });
+                return;
             }
 
-            // Domain -> IP (for domains in Org scans that resolve to IPs)
-            if (startNode.data('type') === 'domain' || startNode.data('type') === 'subdomain') {
-                startNode.outgoers('node[type="ip"]').forEach(ipNode => {
-                    ipNode.outgoers('node[type="network"]').forEach(netNode => {
-                        const netId = netNode.id();
-                        if (!this.visibleLeadNodes || this.visibleLeadNodes.has(netId)) {
-                            addAllAncestors(netNode, targetSet, visited);
-                        }
-                    });
+            // 4. Subdomain -> Parent Domain / Subdomain -> Target Root
+            if (nodeType === 'subdomain') {
+                startNode.incomers('node[type="domain"], node[type="subdomain"], node[type="target"]').forEach(parent => {
+                    const pId = parent.id();
+                    if (!this.visibleLeadNodes || this.visibleLeadNodes.has(pId)) {
+                        addAllAncestors(parent, targetSet, visited);
+                    }
                 });
+                return;
             }
+
+            // 5. Network / Domain -> Target Root
+            if (nodeType === 'network' || nodeType === 'domain') {
+                startNode.incomers('node[type="target"]').forEach(targetNode => {
+                    targetSet.add(targetNode.id());
+                });
+                return;
+            }
+
+            // Fallback for any other node types
+            startNode.incomers('node').forEach(parent => {
+                const pId = parent.id();
+                if (!this.visibleLeadNodes || this.visibleLeadNodes.has(pId)) {
+                    addAllAncestors(parent, targetSet, visited);
+                }
+            });
         };
 
         // Helper to trace full descendant subtree downwards (children services, vulns, clusters)
@@ -3576,7 +3617,7 @@ class EASMDashboard {
                         cNode.data('label', `+ ${matchingSrvs.length} ${matchingSrvs.length === 1 ? 'Service' : 'Services'}`);
                     }
 
-                    if (hasMatch || nodesToKeep.has(parentId)) {
+                    if (hasMatch) {
                         nodesToKeep.add(cNode.id());
                         nodesToKeep.add(parentId);
                         addAllAncestors(parentNode, nodesToKeep);
