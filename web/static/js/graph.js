@@ -1935,10 +1935,12 @@ class EASMDashboard {
                         'color': '#ffffff',
                         'text-valign': 'center',
                         'text-halign': 'center',
-                        'font-size': '11px',
+                        'text-wrap': 'wrap',
+                        'text-max-width': '85px',
+                        'font-size': '10px',
                         'font-weight': 'bold',
-                        'width': '70px',
-                        'height': '70px',
+                        'width': '75px',
+                        'height': '75px',
                         'shape': 'octagon',
                         'border-width': '2px',
                         'border-color': '#60a5fa'
@@ -4345,16 +4347,37 @@ class EASMDashboard {
                 }
             }
 
-            html = `
-                <h4>${sectionTitle}</h4>
+            let mainPropertiesHtml = '';
+            if (data.type === 'network') {
+                mainPropertiesHtml = `
                 <div class="property">
-                    <span class="key">${data.type === 'network' ? 'Organization / ASN:' : (data.type === 'target' ? 'Target Query:' : 'Domain / Host:')}</span>
+                    <span class="key">Organization:</span>
+                    <span class="value">${data.org || data.name || data.label}</span>
+                </div>
+                ${data.asn ? `
+                <div class="property">
+                    <span class="key">Autonomous System (ASN):</span>
+                    <span class="value" style="color: #60a5fa; font-weight: 600; font-family: monospace;">${data.asn}</span>
+                </div>` : ''}
+                <div class="property">
+                    <span class="key">Type:</span>
+                    <span class="value">ORGANIZATION / ASN CLUSTER</span>
+                </div>`;
+            } else {
+                mainPropertiesHtml = `
+                <div class="property">
+                    <span class="key">${data.type === 'target' ? 'Target Query:' : 'Domain / Host:'}</span>
                     <span class="value">${data.name || data.label}</span>
                 </div>
                 <div class="property">
                     <span class="key">Type:</span>
                     <span class="value">${data.target_type ? `${data.type.toUpperCase()} (${data.target_type.toUpperCase()})` : data.type.toUpperCase()}</span>
-                </div>
+                </div>`;
+            }
+
+            html = `
+                <h4>${sectionTitle}</h4>
+                ${mainPropertiesHtml}
                 ${fileTargetsHtml}
                 ${subdomainsAccordionHtml}
                 ${riskMetricsHtml}
