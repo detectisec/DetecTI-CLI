@@ -416,6 +416,29 @@ class ThreatTrackEngine:
                     logger.error(f"Error during recon stage: {res}")
 
         # ----------------------------------------------------
+        # Scope Governance: Determine Organization / ASN Scope Filters
+        # ----------------------------------------------------
+        target_org = None
+        target_asn = None
+        clean_lower = clean_target.lower()
+        if "org:" in clean_lower:
+            import re
+            m = re.search(r'org:\s*["\']?([^"\']+)["\']?', clean_target, re.IGNORECASE)
+            if m:
+                target_org = m.group(1).strip()
+        if "asn:" in clean_lower:
+            import re
+            m = re.search(r'asn:\s*["\']?([^"\']+)["\']?', clean_target, re.IGNORECASE)
+            if m:
+                target_asn = m.group(1).strip().upper()
+
+        initial_org_ips = set()
+        if target_org or target_asn:
+            for f in raw_recon_findings:
+                if f.host_ip and "shodan" in f.source.lower():
+                    initial_org_ips.add(f.host_ip)
+
+        # ----------------------------------------------------
         # Stage 1.2: Subdomain & Domain DNS Resolution & Recursive IP Mapping
         # (Resolves all subdomains and associated domains discovered via crt.sh/WHOIS/Shodan to their active A/AAAA IPs)
         # ----------------------------------------------------
@@ -450,6 +473,10 @@ class ThreatTrackEngine:
             for sub, ips in resolve_results:
                 if ips:
                     for ip in ips:
+                        # Scope enforcement: If target is an Organization or ASN, ignore foreign resolved IPs!
+                        if (target_org or target_asn) and ip not in initial_org_ips:
+                            continue
+
                         raw_recon_findings.append(
                             Finding(
                                 type=FindingType.HOST_INFO,
@@ -472,26 +499,6 @@ class ThreatTrackEngine:
         # Stage 1.3: Recursive Threat Intelligence Feedback Loop (Shodan & Censys)
         # (Feeds all resolved subdomain IPs back into Shodan & Censys for full port, service, banner & CVE discovery)
         # ----------------------------------------------------
-        # Determine Organization / ASN Scope Filters
-        target_org = None
-        target_asn = None
-        clean_lower = clean_target.lower()
-        if "org:" in clean_lower:
-            import re
-            m = re.search(r'org:\s*["\']?([^"\']+)["\']?', clean_target, re.IGNORECASE)
-            if m:
-                target_org = m.group(1).strip()
-        if "asn:" in clean_lower:
-            import re
-            m = re.search(r'asn:\s*["\']?([^"\']+)["\']?', clean_target, re.IGNORECASE)
-            if m:
-                target_asn = m.group(1).strip().upper()
-
-        initial_org_ips = set()
-        if target_org or target_asn:
-            for f in raw_recon_findings:
-                if f.host_ip and "shodan" in f.source.lower():
-                    initial_org_ips.add(f.host_ip)
 
         target_scopes: Set[str] = set()
         if root_domain:
@@ -582,6 +589,8 @@ class ThreatTrackEngine:
             clean_src = _clean_source(f.source)
 
             if f.type in (FindingType.SUBDOMAIN, FindingType.ASSOCIATED_DOMAIN):
+                if (target_org or target_asn) and (not f.host_ip or f.host_ip not in initial_org_ips):
+                    continue
                 domain_findings.append(f)
                 if not f.host_ip:
                     continue
