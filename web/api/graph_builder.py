@@ -1,7 +1,7 @@
 """Graph data builder for Cytoscape.js visualization."""
 
 import sqlite3
-from typing import Dict, List
+from typing import Dict, List, Optional, Set
 from core.database.storage import DatabaseManager
 
 
@@ -11,10 +11,13 @@ class GraphBuilder:
     def __init__(self, db_manager: DatabaseManager):
         self.db = db_manager
     
-    def build_graph(self) -> Dict:
+    def build_graph(self, active_targets: Optional[List[str]] = None) -> Dict:
         """Build complete graph with nodes and edges for Cytoscape.js.
         
-        Hierarchy: Target / Root Query (alvo.com) -> Subdomains & IPs -> Services -> Vulnerabilities
+        Host-Centric Architecture:
+        - Target Root connects directly to Host IPs via CONTAINS_TARGET
+        - Explicit FQDN targets connect to Target Root (CONTAINS_TARGET) and IP (RESOLVES_TO)
+        - All enumerated domains/subdomains are embedded as rich metadata in target_root
         """
         nodes = []
         edges = []
@@ -31,15 +34,26 @@ class GraphBuilder:
             except Exception:
                 pass
 
-            # 2. Build domain & subdomain nodes
-            domain_nodes, domain_edges, root_target_node, subdomain_to_ips, domain_to_ips = self._build_domain_nodes(conn, target_name, target_type)
+            # 2. Build domain & subdomain nodes (only explicit targets spawned as graph nodes)
+            domain_nodes, domain_edges, root_target_node, subdomain_to_ips, domain_to_ips = self._build_domain_nodes(
+                conn, target_name, target_type, active_targets=active_targets
+            )
             if root_target_node:
                 nodes.append(root_target_node)
             nodes.extend(domain_nodes)
             edges.extend(domain_edges)
             
-            # 3. Build IP nodes connected to subdomains/domains (or target root)
-            ip_nodes, ip_edges = self._build_ip_nodes(conn, subdomain_to_ips, domain_to_ips, root_target_node)
+            # 3. Build IP nodes connected to target root
+            spawned_fqdn_ids = {n["data"]["id"] for n in domain_nodes}
+            ip_nodes, ip_edges = self._build_ip_nodes(
+                conn,
+                subdomain_to_ips,
+                domain_to_ips,
+                spawned_fqdn_ids=spawned_fqdn_ids,
+                target_name=target_name,
+                target_type=target_type,
+                root_target_node=root_target_node
+            )
             nodes.extend(ip_nodes)
             edges.extend(ip_edges)
             
@@ -60,31 +74,33 @@ class GraphBuilder:
             }
         }
     
-    def _build_domain_nodes(self, conn: sqlite3.Connection, target_name: str | None = None, target_type: str | None = None) -> tuple[List[Dict], List[Dict], Dict | None, Dict[str, set]]:
-        """Build domain and subdomain nodes with hierarchy Root Domain -> Subdomains."""
+    def _build_domain_nodes(
+        self,
+        conn: sqlite3.Connection,
+        target_name: str | None = None,
+        target_type: str | None = None,
+        active_targets: Optional[List[str]] = None
+    ) -> tuple[List[Dict], List[Dict], Dict | None, Dict[str, set], Dict[str, set]]:
+        """Build domain and subdomain inventory and spawn nodes ONLY for explicit targets."""
         nodes = []
         edges = []
         root_target_node = None
         
         # Get all domains
         cursor = conn.execute("SELECT id, name FROM domains ORDER BY name")
-        processed_domains = set()
         domains_list = cursor.fetchall()
         
-        # 1. Create a dedicated Target Root Node for the query/target that generated the entire scan (Always anchors the graph)
         targets_list = []
         explicit_targets = set()
         if target_name:
-            # If target_type is file or list, retrieve the exact targets from the input file on disk
             if target_type == "file":
                 from pathlib import Path
                 clean_path = str(target_name).strip()
                 file_obj = Path(clean_path)
-                if not file_obj.is_absolute():
-                    if not file_obj.exists():
-                        candidate = Path.cwd() / clean_path
-                        if candidate.exists():
-                            file_obj = candidate
+                if not file_obj.is_absolute() and not file_obj.exists():
+                    candidate = Path.cwd() / clean_path
+                    if candidate.exists():
+                        file_obj = candidate
                 
                 if file_obj.exists() and file_obj.is_file():
                     try:
@@ -92,7 +108,6 @@ class GraphBuilder:
                     except Exception:
                         pass
                 
-                # Fallback if file was moved or not found on disk:
                 if not targets_list:
                     cursor_ips = conn.execute("SELECT ip FROM ip_addresses ORDER BY ip")
                     file_ips = [r[0] for r in cursor_ips.fetchall()]
@@ -112,6 +127,11 @@ class GraphBuilder:
                 return t
 
             explicit_targets = {_normalize_target_item(t) for t in targets_list if _normalize_target_item(t)}
+            if active_targets:
+                for at in active_targets:
+                    norm = _normalize_target_item(at)
+                    if norm:
+                        explicit_targets.add(norm)
 
             root_target_node = {
                 "data": {
@@ -125,368 +145,119 @@ class GraphBuilder:
                 }
             }
 
-        is_file_target = (target_type == "file" or bool(targets_list and len(targets_list) > 1))
-        direct_target_subdomains = set()
-
-        # Determine in-scope target roots
-        target_scopes = set()
-        if explicit_targets:
-            for item in explicit_targets:
-                if "." in item and not item.replace(".", "").isdigit():
-                    try:
-                        import tldextract
-                        ext = tldextract.extract(item)
-                        if ext.registered_domain:
-                            target_scopes.add(ext.registered_domain.lower())
-                    except Exception:
-                        pass
-                    target_scopes.add(item.lower())
-        elif target_name:
-            t_clean = target_name.strip().lower()
-            if "." in t_clean and not t_clean.replace(".", "").isdigit():
-                try:
-                    import tldextract
-                    ext = tldextract.extract(t_clean)
-                    if ext.registered_domain:
-                        target_scopes.add(ext.registered_domain.lower())
-                except Exception:
-                    pass
-                target_scopes.add(t_clean)
-
-        def _is_in_scope(h: str) -> bool:
-            if not target_scopes:
-                return True
-            h_clean = h.strip().lower()
-            return any(h_clean == s or h_clean.endswith(f".{s}") for s in target_scopes)
-
-        # Filter out out-of-scope third party domains (like rdstation, aramado, cloudfront, etc.)
-        if target_scopes:
-            domains_list = [d for d in domains_list if _is_in_scope(d[1])]
-
-        # 2. Add domain nodes (Domains discovered during the scan)
-        for domain_id, domain_name in domains_list:
-            dname_lower = domain_name.lower()
-            is_main_domain = bool(target_name and (dname_lower == target_name.lower() or target_name.lower().endswith(f".{dname_lower}")))
-            node_data = {
-                "id": f"dom_{domain_id}",
-                "label": domain_name,
-                "type": "domain",
-                "name": domain_name,
-                "is_root": is_main_domain
-            }
-            nodes.append({"data": node_data})
-            processed_domains.add(domain_id)
-
-            # Connect Target Root -> Domain (if domain was explicitly in targets_list or matches a domain query)
-            if root_target_node:
-                if is_file_target and explicit_targets:
-                    if dname_lower in explicit_targets or (target_scopes and dname_lower in target_scopes):
-                        edges.append({
-                            "data": {
-                                "id": f"e_target_dom_{domain_id}",
-                                "source": "target_root",
-                                "target": f"dom_{domain_id}",
-                                "label": "MATCHES_DOMAIN"
-                            }
-                        })
-                elif target_scopes:
-                    # Domain target query (e.g. example.com)
-                    if dname_lower in target_scopes or is_main_domain:
-                        edges.append({
-                            "data": {
-                                "id": f"e_target_dom_{domain_id}",
-                                "source": "target_root",
-                                "target": f"dom_{domain_id}",
-                                "label": "MATCHES_DOMAIN"
-                            }
-                        })
-                elif not (target_name and (target_name.startswith("org:") or target_name.startswith("asn:"))):
-                    edges.append({
-                        "data": {
-                            "id": f"e_target_dom_{domain_id}",
-                            "source": "target_root",
-                            "target": f"dom_{domain_id}",
-                            "label": "MATCHES_DOMAIN"
-                        }
-                    })
-        
-        # Get all subdomains with their domain mappings and IP connections
-        cursor = conn.execute("""
-            SELECT DISTINCT s.id, s.name, s.domain_id, d.name as domain_name,
-                   si.ip_id, ip.ip
+        # Query all subdomains and their resolved IPs
+        cursor_subs = conn.execute("""
+            SELECT s.id, s.name, s.domain_id, d.name as domain_name, si.ip_id, ip.ip
             FROM subdomains s
             JOIN domains d ON s.domain_id = d.id
             LEFT JOIN subdomain_ips si ON s.id = si.subdomain_id
             LEFT JOIN ip_addresses ip ON si.ip_id = ip.id
-            ORDER BY s.name
+            ORDER BY s.name ASC
         """)
         
-        processed_subdomains = set()
-        subdomain_to_ips = {}
-        domain_to_ips = {}
-        subdomain_records = []
+        subdomain_to_ips: Dict[str, set] = {}
+        domain_to_ips: Dict[str, set] = {}
+        subdomain_info_map: Dict[str, Dict] = {}
         
-        for row in cursor.fetchall():
-            sub_id, sub_name, domain_id, domain_name, ip_id, ip_address = row
-            
-            # Filter out out-of-scope subdomains
-            if target_scopes and (not _is_in_scope(sub_name) or not _is_in_scope(domain_name)):
-                continue
-
-            # If sub_name is the root domain itself (e.g. example.com == example.com), do not create duplicate subdomain node
-            if sub_name.strip().lower() == domain_name.strip().lower():
-                if ip_id and ip_address:
+        for sub_id, sub_name, domain_id, domain_name, ip_id, ip_addr in cursor_subs.fetchall():
+            is_apex = (sub_name.strip().lower() == domain_name.strip().lower())
+            if ip_id:
+                subdomain_to_ips.setdefault(sub_id, set()).add(ip_id)
+                if is_apex:
                     domain_to_ips.setdefault(domain_id, set()).add(ip_id)
-                continue
 
-            # Add subdomain node if not already added
-            if sub_id not in processed_subdomains:
-                nodes.append({
-                    "data": {
-                        "id": f"sub_{sub_id}",
-                        "label": sub_name,
-                        "type": "subdomain",
+            if not is_apex:
+                if sub_id not in subdomain_info_map:
+                    subdomain_info_map[sub_id] = {
+                        "id": sub_id,
                         "name": sub_name,
                         "domain_id": domain_id,
-                        "domain_name": domain_name
+                        "domain_name": domain_name,
+                        "ips": []
                     }
-                })
-                processed_subdomains.add(sub_id)
-                subdomain_records.append((sub_id, sub_name, domain_id, domain_name))
+                if ip_addr and ip_addr not in subdomain_info_map[sub_id]["ips"]:
+                    subdomain_info_map[sub_id]["ips"].append(ip_addr)
 
-                # Check if this subdomain is an explicit target from the input file/list
-                if is_file_target and explicit_targets and sub_name.lower() in explicit_targets:
-                    direct_target_subdomains.add(sub_id)
-                    if root_target_node:
-                        edges.append({
-                            "data": {
-                                "id": f"e_target_sub_{sub_id}",
-                                "source": "target_root",
-                                "target": f"sub_{sub_id}",
-                                "label": "TARGET_SUBDOMAIN"
-                            }
-                        })
-            
-            # Keep track of Subdomain -> IP relationships
-            if ip_id and ip_address:
-                if sub_id not in subdomain_to_ips:
-                    subdomain_to_ips[sub_id] = set()
-                subdomain_to_ips[sub_id].add(ip_id)
-        
-        # Subdomains that don't have IP mappings yet
-        cursor = conn.execute("""
-            SELECT s.id, s.name, s.domain_id, d.name as domain_name
-            FROM subdomains s
-            JOIN domains d ON s.domain_id = d.id
-            WHERE s.id NOT IN (
-                SELECT DISTINCT subdomain_id FROM subdomain_ips WHERE subdomain_id IS NOT NULL
-            )
-            ORDER BY s.name
-        """)
-        
-        for sub_id, sub_name, domain_id, domain_name in cursor.fetchall():
-            if target_scopes and (not _is_in_scope(sub_name) or not _is_in_scope(domain_name)):
-                continue
+        all_domains = [{"id": d[0], "name": d[1]} for d in domains_list]
+        all_subdomains = list(subdomain_info_map.values())
 
-            if sub_name.strip().lower() == domain_name.strip().lower():
-                continue
+        # Embed complete DNS inventory inside target_root for instant Asset Inspector access
+        if root_target_node:
+            root_target_node["data"]["all_domains"] = all_domains
+            root_target_node["data"]["all_subdomains"] = all_subdomains
+            root_target_node["data"]["total_domains"] = len(all_domains)
+            root_target_node["data"]["total_subdomains"] = len(all_subdomains)
 
-            if sub_id not in processed_subdomains:
-                nodes.append({
-                    "data": {
-                        "id": f"sub_{sub_id}",
-                        "label": sub_name,
-                        "type": "subdomain",
-                        "name": sub_name,
-                        "domain_id": domain_id,
-                        "domain_name": domain_name
-                    }
-                })
-                processed_subdomains.add(sub_id)
-                subdomain_records.append((sub_id, sub_name, domain_id, domain_name))
-
-                if is_file_target and explicit_targets and sub_name.lower() in explicit_targets:
-                    direct_target_subdomains.add(sub_id)
-                    if root_target_node:
-                        edges.append({
-                            "data": {
-                                "id": f"e_target_sub_{sub_id}",
-                                "source": "target_root",
-                                "target": f"sub_{sub_id}",
-                                "label": "TARGET_SUBDOMAIN"
-                            }
-                        })
-
-        # If a file target had domains but none matched explicitly, connect them to target_root
-        if is_file_target and root_target_node:
-            connected_targets = {e["data"]["target"] for e in edges if e["data"]["source"] == "target_root"}
-            if not connected_targets:
-                for domain_id, _ in domains_list:
-                    edges.append({
-                        "data": {
-                            "id": f"e_target_dom_{domain_id}",
-                            "source": "target_root",
-                            "target": f"dom_{domain_id}",
-                            "label": "MATCHES_DOMAIN"
-                        }
-                    })
-
-        # 3. Build Multi-Level FQDN Tree Hierarchy
-        # Map all known domain and subdomain names to their node IDs
-        fqdn_to_node_id = {}
+        # 2. Spawn Graph Nodes ONLY for FQDNs that were explicitly marked / scanned as targets
         for domain_id, domain_name in domains_list:
-            fqdn_to_node_id[domain_name.lower()] = f"dom_{domain_id}"
-        for sub_id, sub_name, domain_id, domain_name in subdomain_records:
-            fqdn_to_node_id[sub_name.lower()] = f"sub_{sub_id}"
+            dname_lower = domain_name.lower()
+            if dname_lower in explicit_targets:
+                node_data = {
+                    "id": f"dom_{domain_id}",
+                    "label": domain_name,
+                    "type": "domain",
+                    "name": domain_name,
+                    "is_target": True,
+                    "is_root": False
+                }
+                nodes.append({"data": node_data})
+                if root_target_node:
+                    edges.append({"data": {"id": f"e_target_dom_{domain_id}", "source": "target_root", "target": f"dom_{domain_id}", "label": "CONTAINS_TARGET"}})
 
-        # Ensure every explicit domain/subdomain target from input file exists as a node directly under target_root
-        if is_file_target and explicit_targets and root_target_node:
-            for item in explicit_targets:
-                item_clean = item.strip().lower()
-                if item_clean not in fqdn_to_node_id:
-                    # If it has dots and is not a plain IP
-                    if "." in item_clean and not item_clean.replace(".", "").isdigit():
-                        try:
-                            import tldextract
-                            ext = tldextract.extract(item_clean)
-                            reg_dom = ext.registered_domain
-                        except Exception:
-                            reg_dom = item_clean
-                        
-                        is_sub = bool(reg_dom and item_clean != reg_dom)
-                        node_type = "subdomain" if is_sub else "domain"
-                        node_id = f"target_item_{abs(hash(item_clean)) % 10000000}"
-                        fqdn_to_node_id[item_clean] = node_id
-                        
-                        nodes.append({
-                            "data": {
-                                "id": node_id,
-                                "label": item_clean,
-                                "type": node_type,
-                                "name": item_clean,
-                                "is_root": False
-                            }
-                        })
-                        edges.append({
-                            "data": {
-                                "id": f"e_target_root_{node_id}",
-                                "source": "target_root",
-                                "target": node_id,
-                                "label": "TARGET_SUBDOMAIN" if is_sub else "MATCHES_DOMAIN"
-                            }
-                        })
-                        if is_sub:
-                            direct_target_subdomains.add(node_id)
+        for sub_id, sub_info in subdomain_info_map.items():
+            sname_lower = sub_info["name"].lower()
+            if sname_lower in explicit_targets:
+                node_data = {
+                    "id": f"sub_{sub_id}",
+                    "label": sub_info["name"],
+                    "type": "subdomain",
+                    "name": sub_info["name"],
+                    "domain_id": sub_info["domain_id"],
+                    "domain_name": sub_info["domain_name"],
+                    "is_target": True
+                }
+                nodes.append({"data": node_data})
+                if root_target_node:
+                    edges.append({"data": {"id": f"e_target_sub_{sub_id}", "source": "target_root", "target": f"sub_{sub_id}", "label": "CONTAINS_TARGET"}})
 
-        # Connect each subdomain to its closest parent in the FQDN hierarchy
-        for sub_id, sub_name, domain_id, domain_name in subdomain_records:
-            # If this subdomain was explicitly connected directly to target_root as a top-level target, don't nest it under domain
-            if sub_id in direct_target_subdomains:
-                continue
-
-            sname_clean = sub_name.lower().strip()
-            parts = sname_clean.split(".")
-            parent_node_id = None
-
-            # Look for closest parent by peeling off sub-labels from left to right
-            # e.g., api.dev.example.com -> dev.example.com -> example.com
-            for i in range(1, len(parts)):
-                parent_candidate = ".".join(parts[i:])
-                if parent_candidate in fqdn_to_node_id and fqdn_to_node_id[parent_candidate] != f"sub_{sub_id}":
-                    parent_node_id = fqdn_to_node_id[parent_candidate]
-                    break
-
-            # Fallback to direct domain parent if no intermediate subdomain ancestor was found
-            if not parent_node_id or parent_node_id == f"sub_{sub_id}":
-                if domain_name.lower() in fqdn_to_node_id and fqdn_to_node_id[domain_name.lower()] != f"sub_{sub_id}":
-                    parent_node_id = fqdn_to_node_id[domain_name.lower()]
-                else:
-                    parent_node_id = f"dom_{domain_id}"
-
-            # Only append edge if source and target are distinct (no self-loops)
-            if parent_node_id and parent_node_id != f"sub_{sub_id}":
-                edges.append({
-                    "data": {
-                        "id": f"e_tree_{parent_node_id}_sub_{sub_id}",
-                        "source": parent_node_id,
-                        "target": f"sub_{sub_id}",
-                        "label": "HAS_SUBDOMAIN"
-                    }
-                })
-        
         return nodes, edges, root_target_node, subdomain_to_ips, domain_to_ips
     
-    def _build_ip_nodes(self, conn: sqlite3.Connection, subdomain_to_ips: Dict[str, set], domain_to_ips: Dict[str, set], root_target_node: Dict | None) -> tuple[List[Dict], List[Dict]]:
-        """Build IP nodes, Organization/ASN network clusters, and hierarchy edges."""
+    def _build_ip_nodes(
+        self,
+        conn: sqlite3.Connection,
+        subdomain_to_ips: Dict[str, set],
+        domain_to_ips: Dict[str, set],
+        spawned_fqdn_ids: Optional[Set[str]] = None,
+        target_name: Optional[str] = None,
+        target_type: Optional[str] = None,
+        targets_list: Optional[List[str]] = None,
+        root_target_node: Optional[Dict] = None
+    ) -> tuple[List[Dict], List[Dict]]:
         nodes = []
         edges = []
-        
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(ip_addresses)").fetchall()]
-        has_geo = "latitude" in cols and "longitude" in cols
-        has_post = "postal_code" in cols
-        
-        select_geo = ", latitude, longitude" if has_geo else ", NULL as latitude, NULL as longitude"
-        select_post = ", postal_code" if has_post else ", NULL as postal_code"
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(ip_addresses)").fetchall()}
+        select_post = ", postal_code" if "postal_code" in cols else ", '' as postal_code"
+        select_geo = ", latitude, longitude" if ("latitude" in cols and "longitude" in cols) else ", NULL as latitude, NULL as longitude"
 
         cursor = conn.execute(f"""
             SELECT id, ip, org, country, city, region_code, asn {select_post} {select_geo}
             FROM ip_addresses
         """)
-        
         ip_rows = cursor.fetchall()
+
+        cursor_fqdns = conn.execute("""
+            SELECT DISTINCT si.ip_id, s.name
+            FROM subdomain_ips si
+            JOIN subdomains s ON si.subdomain_id = s.id
+            ORDER BY LENGTH(s.name) ASC, s.name ASC
+        """)
+        ip_to_fqdns: Dict[str, List[str]] = {}
+        for ip_id, fqdn in cursor_fqdns.fetchall():
+            if fqdn:
+                ip_to_fqdns.setdefault(str(ip_id), []).append(fqdn)
         
-        # 1. Build Organization / ASN Network Cluster Nodes
-        # Extract unique (asn, org) pairs across all IPs
-        net_cluster_map = {}  # (asn, org) -> net_node_id
-        for _, _, org, _, _, _, asn, _, _, _ in ip_rows:
-            clean_asn = str(asn).strip() if asn else ""
-            clean_org = str(org).strip() if org else ""
-            if clean_asn.lower() == "unknown":
-                clean_asn = ""
-            if clean_org.lower() == "unknown":
-                clean_org = ""
-            
-            if clean_asn or clean_org:
-                net_key = (clean_asn, clean_org)
-                if net_key not in net_cluster_map:
-                    cluster_slug = f"{clean_asn}_{clean_org}".replace(" ", "_").replace("/", "_").replace(":", "_")
-                    net_id = f"net_{abs(hash(cluster_slug)) % 10000000}"
-                    net_cluster_map[net_key] = net_id
-                    
-                    if clean_org and clean_asn:
-                        net_label = f"{clean_org}\n({clean_asn})"
-                    elif clean_org:
-                        net_label = clean_org
-                    else:
-                        net_label = clean_asn
-
-                    nodes.append({
-                        "data": {
-                            "id": net_id,
-                            "label": net_label,
-                            "type": "network",
-                            "name": clean_org or clean_asn,
-                            "org": clean_org,
-                            "asn": clean_asn,
-                            "is_root": False
-                        }
-                    })
-
-                    # Connect Target Root -> Organization / ASN (MATCHES_ORG / MATCHES_ASN)
-                    if root_target_node:
-                        edge_label = "MATCHES_ORG" if clean_org else "MATCHES_ASN"
-                        edges.append({
-                            "data": {
-                                "id": f"e_root_net_{net_id}",
-                                "source": "target_root",
-                                "target": net_id,
-                                "label": edge_label
-                            }
-                        })
-
-        # 2. Build IP Nodes and connect to ASN / Org networks
-        connected_ips = set()
         for ip_id, ip, org, country, city, region_code, asn, postal_code, latitude, longitude in ip_rows:
+            fqdns = ip_to_fqdns.get(str(ip_id), [])
             nodes.append({
                 "data": {
                     "id": f"ip_{ip_id}",
@@ -500,70 +271,36 @@ class GraphBuilder:
                     "postal_code": postal_code or "",
                     "latitude": latitude,
                     "longitude": longitude,
-                    "asn": asn or "Unknown"
+                    "asn": asn or "Unknown",
+                    "fqdns": fqdns,
+                    "fqdn_count": len(fqdns)
                 }
             })
 
-            # Connect IP -> Organization / ASN (BELONGS_TO)
-            clean_asn = str(asn).strip() if asn else ""
-            clean_org = str(org).strip() if org else ""
-            if clean_asn.lower() == "unknown":
-                clean_asn = ""
-            if clean_org.lower() == "unknown":
-                clean_org = ""
-            net_key = (clean_asn, clean_org)
-            if net_key in net_cluster_map:
-                net_id = net_cluster_map[net_key]
+            # Every Host IP directly relates to target_root via CONTAINS_TARGET
+            if root_target_node:
                 edges.append({
                     "data": {
-                        "id": f"e_ip_net_{ip_id}_{net_id}",
-                        "source": f"ip_{ip_id}",
-                        "target": net_id,
-                        "label": "BELONGS_TO"
-                    }
-                })
-                connected_ips.add(ip_id)
-        
-        # 3. Connect Subdomains -> IPs (RESOLVES_TO) from verified DNS resolutions
-        for sub_id, ip_ids in subdomain_to_ips.items():
-            for ip_id in ip_ids:
-                edges.append({
-                    "data": {
-                        "id": f"e_sub_ip_{sub_id}_{ip_id}",
-                        "source": f"sub_{sub_id}",
+                        "id": f"e_root_ip_{ip_id}",
+                        "source": "target_root",
                         "target": f"ip_{ip_id}",
-                        "label": "RESOLVES_TO"
+                        "label": "CONTAINS_TARGET"
                     }
                 })
-                connected_ips.add(ip_id)
-
-        # 4. Connect Domains -> IPs (RESOLVES_TO for root domain resolutions)
-        if domain_to_ips:
-            for dom_id, ip_ids in domain_to_ips.items():
-                for ip_id in ip_ids:
-                    edges.append({
-                        "data": {
-                            "id": f"e_dom_ip_{dom_id}_{ip_id}",
-                            "source": f"dom_{dom_id}",
-                            "target": f"ip_{ip_id}",
-                            "label": "RESOLVES_TO"
-                        }
-                    })
-                    connected_ips.add(ip_id)
         
-        # 5. Connect any remaining completely unlinked IPs directly to target_root (CONTAINS_IP)
-        if root_target_node:
-            for ip_id, ip, org, _, _, _, asn, _, _, _ in ip_rows:
-                if ip_id not in connected_ips:
-                    edges.append({
-                        "data": {
-                            "id": f"e_root_ip_{ip_id}",
-                            "source": "target_root",
-                            "target": f"ip_{ip_id}",
-                            "label": "CONTAINS_IP"
-                        }
-                    })
-                    connected_ips.add(ip_id)
+        # Connect Explicit FQDN targets -> IPs (RESOLVES_TO) ONLY if the node exists in graph
+        fqdn_set = spawned_fqdn_ids or set()
+        for sub_id, ip_ids in subdomain_to_ips.items():
+            sub_node_id = f"sub_{sub_id}"
+            if sub_node_id in fqdn_set:
+                for ip_id in ip_ids:
+                    edges.append({"data": {"id": f"e_sub_ip_{sub_id}_{ip_id}", "source": sub_node_id, "target": f"ip_{ip_id}", "label": "RESOLVES_TO"}})
+
+        for dom_id, ip_ids in domain_to_ips.items():
+            dom_node_id = f"dom_{dom_id}"
+            if dom_node_id in fqdn_set:
+                for ip_id in ip_ids:
+                    edges.append({"data": {"id": f"e_dom_ip_{dom_id}_{ip_id}", "source": dom_node_id, "target": f"ip_{ip_id}", "label": "RESOLVES_TO"}})
         
         return nodes, edges
     

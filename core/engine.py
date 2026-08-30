@@ -474,11 +474,27 @@ class ThreatTrackEngine:
 
             resolve_results = await asyncio.gather(*[_resolve_subdomain(s) for s in discovered_subdomains])
             
+            # Authoritative IP Target Gating: If target is a direct IP, only accept domains whose live DNS resolves back to target IP!
+            is_ip_scan = (target_type == "ip")
+            target_ip_clean = clean_target if is_ip_scan else None
+
             for sub, ips in resolve_results:
                 if ips:
+                    # In an IP scan, if the resolved IPs do NOT include the target IP, this domain has migrated elsewhere
+                    if is_ip_scan and target_ip_clean and target_ip_clean not in ips:
+                        # Drop foreign domain findings to keep attack surface strict and prevent third-party noise
+                        for sub_finding in subdomain_finding_refs.get(sub, []):
+                            if sub_finding in raw_recon_findings:
+                                raw_recon_findings.remove(sub_finding)
+                        continue
+
                     for ip in ips:
                         # Scope enforcement: If target is an Organization or ASN, ignore foreign resolved IPs!
                         if (target_org or target_asn) and ip not in initial_org_ips:
+                            continue
+                        
+                        # In IP scan, only inject host info for the target IP itself
+                        if is_ip_scan and target_ip_clean and ip != target_ip_clean:
                             continue
 
                         raw_recon_findings.append(

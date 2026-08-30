@@ -135,9 +135,10 @@ flowchart TD
    - **ExploitDB (searchsploit)**: Matches CVEs against local exploit scripts, PoCs, and shellcodes with verification tags.
    - **GitHub PoC Intelligence**: Queries real-world public exploit repositories and verification status.
 
-8. **Stage 4: Graph Modeling & Relational Synthesis**:
-   - Binds assets into a structured, multi-tiered semantic hierarchical DAG topology:
-     $$\text{TARGET\_ROOT} \xrightarrow{\text{MATCHES\_ORG / MATCHES\_DOMAIN}} \text{ORG / ASN / DOMAIN} \xrightarrow{\text{BELONGS\_TO / HAS\_SUBDOMAIN}} \text{IPs / SUBDOMAINS} \xrightarrow{\text{EXPOSES}} \text{SERVICES} \xrightarrow{\text{HAS\_VULN}} \text{CVEs}$$
+8. **Stage 4: Graph Modeling & Relational Synthesis (Host-Centric & Target-Driven)**:
+   - Binds assets into a streamlined, high-performance attack chain topology:
+     $$\text{TARGET\_ROOT} \xrightarrow{\text{CONTAINS\_TARGET}} \text{HOST IPs / FQDN TARGETS} \xrightarrow{\text{EXPOSES / RESOLVES\_TO}} \text{SERVICES} \xrightarrow{\text{HAS\_VULN}} \text{CVEs}$$
+   - Enumerated passive domains and subdomains are embedded directly into the `target_root` searchable inventory and within Host IP metadata badges (`🌐 N FQDNs`), liberating canvas space and boosting rendering performance.
 
 9. **Stage 5: Persistence & Presentation**:
    - Stores all relationships in a relational SQLite database with auto-migration support.
@@ -168,11 +169,21 @@ flowchart TD
   - **Source Provenance Tracking**: Clear visibility of where each vulnerability was identified (`Nuclei`, `NVD`, etc.) in all graph views, node inspectors, and Risk Metrics accordions.
 - **💻 Interactive & Fully Responsive Web Dashboard (DetecTIHound)**:
   - Asynchronous FastAPI web server rendering rich EASM network graphs with Cytoscape.js.
-  - **Strict Attack Path Isolation in Filtering**: When applying risk or vulnerability filters (Critical, CISA KEV, High EPSS, 3D Risk Matrix), the graph isolates the exact single-lineage attack path (`Target Root ──► ASN ──► Host IP ──► Service / Port ──► CVE`), pruning 100% of unrelated sibling subdomains, non-vulnerable IPs, and background noise.
+  - **Host-Centric & Target-Driven Architecture**:
+    - **Clean Attack Chain**: Direct topological flow from `Target Root ──(CONTAINS_TARGET)──► Host IPs ──(EXPOSES)──► Services ──(HAS_VULN)──► CVEs`.
+    - **Asset Inspector DNS Inventories**: Clicking the `target_root` anchor displays complete searchable accordions for `🌐 Enumerated Domains (X)` and `🏷️ Enumerated Subdomains (Y)` with instant filtering, copy controls, and 1-click **`Set as Target (FQDN)`** actions.
+    - **On-Demand FQDN Materialization**: Marking an FQDN as an active scan target materializes it on the canvas (`Target Root ──(CONTAINS_TARGET)──► FQDN ──(RESOLVES_TO)──► Host IP`).
+    - **Compact IP Badges**: Host IPs display clean metadata chips (`🌐 N FQDNs`) with expandable Virtual Hosts in the Asset Inspector.
+  - **Lead Selector Zero-Render Default & Smart Scan Preservation**:
+    - **Clean Initial Load**: On database load or database switch, leads start unchecked by default with an empty canvas ready for tactical query exploration.
+    - **Real-Time Post-Scan Preservation**: When active scans (Masscan / Nuclei) complete, active lead selections are preserved seamlessly so newly discovered open ports, services, and CVEs appear on screen without resetting analyst workflow.
+  - **Strict Attack Path Isolation in Filtering**: When applying risk or vulnerability filters (Critical, CISA KEV, High EPSS, 3D Risk Matrix), the graph isolates the exact single-lineage attack path (`Target Root ──► Host IP ──► Service / Port ──► CVE`), pruning 100% of non-vulnerable IPs and background noise.
   - **Bidirectional Inspector Navigation**:
-    - Inspecting a **Domain / Subdomain** displays its **Resolved IP** with a 1-click `[ ⌖ Focus ]` crosshair button.
-    - Inspecting a **Host IP** displays all active **Resolving Domains / Hosts** with dedicated focus buttons.
-  - **Multi-Tiered Semantic Hierarchical DAG Layout**: 6-tier vertical topological layout arranging Root Query $\rightarrow$ Org/ASN $\rightarrow$ Host IPs $\rightarrow$ Subdomains $\rightarrow$ Ports/Services $\rightarrow$ CVEs/PoCs, with multi-row matrix fan-out for dense enterprise ASN IP blocks.
+    - Inspecting a **Host IP** displays all active **Associated FQDNs & Virtual Hosts** with dedicated focus and filter buttons.
+    - Inspecting an **FQDN Target** displays its **Resolved IP** with a 1-click `[ ⌖ Focus ]` crosshair button.
+  - **Hierarchical (Left-Right, Default) DAG Layout**:
+    - Left-to-Right orientation flowing from `Target Root (x=0)` $\rightarrow$ `FQDN Targets / Host IPs (x=280)` $\rightarrow$ `Services (x=IP.x+110)` $\rightarrow$ `CVEs (x=Srv.x+80)`.
+    - Matrix grid supporting up to 9 Host IPs per vertical column with dynamic clearance to eliminate node overlap across large enterprise ranges.
   - **Retractable Filters & Controls Drawer**: Smoothly collapse the left sidebar to liberate 100% of the screen for graph exploration across all desktop and mobile devices.
   - **Clean & Focused Asset Inspector**: Dedicated strictly to technical metadata, CWE descriptions, affected ports, IP geolocation, associated domains, weaponized exploit URLs, banner metadata, and explicit vulnerability **Source** attribution.
   - **Intuitive Mouse Navigation & Node Organization**:
@@ -182,8 +193,6 @@ flowchart TD
     - **Right-Click (Node)**: Custom Context Menu to Collapse/Uncollapse Services or Vulnerabilities, Set/Remove Targets (IPs and FQDNs), Remove Verified Active, Focus Node, or Copy Domain/IP/CVE identifiers.
     - **Right-Click (Drag)**: Box area selection to group and reposition multiple nodes together.
     - **Smooth Scroll Wheel**: Seamless zoom in/out centered directly at the cursor position.
-  - **Retractable Filters & Controls Drawer**: Smoothly collapse the left sidebar to liberate 100% of the screen for graph exploration across all desktop and mobile devices.
-  - **Clean & Focused Asset Inspector**: Dedicated strictly to technical metadata, CWE descriptions, affected ports, IP geolocation, associated domains, weaponized exploit URLs, banner metadata, and explicit vulnerability **Source** attribution.
   - **Granular Graph Filters**:
     - `CISA KEV (Known Exploited)`
     - `High EPSS (>50% Exploit Probability)`
@@ -194,10 +203,10 @@ flowchart TD
     - `Exposed Services Branches`
     - `Verified Active Services Only`
     - `Vulnerable Services Only`
-  - **Visual Topology & Semantic Relationships**: Interactive graph engine with distinct node geometry, high-contrast colors (Electric Purple root query anchor, Royal Blue ASN octagons, deep blue domains, turquoise subdomains, purple IPs, orange/green service hexagons, red CVE diamonds, and crimson CISA KEV highlights), and directed relationship edges.
+  - **Visual Topology & Semantic Relationships**: Interactive graph engine with distinct node geometry, high-contrast colors (Electric Purple root query anchor, turquoise FQDN targets, purple IPs, orange/green service hexagons, red CVE diamonds, and crimson CISA KEV highlights), and directed relationship edges.
   - **Dynamic Database Switcher**: Seamlessly switch between any saved SQLite databases without server restart (including a rich pre-packaged demo dataset in `example.com.sqlite`).
   - **Export Data Menu**: One-click download of active scan data in **JSON**, **Executive Markdown**, and **Standalone HTML** formats.
-  - **Floating Action Controls**: Instant access to `📐 Fit to Screen`, `🔍 Reset Zoom`, `🔄 Re-layout`, and **Layout Selector** (`🌳 Hierarchical (Top-Down, Default)`, `🌐 Force-Directed`, `🎯 Concentric`, `▦ Grid`).
+  - **Floating Action Controls**: Instant access to `📐 Fit to Screen`, `🔍 Reset Zoom`, `🔄 Re-layout`, and **Layout Selector** (`🌳 Hierarchical (Left-Right, Default)`, `🌐 Force-Directed`, `🎯 Concentric`, `▦ Grid`).
   - **Smart Collapsible Clusters (High Fan-Out Optimization)**: Group high-density services or vulnerabilities into clean, collapsible cluster nodes with a dashed border.
 - **🎯 Target Management & High-Speed Active Port Scanning (Masscan)**:
   - **Hybrid IP & FQDN Target Scanning**:
@@ -207,8 +216,8 @@ flowchart TD
       - **Existing IP**: If the resolved IP already exists on the graph but was disconnected or linked elsewhere, the direct **`RESOLVES_TO`** edge is automatically created and rendered connecting the FQDN to that IP.
       - **Service Port Sync**: Existing passive ports on that IP are promoted to **`Confirmed Active`** (with `"Masscan"` appended to sources), and newly discovered active ports are dynamically created under the host IP.
     - **Multi-Source Strict Service Deduplication**: Prevents duplicate service entries per `(IP, Port, Protocol)` across passive recon and active scanning. Merges sources (`Shodan`, `Censys`, `Masscan`, `Nuclei`), enriches banners and version details, and ensures a clean 1:1 service port visualization in Cytoscape.
-    - **Right-Click Target Marking & Bulk Selection**: Mark/unmark any individual `IP Address`, `Domain`, or `Subdomain` node as a scan target directly from the Cytoscape graph context menu (**Set as Target** / **Remove Target**).
-    - **Bulk Target Addition on Root Nodes**: Right-click on any `Organization`, `Network / ASN`, `Target Root`, or `Domain` node to instantly mark or unmark **all associated descendant IPs** as scan targets in a single click (**Set all N IPs as Targets** / **Remove all N IPs from Targets**).
+    - **Right-Click Target Marking & Bulk Selection**: Mark/unmark any individual `IP Address`, `Domain`, or `Subdomain` node as a scan target directly from the Cytoscape graph context menu (**Set as Target** / **Remove Target**). (Note: The abstract `target_root` node cannot be marked as an individual scan target).
+    - **Bulk Target Addition on Root Nodes**: Right-click on any `Domain` or parent node to instantly mark or unmark **all associated descendant IPs** as scan targets in a single click (**Set all N IPs as Targets** / **Remove all N IPs from Targets**).
   - **Active Verification Reset (Remove Verified Active)**: Right-click individual active services or parent root nodes to reset active verification back to passive status for targeted re-scans without losing existing asset metadata.
   - **Smart Port Exclusion**: Automatically filters out ports already marked `Confirmed Active` to avoid duplicate scanning and save network bandwidth.
   - **2-Phase Pipeline for All Ports (0-65535)**: Phase 1 prioritizes unverified passive ports for immediate 1-2s visual confirmation, followed by Phase 2 batch sweep of remaining ports.

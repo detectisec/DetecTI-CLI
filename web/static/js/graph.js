@@ -78,40 +78,40 @@ class EASMDashboard {
             }
         });
 
-        const Y_TIER_GAP = 240;
+        const X_TIER_GAP = 280;
 
-        // Tier 0: Center Target Root at (0, 0)
+        // Tier 0: Center Target Root on Left at (0, 0)
         tier0_target.forEach((node, i) => {
-            positions[node.id()] = { x: (i - (tier0_target.length - 1) / 2) * 240, y: 0 };
+            positions[node.id()] = { x: 0, y: (i - (tier0_target.length - 1) / 2) * 180 };
         });
 
-        // Tier 1: Networks on Left, Domains on Right
-        const tier1Y = Y_TIER_GAP;
-        const netSpacing = Math.max(320, 1600 / Math.max(1, tier1_network.length));
-        const domSpacing = Math.max(280, 1400 / Math.max(1, tier1_domain.length));
+        // Tier 1: Networks Top, Domains Bottom / Center (at x = X_TIER_GAP)
+        const tier1X = X_TIER_GAP;
+        const netSpacing = Math.max(160, 800 / Math.max(1, tier1_network.length));
+        const domSpacing = Math.max(160, 800 / Math.max(1, tier1_domain.length));
 
         tier1_network.forEach((node, i) => {
-            let x;
+            let y;
             if (tier1_domain.length > 0) {
-                x = - ((tier1_network.length - i - 0.5) * netSpacing) - 150;
+                y = - ((tier1_network.length - i - 0.5) * netSpacing) - 90;
             } else {
-                x = (i - (tier1_network.length - 1) / 2) * netSpacing;
+                y = (i - (tier1_network.length - 1) / 2) * netSpacing;
             }
-            positions[node.id()] = { x, y: tier1Y };
+            positions[node.id()] = { x: tier1X, y };
         });
 
         tier1_domain.forEach((node, i) => {
-            let x;
+            let y;
             if (tier1_network.length > 0) {
-                x = ((i + 0.5) * domSpacing) + 150;
+                y = ((i + 0.5) * domSpacing) + 90;
             } else {
-                x = (i - (tier1_domain.length - 1) / 2) * domSpacing;
+                y = (i - (tier1_domain.length - 1) / 2) * domSpacing;
             }
-            positions[node.id()] = { x, y: tier1Y };
+            positions[node.id()] = { x: tier1X, y };
         });
 
-        // Tier 2: Subdomains (beneath their parent domain)
-        const tier2Y = tier1Y + Y_TIER_GAP;
+        // Tier 2: Subdomains (to the right of their parent domain)
+        const tier2X = tier1X + X_TIER_GAP;
         const subsByDomain = new Map();
         tier2_subdomain.forEach(node => {
             let domId = node.data('domain_id');
@@ -119,67 +119,28 @@ class EASMDashboard {
                 const parentDom = node.incomers('node[type="domain"]').first();
                 if (parentDom.length > 0) domId = parentDom.data('domain_id') || parentDom.id().replace('dom_', '');
             }
-            domId = domId || 'unknown';
+            domId = domId ? domId.replace('dom_', '') : 'unknown';
             if (!subsByDomain.has(domId)) subsByDomain.set(domId, []);
             subsByDomain.get(domId).push(node);
         });
 
         subsByDomain.forEach((subs, domId) => {
             const parentPos = positions[`dom_${domId}`] || positions[domId];
-            const baseX = parentPos ? parentPos.x : 0;
-            const maxCols = Math.min(6, Math.max(1, Math.ceil(Math.sqrt(subs.length * 1.5))));
-            const cols = Math.min(subs.length, maxCols);
+            const baseY = parentPos ? parentPos.y : 0;
+            const maxRows = Math.min(12, Math.max(1, Math.ceil(Math.sqrt(subs.length * 2.5))));
+            const rows = Math.min(subs.length, maxRows);
             
             subs.forEach((node, idx) => {
-                const r = Math.floor(idx / cols);
-                const c = idx % cols;
-                const rowCount = Math.min(cols, subs.length - r * cols);
-                const x = baseX + (c - (rowCount - 1) / 2) * 160;
-                const y = tier2Y + (r * 75);
+                const col = Math.floor(idx / rows);
+                const row = idx % rows;
+                const colCount = Math.min(rows, subs.length - col * rows);
+                const y = baseY + (row - (colCount - 1) / 2) * 70;
+                const x = tier2X + (col * 170);
                 positions[node.id()] = { x, y };
             });
         });
 
-        // Tier 3: Host IPs (grouped under their parent ASN/Network or beneath subdomains)
-        let maxTier2Y = tier2Y;
-        tier2_subdomain.forEach(node => {
-            if (positions[node.id()]) maxTier2Y = Math.max(maxTier2Y, positions[node.id()].y);
-        });
-        const tier3Y = tier2_subdomain.length > 0 ? maxTier2Y + Y_TIER_GAP : tier1Y + Y_TIER_GAP;
-
-        const ipsByNetwork = new Map();
-        tier3_ip.forEach(node => {
-            const netEdge = node.connectedEdges('edge[label="BELONGS_TO"]').first();
-            let netId = netEdge.length > 0 ? netEdge.target().id() : null;
-            if (!netId) {
-                const netOut = node.outgoers('node[type="network"]').first();
-                if (netOut.length > 0) netId = netOut.id();
-            }
-            netId = netId || 'unassigned';
-            if (!ipsByNetwork.has(netId)) ipsByNetwork.set(netId, []);
-            ipsByNetwork.get(netId).push(node);
-        });
-
-        let unassignedOffset = 0;
-        ipsByNetwork.forEach((ipList, netId) => {
-            const netPos = positions[netId];
-            const baseX = netPos ? netPos.x : unassignedOffset;
-            if (!netPos) unassignedOffset += 200;
-
-            const maxCols = Math.min(8, Math.max(2, Math.ceil(Math.sqrt(ipList.length * 2))));
-            const cols = Math.min(ipList.length, maxCols);
-
-            ipList.forEach((node, idx) => {
-                const r = Math.floor(idx / cols);
-                const c = idx % cols;
-                const rowCount = Math.min(cols, ipList.length - r * cols);
-                const x = baseX + (c - (rowCount - 1) / 2) * 135;
-                const y = tier3Y + (r * 70);
-                positions[node.id()] = { x, y };
-            });
-        });
-
-        // Tier 4: Services & Service Clusters (directly below their parent Host IP)
+        // Pre-compute Services by IP and Vulns by Parent
         const srvsByIp = new Map();
         tier4_service.forEach(node => {
             let parentIpId = node.data('parent_ip') || node.data('ip_id');
@@ -192,23 +153,6 @@ class EASMDashboard {
             srvsByIp.get(parentIpId).push(node);
         });
 
-        srvsByIp.forEach((srvList, ipId) => {
-            const ipPos = positions[ipId];
-            const baseX = ipPos ? ipPos.x : 0;
-            const baseY = ipPos ? ipPos.y + 110 : tier3Y + 140;
-
-            const cols = Math.min(srvList.length, 5);
-            srvList.forEach((node, idx) => {
-                const r = Math.floor(idx / cols);
-                const c = idx % cols;
-                const rowCount = Math.min(cols, srvList.length - r * cols);
-                const x = baseX + (c - (rowCount - 1) / 2) * 95;
-                const y = baseY + (r * 60);
-                positions[node.id()] = { x, y };
-            });
-        });
-
-        // Tier 5: Vulnerabilities & Vuln Clusters (directly below their parent Service or IP)
         const vulnsByParent = new Map();
         tier5_vuln.forEach(node => {
             let parentId = node.data('parent_srv') || node.data('service_id');
@@ -221,20 +165,99 @@ class EASMDashboard {
             vulnsByParent.get(parentId).push(node);
         });
 
-        vulnsByParent.forEach((vulnList, parentId) => {
-            const parentPos = positions[parentId] || positions[`srv_${parentId}`];
-            const baseX = parentPos ? parentPos.x : 0;
-            const baseY = parentPos ? parentPos.y + 90 : tier3Y + 260;
+        // Tier 3: Host IPs - Generous 2D Grid along X with strict dynamic clearance
+        let maxTier2X = tier2X;
+        tier2_subdomain.forEach(node => {
+            if (positions[node.id()]) maxTier2X = Math.max(maxTier2X, positions[node.id()].x);
+        });
+        const tier3StartX = tier2_subdomain.length > 0 ? maxTier2X + 240 : tier1X + 280;
 
-            const cols = Math.min(vulnList.length, 4);
-            vulnList.forEach((node, idx) => {
-                const r = Math.floor(idx / cols);
-                const c = idx % cols;
-                const rowCount = Math.min(cols, vulnList.length - r * cols);
-                const x = baseX + (c - (rowCount - 1) / 2) * 80;
-                const y = baseY + (r * 55);
-                positions[node.id()] = { x, y };
+        const numIps = tier3_ip.length;
+        const ipRows = numIps <= 3 ? Math.max(1, numIps) : (numIps <= 6 ? 3 : (numIps <= 12 ? 6 : 9));
+
+        // Group IPs into columns
+        const ipColsList = [];
+        for (let i = 0; i < numIps; i += ipRows) {
+            ipColsList.push(tier3_ip.slice(i, i + ipRows));
+        }
+
+        let curIpColX = tier3StartX;
+
+        ipColsList.forEach(colIps => {
+            let maxColWidth = 100;
+
+            colIps.forEach((node, rIdx) => {
+                const rowCount = colIps.length;
+                const ipX = curIpColX;
+                const ipY = (rIdx - (rowCount - 1) / 2) * 160;
+                positions[node.id()] = { x: ipX, y: ipY };
+
+                // Tier 4: Place Services to the right of Host IP
+                const srvList = srvsByIp.get(node.id()) || [];
+                const sRows = Math.min(Math.max(1, srvList.length), 3);
+                const srvX = ipX + 110;
+
+                srvList.forEach((srvNode, sIdx) => {
+                    const sc = Math.floor(sIdx / sRows);
+                    const sr = sIdx % sRows;
+                    const sColCount = Math.min(sRows, srvList.length - sc * sRows);
+                    const sx = srvX + (sc * 80);
+                    const sy = ipY + (sr - (sColCount - 1) / 2) * 55;
+                    positions[srvNode.id()] = { x: sx, y: sy };
+
+                    // Tier 5: Place Vulns to the right of Service
+                    const vList = vulnsByParent.get(srvNode.id()) || [];
+                    const vRows = Math.min(Math.max(1, vList.length), 2);
+                    vList.forEach((vNode, vIdx) => {
+                        const vc = Math.floor(vIdx / vRows);
+                        const vr = vIdx % vRows;
+                        const vColCount = Math.min(vRows, vList.length - vc * vRows);
+                        const vx = sx + 80 + (vc * 65);
+                        const vy = sy + (vr - (vColCount - 1) / 2) * 45;
+                        positions[vNode.id()] = { x: vx, y: vy };
+                    });
+                });
+
+                // Tier 5: Place Direct IP Vulns (if any)
+                const directVulns = vulnsByParent.get(node.id()) || [];
+                const totalSrvCols = Math.ceil(srvList.length / Math.max(1, sRows));
+                let directVulnX = srvList.length > 0 ? (srvX + (totalSrvCols * 80) + 30) : (ipX + 110);
+                let branchWidth = srvList.length > 0 ? (srvX - ipX + totalSrvCols * 80) : 0;
+
+                if (directVulns.length > 0) {
+                    const dRows = Math.min(Math.max(1, directVulns.length), 3);
+                    directVulns.forEach((vNode, vIdx) => {
+                        const vc = Math.floor(vIdx / dRows);
+                        const vr = vIdx % dRows;
+                        const vColCount = Math.min(dRows, directVulns.length - vc * dRows);
+                        const vx = directVulnX + (vc * 65);
+                        const vy = ipY + (vr - (vColCount - 1) / 2) * 45;
+                        positions[vNode.id()] = { x: vx, y: vy };
+                    });
+                    const totalDVulnCols = Math.ceil(directVulns.length / dRows);
+                    branchWidth = Math.max(branchWidth, (directVulnX - ipX) + (totalDVulnCols * 65));
+                }
+
+                maxColWidth = Math.max(maxColWidth, branchWidth);
             });
+
+            curIpColX += maxColWidth + 140; // Clearance to next IP column
+        });
+
+        // Fallback: Ensure EVERY node in the graph gets a valid position
+        let unplacedOffsetY = 600;
+        nodes.forEach(node => {
+            const id = node.id();
+            if (!positions[id]) {
+                const parentNode = node.incomers('node').first();
+                if (parentNode.length > 0 && positions[parentNode.id()]) {
+                    const pPos = positions[parentNode.id()];
+                    positions[id] = { x: pPos.x + 80, y: pPos.y };
+                } else {
+                    positions[id] = { x: tier1X, y: unplacedOffsetY };
+                    unplacedOffsetY += 100;
+                }
+            }
         });
 
         return positions;
@@ -432,7 +455,7 @@ class EASMDashboard {
         }
     }
 
-    populateLeadSelector(elements) {
+    populateLeadSelector(elements, preserveSelection = false) {
         try {
             console.log('=== LEAD SELECTOR DEBUG START ===');
             console.log('Populating lead selector from graph data...');
@@ -626,7 +649,20 @@ class EASMDashboard {
                 });
             }
             
-            console.log(`✓ Created ${this.leads.length} leads total`);
+            // Reset lead selection on initial database load (leads come unchecked by default)
+            // But preserve active leads when refreshing after a background scan
+            if (!preserveSelection) {
+                this.selectedLeads.clear();
+            } else {
+                const currentLeadIds = new Set(this.leads.map(l => l.id));
+                Array.from(this.selectedLeads).forEach(id => {
+                    if (!currentLeadIds.has(id)) {
+                        this.selectedLeads.delete(id);
+                    }
+                });
+            }
+
+            console.log(`✓ Created ${this.leads.length} leads total (preserveSelection: ${preserveSelection})`);
             console.log('=== LEAD SELECTOR DEBUG END ===');
             
             // Always try to render, even if we have 0 leads
@@ -696,17 +732,15 @@ class EASMDashboard {
 
         if (targetData.type === 'target' || targetData.type === 'network') {
             outEdges.forEach(edgeData => {
-                if (edgeData.label === 'MATCHES_DOMAIN') {
-                    visitedDomIds.add(edgeData.target);
-                }
-                if (edgeData.label === 'MATCHES_ORG' || edgeData.label === 'MATCHES_ASN') {
-                    const netId = edgeData.target;
-                    const netIn = this.inEdges.get(netId) || [];
-                    netIn.forEach(e => {
-                        if (e.label === 'BELONGS_TO' || e.label === 'ORGANIZATION_OF') {
-                            connectedIpIds.add(e.source);
-                        }
-                    });
+                if (edgeData.label === 'MATCHES_DOMAIN' || edgeData.label === 'CONTAINS_TARGET') {
+                    const tgtNode = this.nodeIndex ? this.nodeIndex.get(edgeData.target) : null;
+                    if (tgtNode && tgtNode.type === 'ip') {
+                        connectedIpIds.add(edgeData.target);
+                    } else if (tgtNode && tgtNode.type === 'subdomain') {
+                        visitedSubIds.add(edgeData.target);
+                    } else {
+                        visitedDomIds.add(edgeData.target);
+                    }
                 }
                 if (edgeData.label === 'CONTAINS_IP' || edgeData.label === 'HOSTS_IP' || edgeData.label === 'RESOLVES_TO') {
                     connectedIpIds.add(edgeData.target);
@@ -1293,7 +1327,7 @@ class EASMDashboard {
             leadItem.classList.add('selected');
         }
 
-        this.applyLeadFilter({ relayout: false });
+        this.applyLeadFilter({ relayout: true });
     }
 
     selectAllLeads() {
@@ -1306,7 +1340,7 @@ class EASMDashboard {
                 if (checkbox) checkbox.checked = true;
             }
         });
-        this.applyLeadFilter({ relayout: false });
+        this.applyLeadFilter({ relayout: true });
     }
 
     deselectAllLeads() {
@@ -1322,20 +1356,21 @@ class EASMDashboard {
     applyLeadFilter(options = {}) {
         if (!this.cy) return;
 
-        // Default behavior: If no leads are selected, hide all nodes and edges
-        if (this.selectedLeads.size === 0) {
-            this.cy.nodes().hide();
-            this.cy.edges().hide();
-            return;
-        }
-
-        // Show all nodes and edges first
-        this.cy.nodes().show();
-        this.cy.edges().show();
-
         // Get selected lead IDs
         const selectedLeadIds = Array.from(this.selectedLeads);
         const visibleNodes = new Set();
+
+        // Rule: When NO leads are selected (default upon DB load), render NOTHING!
+        if (selectedLeadIds.length === 0) {
+            this.cy.nodes().hide();
+            this.cy.edges().hide();
+            this.visibleLeadNodes = new Set();
+            return;
+        }
+
+        // Show all nodes and edges for filtering pass
+        this.cy.nodes().show();
+        this.cy.edges().show();
 
         // First pass: Find all selected lead nodes
         selectedLeadIds.forEach(leadId => {
@@ -1345,63 +1380,53 @@ class EASMDashboard {
             }
         });
 
-        // Second pass: For each selected lead, add:
-        // 1. Its ancestry lineage to the root (so the lead connects cleanly to root domain/target)
-        // 2. Its downstream descendants (Services -> Vulnerabilities -> Exploits / IP resolutions)
-        // This prevents pulling in unrelated sibling domains, subdomains, or other IPs!
-        
-        // Add ancestors towards root (incomers + network clusters)
-        const addAncestors = (nodeId, visited = new Set()) => {
-            if (visited.has(nodeId)) return;
-            visited.add(nodeId);
-            
-            const node = this.cy.getElementById(nodeId);
-            if (!node.length) return;
-            
-            // Standard incomers (Domain -> Subdomain, Target -> Network, Target -> Domain, etc.)
-            node.incomers('node').forEach(parentNode => {
-                const parentId = parentNode.id();
-                visibleNodes.add(parentId);
-                addAncestors(parentId, visited);
-            });
-
-            // IP -> Network cluster (BELONGS_TO is an outgoing edge from IP to Network cluster)
-            if (node.data('type') === 'ip') {
-                node.outgoers('node[type="network"]').forEach(netNode => {
-                    const netId = netNode.id();
-                    visibleNodes.add(netId);
-                    addAncestors(netId, visited);
+            // Second pass: For each selected lead, add ancestry towards root and downstream descendants
+            const addAncestors = (nodeId, visited = new Set()) => {
+                if (visited.has(nodeId)) return;
+                visited.add(nodeId);
+                
+                const node = this.cy.getElementById(nodeId);
+                if (!node.length) return;
+                
+                node.incomers('node').forEach(parentNode => {
+                    const parentId = parentNode.id();
+                    visibleNodes.add(parentId);
+                    addAncestors(parentId, visited);
                 });
-            }
 
-            // Domain -> IP (for domains in Org scans that resolve to IPs)
-            if (node.data('type') === 'domain' || node.data('type') === 'subdomain') {
-                node.outgoers('node[type="ip"]').forEach(ipNode => {
-                    ipNode.outgoers('node[type="network"]').forEach(netNode => {
+                if (node.data('type') === 'ip') {
+                    node.outgoers('node[type="network"]').forEach(netNode => {
                         const netId = netNode.id();
                         visibleNodes.add(netId);
                         addAncestors(netId, visited);
                     });
+                }
+
+                if (node.data('type') === 'domain' || node.data('type') === 'subdomain') {
+                    node.outgoers('node[type="ip"]').forEach(ipNode => {
+                        ipNode.outgoers('node[type="network"]').forEach(netNode => {
+                            const netId = netNode.id();
+                            visibleNodes.add(netId);
+                            addAncestors(netId, visited);
+                        });
+                    });
+                }
+            };
+
+            const addDescendants = (nodeId, visited = new Set()) => {
+                if (visited.has(nodeId)) return;
+                visited.add(nodeId);
+                
+                const node = this.cy.getElementById(nodeId);
+                if (!node.length) return;
+                
+                node.outgoers('node').forEach(childNode => {
+                    const childId = childNode.id();
+                    visibleNodes.add(childId);
+                    addDescendants(childId, visited);
                 });
-            }
-        };
+            };
 
-        // Add downstream descendants (outgoers: services, vulns, etc.)
-        const addDescendants = (nodeId, visited = new Set()) => {
-            if (visited.has(nodeId)) return;
-            visited.add(nodeId);
-            
-            const node = this.cy.getElementById(nodeId);
-            if (!node.length) return;
-            
-            node.outgoers('node').forEach(childNode => {
-                const childId = childNode.id();
-                visibleNodes.add(childId);
-                addDescendants(childId, visited);
-            });
-        };
-
-        // For each selected lead, trace ancestors up to root and descendants down to vulns/services
         selectedLeadIds.forEach(leadId => {
             addAncestors(leadId);
             addDescendants(leadId);
@@ -1849,31 +1874,64 @@ class EASMDashboard {
                         layoutName = 'cose';
                     }
                     const layoutOptions = this.getLayoutOptions(layoutName, visibleElements);
-                    const layout = visibleElements.layout({
-                        ...layoutOptions,
-                        name: layoutOptions.name || layoutName,
-                        animate: true,
-                        animationDuration: 500,
-                        animationEasing: 'ease-in-out',
-                        stop: () => {
+
+                    if (layoutOptions.name === 'preset' && layoutOptions.positions) {
+                        const posMap = layoutOptions.positions;
+                        const animDuration = 500;
+
+                        visibleElements.nodes().forEach(node => {
+                            const targetPos = posMap[node.id()];
+                            if (targetPos) {
+                                node.animate({
+                                    position: targetPos,
+                                    duration: animDuration,
+                                    easing: 'ease-in-out'
+                                });
+                            }
+                        });
+
+                        setTimeout(() => {
                             if (this.cy) {
                                 this.cy.resize();
-                                const currentVisible = this.cy.elements(':visible');
+                                const currentVisible = this.cy.nodes(':visible');
                                 if (currentVisible.length > 0) {
                                     this.cy.animate({
                                         fit: {
                                             eles: currentVisible,
                                             padding: 50
                                         },
-                                        duration: 300,
+                                        duration: 350,
                                         easing: 'ease-out'
                                     });
                                 }
                             }
-                        }
-                    });
-
-                    layout.run();
+                        }, animDuration + 20);
+                    } else {
+                        const layout = visibleElements.layout({
+                            ...layoutOptions,
+                            name: layoutOptions.name || layoutName,
+                            animate: true,
+                            animationDuration: 500,
+                            animationEasing: 'ease-in-out',
+                            stop: () => {
+                                if (this.cy) {
+                                    this.cy.resize();
+                                    const currentVisible = this.cy.elements(':visible');
+                                    if (currentVisible.length > 0) {
+                                        this.cy.animate({
+                                            fit: {
+                                                eles: currentVisible,
+                                                padding: 50
+                                            },
+                                            duration: 300,
+                                            easing: 'ease-out'
+                                        });
+                                    }
+                                }
+                            }
+                        });
+                        layout.run();
+                    }
                 } else if (options.fitView !== false) {
                     // Frame the visible elements smoothly without moving any nodes
                     this.cy.resize();
@@ -1989,15 +2047,28 @@ class EASMDashboard {
                     selector: 'node[type="ip"]',
                     style: {
                         'background-color': '#9b59b6',
-                        'label': 'data(label)',
+                        'label': function(ele) {
+                            const ip = ele.data('ip') || ele.data('label') || '';
+                            const fqdns = ele.data('fqdns') || [];
+                            const fqdnCount = (ele.data('fqdn_count') !== undefined && ele.data('fqdn_count') !== null) ? ele.data('fqdn_count') : fqdns.length;
+                            if (fqdnCount === 1) {
+                                return `${ip}\n🌐 1 FQDN`;
+                            } else if (fqdnCount > 1) {
+                                return `${ip}\n🌐 ${fqdnCount} FQDNs`;
+                            }
+                            return ip;
+                        },
                         'color': '#ffffff',
                         'text-valign': 'center',
                         'text-halign': 'center',
-                        'font-size': '10px',
+                        'text-wrap': 'wrap',
+                        'text-max-width': '120px',
+                        'line-height': 1.25,
+                        'font-size': '9.5px',
                         'font-weight': 'bold',
-                        'width': '55px',
-                        'height': '55px',
-                        'shape': 'rectangle',
+                        'width': '100px',
+                        'height': '48px',
+                        'shape': 'round-rectangle',
                         'border-width': '2px',
                         'border-color': '#8e44ad'
                     }
@@ -2062,6 +2133,16 @@ class EASMDashboard {
                         'background-fit': 'none',
                         'background-repeat': 'no-repeat',
                         'box-shadow': '0 0 16px rgba(0, 240, 255, 0.85)'
+                    }
+                },
+                
+                // Revert target badge and glow cleanly when unmarked
+                {
+                    selector: 'node:not(.is-target):not([is_target="true"])',
+                    style: {
+                        'background-image': 'none',
+                        'background-image-opacity': 0,
+                        'box-shadow': 'none'
                     }
                 },
                 
@@ -2242,7 +2323,8 @@ class EASMDashboard {
                     style: {
                         'line-color': '#4ecdc4',
                         'target-arrow-color': '#4ecdc4',
-                        'width': '1.5px'
+                        'width': '1.5px',
+                        'opacity': 0.85
                     }
                 },
                 
@@ -2265,7 +2347,7 @@ class EASMDashboard {
                 },
                 
                 {
-                    selector: 'edge[label="MATCHES_DOMAIN"], edge[label="MATCHES_ORG"], edge[label="MATCHES_ASN"]',
+                    selector: 'edge[label="CONTAINS_TARGET"], edge[label="MATCHES_DOMAIN"], edge[label="MATCHES_ORG"], edge[label="MATCHES_ASN"]',
                     style: {
                         'line-color': '#8c52ff',
                         'target-arrow-color': '#8c52ff',
@@ -2353,7 +2435,7 @@ class EASMDashboard {
         });
     }
 
-    async loadGraph() {
+    async loadGraph(preserveLeadSelection = false) {
         try {
             console.log('Fetching graph data...');
             
@@ -2383,7 +2465,7 @@ class EASMDashboard {
 
                 // Populate lead selector from graph data after elements are added
                 console.log('Populating lead selector...');
-                this.populateLeadSelector(this.graphData.elements);
+                this.populateLeadSelector(this.graphData.elements, preserveLeadSelection);
                 this.applyLeadFilter({ relayout: true });
                 this.syncTargetNodesStyling();
                 
@@ -2451,7 +2533,10 @@ class EASMDashboard {
             } else {
                 // Single left click: select ONLY this node and show inspector
                 this.cy.nodes().removeClass('cy-selected').unselect();
+                this.cy.edges('edge[label="RESOLVES_TO"]').removeClass('ghost-active');
                 node.addClass('cy-selected').select();
+                const connectedGhost = node.connectedEdges('edge[label="RESOLVES_TO"]');
+                connectedGhost.addClass('ghost-active');
                 this.showNodeInspector(node);
             }
         });
@@ -2480,10 +2565,30 @@ class EASMDashboard {
             this.showContextMenu(node, clientX, clientY);
         });
 
+        // Ghost Edge Lighting Handlers:
+        // Hovering or tapping a domain/subdomain/IP lights up its RESOLVES_TO edges
+        this.cy.on('mouseover', 'node', (event) => {
+            const node = event.target;
+            const type = node.data('type');
+            if (type === 'domain' || type === 'subdomain' || type === 'ip') {
+                const connectedGhostEdges = node.connectedEdges('edge[label="RESOLVES_TO"]');
+                connectedGhostEdges.addClass('ghost-active');
+            }
+        });
+
+        this.cy.on('mouseout', 'node', (event) => {
+            const node = event.target;
+            // Only remove if not selected
+            if (!node.selected() && !node.hasClass('cy-selected')) {
+                this.cy.edges('edge[label="RESOLVES_TO"]').removeClass('ghost-active');
+            }
+        });
+
         // Background click handler (close inspector, context menu & unselect nodes)
         this.cy.on('tap', (event) => {
             this.hideContextMenu();
             if (event.target === this.cy) {
+                this.cy.edges('edge[label="RESOLVES_TO"]').removeClass('ghost-active');
                 this.cy.nodes().removeClass('cy-selected').unselect();
                 this.closeInspector();
             }
@@ -2800,31 +2905,66 @@ class EASMDashboard {
             const target = this.cy.elements(':visible');
             const layoutOptions = this.getLayoutOptions(layoutName, target);
 
-            // Run layout with animated transition
-            const layout = target.layout({
-                ...layoutOptions,
-                name: layoutOptions.name || layoutName,
-                fit: true,
-                padding: 40,
-                animate: true,
-                animationDuration: 650,
-                animationEasing: 'ease-in-out'
-            });
+            if (layoutOptions.name === 'preset' && layoutOptions.positions) {
+                const posMap = layoutOptions.positions;
+                const animDuration = 600;
 
-            layout.on('layoutstop', () => {
-                if (this.cy) {
-                    this.cy.animate({
-                        fit: {
-                            eles: visibleNodes,
-                            padding: 45
-                        },
-                        duration: 350,
-                        easing: 'ease-out'
-                    });
-                }
-            });
+                // Animate all visible nodes directly to their calculated hierarchical positions
+                visibleNodes.forEach(node => {
+                    const targetPos = posMap[node.id()];
+                    if (targetPos) {
+                        node.animate({
+                            position: targetPos,
+                            duration: animDuration,
+                            easing: 'ease-in-out'
+                        });
+                    }
+                });
 
-            layout.run();
+                // Auto-fit viewport smoothly to frame the entire graph cleanly
+                setTimeout(() => {
+                    if (this.cy) {
+                        this.cy.resize();
+                        const currentVisible = this.cy.nodes(':visible');
+                        if (currentVisible.length > 0) {
+                            this.cy.animate({
+                                fit: {
+                                    eles: currentVisible,
+                                    padding: 50
+                                },
+                                duration: 400,
+                                easing: 'ease-out'
+                            });
+                        }
+                    }
+                }, animDuration + 20);
+            } else {
+                // Physics-based layouts (cose, cose-bilkent, etc.)
+                const layout = target.layout({
+                    ...layoutOptions,
+                    name: layoutOptions.name || layoutName,
+                    fit: true,
+                    padding: 40,
+                    animate: true,
+                    animationDuration: 650,
+                    animationEasing: 'ease-in-out'
+                });
+
+                layout.on('layoutstop', () => {
+                    if (this.cy) {
+                        this.cy.animate({
+                            fit: {
+                                eles: visibleNodes,
+                                padding: 45
+                            },
+                            duration: 350,
+                            easing: 'ease-out'
+                        });
+                    }
+                });
+
+                layout.run();
+            }
         };
 
         if (floatRelayoutBtn) {
@@ -2891,8 +3031,8 @@ class EASMDashboard {
                 }
             }
             
-            // Apply lead filter to show/hide entire subtrees (preserves layout positions)
-            this.applyLeadFilter({ relayout: false });
+            // Apply lead filter to show/hide entire subtrees and frame active leads
+            this.applyLeadFilter({ relayout: true });
         };
 
         // Filter checkboxes
@@ -4354,8 +4494,103 @@ class EASMDashboard {
                 `;
             }
 
+            // Root Target: Enumerated Domains & Enumerated Subdomains inventories with instant search & Target actions
+            let rootDomainsAccordionHtml = '';
+            let rootSubdomainsAccordionHtml = '';
+
+            if (data.type === 'target' || data.is_root === true) {
+                const allDoms = Array.isArray(data.all_domains) ? data.all_domains : [];
+                if (allDoms.length > 0) {
+                    const domNames = allDoms.map(d => d.name);
+                    const domListHtml = allDoms.map(d => {
+                        const isMarked = this.isTargetMarked(d.name);
+                        return `
+                            <div class="root-domain-item" data-domain="${d.name.toLowerCase()}" style="display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; margin-bottom: 4px; background: rgba(0, 180, 216, 0.08); border: 1px solid rgba(0, 180, 216, 0.25); border-radius: 4px; font-family: monospace; font-size: 0.8rem;">
+                                <span style="color: #00b4d8; font-weight: 600; word-break: break-all;">${d.name}</span>
+                                <div style="display: flex; gap: 4px; align-items: center;">
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.72rem; color: ${isMarked ? '#ef4444' : '#00f0ff'}; border-color: ${isMarked ? '#ef4444' : 'rgba(0, 240, 255, 0.4)'}; background: ${isMarked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 240, 255, 0.15)'};" onclick="window.dashboard.toggleTargetMark('${d.name}')" title="${isMarked ? 'Remove Target' : 'Set as Target (FQDN)'}">
+                                        <i data-lucide="crosshair" style="width: 10px; height: 10px;"></i> ${isMarked ? 'Target' : 'Set Target'}
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+
+                    rootDomainsAccordionHtml = `
+                        <div class="risk-accordion-group" style="margin-top: 0.75rem; margin-bottom: 0.5rem;">
+                            <div class="risk-accordion-header" onclick="window.dashboard.toggleRiskAccordion(this)">
+                                <div class="risk-accordion-title">
+                                    <i data-lucide="globe" class="accordion-icon ui-icon"></i>
+                                    <span>Enumerated Domains (${allDoms.length})</span>
+                                </div>
+                                <div class="risk-accordion-status" style="display: flex; align-items: center; gap: 6px;">
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 180, 216, 0.2); color: #00b4d8; border-color: rgba(0, 180, 216, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(domNames).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i> Copy</button>
+                                    <span class="risk-pill-counter" style="color: #00b4d8; background: rgba(0, 180, 216, 0.15); border-color: rgba(0, 180, 216, 0.4);">${allDoms.length}</span>
+                                    <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
+                                </div>
+                            </div>
+                            <div class="risk-accordion-body" style="display: none; max-height: 250px; overflow-y: auto; padding: 8px 6px;">
+                                <div style="margin-bottom: 6px;">
+                                    <input type="text" placeholder="Filter domains..." oninput="window.dashboard.filterRootDomains(this.value)" style="width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 0.78rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #f8fafc;">
+                                </div>
+                                <div id="root-domains-list-container">
+                                    ${domListHtml}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                const allSubs = Array.isArray(data.all_subdomains) ? data.all_subdomains : [];
+                if (allSubs.length > 0) {
+                    const subNames = allSubs.map(s => s.name);
+                    const subListHtml = allSubs.map(s => {
+                        const isMarked = this.isTargetMarked(s.name);
+                        const ipsBadges = (s.ips || []).map(ip => `
+                            <span style="font-family: monospace; font-size: 0.7rem; color: #93c5fd; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 3px; padding: 1px 4px;">${ip}</span>
+                        `).join('');
+
+                        return `
+                            <div class="root-subdomain-item" data-subdomain="${s.name.toLowerCase()}" style="display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; margin-bottom: 5px; background: rgba(78, 205, 196, 0.07); border: 1px solid rgba(78, 205, 196, 0.22); border-radius: 4px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between;">
+                                    <span style="font-family: monospace; font-size: 0.8rem; color: #4ecdc4; font-weight: 600; word-break: break-all;">${s.name}</span>
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.72rem; color: ${isMarked ? '#ef4444' : '#00f0ff'}; border-color: ${isMarked ? '#ef4444' : 'rgba(0, 240, 255, 0.4)'}; background: ${isMarked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 240, 255, 0.15)'};" onclick="window.dashboard.toggleTargetMark('${s.name}')" title="${isMarked ? 'Remove Target' : 'Set as Target (FQDN)'}">
+                                        <i data-lucide="crosshair" style="width: 10px; height: 10px;"></i> ${isMarked ? 'Target' : 'Set Target'}
+                                    </button>
+                                </div>
+                                ${ipsBadges ? `<div style="display: flex; flex-wrap: wrap; gap: 3px; align-items: center;">${ipsBadges}</div>` : ''}
+                            </div>
+                        `;
+                    }).join('');
+
+                    rootSubdomainsAccordionHtml = `
+                        <div class="risk-accordion-group" style="margin-top: 0.75rem; margin-bottom: 0.5rem;">
+                            <div class="risk-accordion-header" onclick="window.dashboard.toggleRiskAccordion(this)">
+                                <div class="risk-accordion-title">
+                                    <i data-lucide="globe" class="accordion-icon ui-icon"></i>
+                                    <span>Enumerated Subdomains (${allSubs.length})</span>
+                                </div>
+                                <div class="risk-accordion-status" style="display: flex; align-items: center; gap: 6px;">
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(78, 205, 196, 0.2); color: #4ecdc4; border-color: rgba(78, 205, 196, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(subNames).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i> Copy</button>
+                                    <span class="risk-pill-counter" style="color: #4ecdc4; background: rgba(78, 205, 196, 0.15); border-color: rgba(78, 205, 196, 0.4);">${allSubs.length}</span>
+                                    <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
+                                </div>
+                            </div>
+                            <div class="risk-accordion-body" style="display: none; max-height: 280px; overflow-y: auto; padding: 8px 6px;">
+                                <div style="margin-bottom: 6px;">
+                                    <input type="text" placeholder="Filter subdomains..." oninput="window.dashboard.filterRootSubdomains(this.value)" style="width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 0.78rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #f8fafc;">
+                                </div>
+                                <div id="root-subdomains-list-container">
+                                    ${subListHtml}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
             let subdomainsAccordionHtml = '';
-            if (data.type === 'domain' || data.type === 'target' || data.type === 'subdomain') {
+            if (data.type === 'domain' || data.type === 'subdomain') {
                 const connectedSubdomains = this.findConnectedSubdomains(data.id, elements);
                 if (connectedSubdomains.length > 0) {
                     const subNamesList = connectedSubdomains.map(s => s.name || s.label);
@@ -4468,6 +4703,8 @@ class EASMDashboard {
                 <h4>${sectionTitle}</h4>
                 ${mainPropertiesHtml}
                 ${fileTargetsHtml}
+                ${rootDomainsAccordionHtml}
+                ${rootSubdomainsAccordionHtml}
                 ${subdomainsAccordionHtml}
                 ${riskMetricsHtml}
             `;
@@ -4503,16 +4740,38 @@ class EASMDashboard {
                 </div>`;
             }
 
-            // Find resolving domains/subdomains for this IP
+            // Collect all resolving domains/subdomains for this IP (from graph edges and direct node metadata)
             const resolvingDomains = [];
+            const seenFqdns = new Set();
+
+            // 1. From direct fqdns array in node data
+            if (Array.isArray(data.fqdns)) {
+                data.fqdns.forEach(fqdn => {
+                    const fClean = String(fqdn || '').trim();
+                    if (fClean && !seenFqdns.has(fClean.toLowerCase())) {
+                        seenFqdns.add(fClean.toLowerCase());
+                        resolvingDomains.push({ id: null, name: fClean, type: 'subdomain' });
+                    }
+                });
+            }
+
+            // 2. From cytoscape graph incomers (if present)
             if (this.cy) {
                 const ipNode = this.cy.getElementById(data.id);
                 if (ipNode.length > 0) {
                     ipNode.incomers('node[type="subdomain"], node[type="domain"]').forEach(dNode => {
                         const dData = dNode.data();
-                        const dName = dData.name || dData.label;
-                        if (dName && !resolvingDomains.some(r => r.name === dName)) {
-                            resolvingDomains.push({ id: dNode.id(), name: dName, type: dData.type });
+                        const dName = (dData.name || dData.label || '').trim();
+                        if (dName) {
+                            const lower = dName.toLowerCase();
+                            const existing = resolvingDomains.find(r => r.name.toLowerCase() === lower);
+                            if (existing) {
+                                existing.id = dNode.id();
+                                existing.type = dData.type;
+                            } else if (!seenFqdns.has(lower)) {
+                                seenFqdns.add(lower);
+                                resolvingDomains.push({ id: dNode.id(), name: dName, type: dData.type });
+                            }
                         }
                     });
                 }
@@ -4524,7 +4783,8 @@ class EASMDashboard {
                         const srcData = this.nodeIndex ? this.nodeIndex.get(edgeData.source) : null;
                         if (srcData && (srcData.type === 'domain' || srcData.type === 'subdomain')) {
                             const dName = srcData.name || srcData.label;
-                            if (dName && !resolvingDomains.some(r => r.name === dName)) {
+                            if (dName && !seenFqdns.has(dName.toLowerCase())) {
+                                seenFqdns.add(dName.toLowerCase());
                                 resolvingDomains.push({ id: edgeData.source, name: dName, type: srcData.type });
                             }
                         }
@@ -4534,17 +4794,64 @@ class EASMDashboard {
 
             let resolvingDomainsHtml = '';
             if (resolvingDomains.length > 0) {
-                const domBadges = resolvingDomains.map(item => `
-                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; margin-bottom: 3px; background: rgba(78, 205, 196, 0.08); border: 1px solid rgba(78, 205, 196, 0.25); border-radius: 4px; font-family: monospace; font-size: 0.8rem;">
-                        <span style="color: #4ecdc4; font-weight: 500; word-break: break-all;">${item.name}</span>
-                        <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.7rem; background: rgba(78, 205, 196, 0.2); color: #4ecdc4; border-color: rgba(78, 205, 196, 0.4);" onclick="event.stopPropagation(); window.dashboard.focusNode('${item.id}')" title="Focus domain in graph"><i data-lucide="crosshair" class="badge-icon"></i> Focus</button>
+                const totalFqdns = resolvingDomains.length;
+                const showSearch = totalFqdns > 5;
+                const searchHtml = showSearch ? `
+                    <div style="margin-bottom: 6px;">
+                        <input type="text" id="ip-fqdn-filter-input" placeholder="🔍 Filter ${totalFqdns} FQDNs / Virtual Hosts..." 
+                            style="width: 100%; padding: 4px 8px; background: rgba(0,0,0,0.35); border: 1px solid rgba(78, 205, 196, 0.3); border-radius: 4px; color: #fff; font-size: 0.75rem; outline: none;"
+                            oninput="window.dashboard.filterIpFqdnList(this.value)"
+                        />
                     </div>
-                `).join('');
+                ` : '';
+
+                const actionToolbar = `
+                    <div style="display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 0.72rem; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.06); color: #fff; border: 1px solid rgba(255,255,255,0.15);" onclick="window.dashboard.copyFqdnsList('${data.id}')">
+                            <i data-lucide="copy" style="width: 12px; height: 12px;"></i> Copy All (${totalFqdns})
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 0.72rem; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; background: rgba(0,240,255,0.1); color: #00f0ff; border: 1px solid rgba(0,240,255,0.3);" onclick="window.dashboard.targetAllIpFqdns('${data.id}')">
+                            <i data-lucide="crosshair" style="width: 12px; height: 12px;"></i> Target All FQDNs
+                        </button>
+                    </div>
+                `;
+
+                const domBadges = resolvingDomains.map(item => {
+                    const isTarget = this.isTargetMarked(item.name);
+                    const targetBtnStyle = isTarget 
+                        ? 'background: rgba(0, 240, 255, 0.25); color: #00f0ff; border-color: #00f0ff;' 
+                        : 'background: rgba(255, 255, 255, 0.05); color: var(--text-muted); border-color: rgba(255, 255, 255, 0.15);';
+                    const targetBtnText = isTarget ? 'Targeted' : 'Target';
+
+                    const focusBtn = item.id ? `
+                        <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 5px; font-size: 0.68rem; background: rgba(78, 205, 196, 0.2); color: #4ecdc4; border-color: rgba(78, 205, 196, 0.4); border-radius: 3px; border: 1px solid;" onclick="event.stopPropagation(); window.dashboard.focusNode('${item.id}')" title="Focus domain in graph">
+                            <i data-lucide="crosshair" style="width: 10px; height: 10px;"></i>
+                        </button>
+                    ` : '';
+
+                    return `
+                    <div class="ip-fqdn-item" data-fqdn="${item.name.toLowerCase()}" style="display: flex; align-items: center; justify-content: space-between; padding: 4px 6px; margin-bottom: 3px; background: rgba(78, 205, 196, 0.06); border: 1px solid rgba(78, 205, 196, 0.2); border-radius: 4px; font-family: monospace; font-size: 0.76rem;">
+                        <span style="color: #4ecdc4; font-weight: 500; word-break: break-all; margin-right: 6px;">${item.name}</span>
+                        <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                            ${focusBtn}
+                            <button type="button" style="margin: 0; padding: 2px 6px; font-size: 0.68rem; border-radius: 3px; border: 1px solid; cursor: pointer; transition: all 0.2s; ${targetBtnStyle}" onclick="event.stopPropagation(); window.dashboard.toggleTargetMark('${item.name}')" title="Toggle as target">
+                                ${targetBtnText}
+                            </button>
+                            <button type="button" style="margin: 0; padding: 2px 5px; font-size: 0.68rem; background: rgba(255,255,255,0.05); color: var(--text-muted); border: 1px solid rgba(255,255,255,0.15); border-radius: 3px; cursor: pointer;" onclick="event.stopPropagation(); navigator.clipboard.writeText('${item.name}'); if(window.dashboard.showToast) window.dashboard.showToast('Copied ${item.name}');" title="Copy FQDN">
+                                <i data-lucide="copy" style="width: 10px; height: 10px;"></i>
+                            </button>
+                        </div>
+                    </div>
+                `}).join('');
 
                 resolvingDomainsHtml = `
-                <div class="property" style="flex-direction: column; align-items: flex-start; gap: 4px;">
-                    <span class="key" style="margin-bottom: 2px;">${resolvingDomains.length === 1 ? 'Resolving Domain / Host:' : `Resolving Domains / Hosts (${resolvingDomains.length}):`}</span>
-                    <div style="width: 100%; max-height: 180px; overflow-y: auto;">
+                <div class="property" style="flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 0.5rem; margin-bottom: 0.5rem; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(78, 205, 196, 0.2);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 4px;">
+                        <span class="key" style="color: #4ecdc4; font-weight: 600;">🌐 Associated FQDNs &amp; VHosts (${totalFqdns})</span>
+                    </div>
+                    ${actionToolbar}
+                    ${searchHtml}
+                    <div id="ip-fqdn-list-container" style="width: 100%; max-height: 200px; overflow-y: auto; padding-right: 2px;">
                         ${domBadges}
                     </div>
                 </div>`;
@@ -5129,7 +5436,8 @@ class EASMDashboard {
         let targetValue = null;
         let rootAssociatedIps = [];
 
-        const isFqdnNode = ['domain', 'subdomain', 'target'].includes(nodeType);
+        const isRootTarget = nodeType === 'target' || nodeId === 'target_root' || data.is_root === true;
+        const isFqdnNode = ['domain', 'subdomain'].includes(nodeType) && !isRootTarget;
         if (nodeType === 'ip') {
             targetValue = String(data.ip || data.name || data.label || nodeId).replace(/^ip_/, '').trim();
             const isMarked = this.isTargetMarked(targetValue);
@@ -5483,6 +5791,99 @@ class EASMDashboard {
         }
     }
 
+    filterIpFqdnList(query) {
+        const q = String(query || '').trim().toLowerCase();
+        const container = document.getElementById('ip-fqdn-list-container');
+        if (!container) return;
+        const items = container.querySelectorAll('.ip-fqdn-item');
+        items.forEach(item => {
+            const fqdn = item.getAttribute('data-fqdn') || '';
+            item.style.display = (!q || fqdn.includes(q)) ? 'flex' : 'none';
+        });
+    }
+
+    filterRootDomains(query) {
+        const q = String(query || '').trim().toLowerCase();
+        const container = document.getElementById('root-domains-list-container');
+        if (!container) return;
+        const items = container.querySelectorAll('.root-domain-item');
+        items.forEach(item => {
+            const dom = item.getAttribute('data-domain') || '';
+            item.style.display = (!q || dom.includes(q)) ? 'flex' : 'none';
+        });
+    }
+
+    filterRootSubdomains(query) {
+        const q = String(query || '').trim().toLowerCase();
+        const container = document.getElementById('root-subdomains-list-container');
+        if (!container) return;
+        const items = container.querySelectorAll('.root-subdomain-item');
+        items.forEach(item => {
+            const sub = item.getAttribute('data-subdomain') || '';
+            item.style.display = (!q || sub.includes(q)) ? 'flex' : 'none';
+        });
+    }
+
+    async copyFqdnsList(ipNodeId) {
+        let fqdns = [];
+        if (this.cy) {
+            const node = this.cy.getElementById(ipNodeId);
+            if (node.length > 0 && Array.isArray(node.data('fqdns'))) {
+                fqdns = node.data('fqdns');
+            }
+        }
+        if (fqdns.length === 0) {
+            const container = document.getElementById('ip-fqdn-list-container');
+            if (container) {
+                const items = container.querySelectorAll('.ip-fqdn-item');
+                items.forEach(item => {
+                    const f = item.getAttribute('data-fqdn');
+                    if (f) fqdns.push(f);
+                });
+            }
+        }
+        if (fqdns.length === 0) return;
+        const text = fqdns.join('\n');
+        await navigator.clipboard.writeText(text);
+        if (typeof this.showToast === 'function') {
+            this.showToast('success', `Copied ${fqdns.length} FQDNs to clipboard`);
+        }
+    }
+
+    async targetAllIpFqdns(ipNodeId) {
+        let fqdns = [];
+        let nodeData = null;
+        if (this.cy) {
+            const node = this.cy.getElementById(ipNodeId);
+            if (node.length > 0) {
+                nodeData = node.data();
+                if (Array.isArray(nodeData.fqdns)) {
+                    fqdns = nodeData.fqdns;
+                }
+            }
+        }
+        if (fqdns.length === 0) {
+            const container = document.getElementById('ip-fqdn-list-container');
+            if (container) {
+                const items = container.querySelectorAll('.ip-fqdn-item');
+                items.forEach(item => {
+                    const f = item.getAttribute('data-fqdn');
+                    if (f) fqdns.push(f);
+                });
+            }
+        }
+        if (fqdns.length === 0) return;
+        for (const fqdn of fqdns) {
+            await this.setTarget(fqdn);
+        }
+        if (typeof this.showToast === 'function') {
+            this.showToast('success', `Marked ${fqdns.length} FQDNs as targets`);
+        }
+        if (nodeData) {
+            this.renderAssetInspector(nodeData);
+        }
+    }
+
     async loadTargets() {
         try {
             const res = await window.api.getTargets();
@@ -5506,7 +5907,6 @@ class EASMDashboard {
         if (!this.cy) return;
         this.cy.batch(() => {
             this.cy.nodes().forEach(node => {
-                const nodeType = node.data('type');
                 const rawName = node.data('name') || node.data('label') || node.data('ip') || node.id();
                 const cleanName = String(rawName || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
 
@@ -5709,8 +6109,11 @@ class EASMDashboard {
 
     async setTarget(target, node = null) {
         try {
+            if (node && (node.data('type') === 'target' || node.id() === 'target_root' || node.data('is_root') === true)) {
+                return;
+            }
             target = String(target || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
-            if (!target) return;
+            if (!target || target === 'root') return;
             this.markedTargets.add(target);
             if (!this.targetStatuses[target]) {
                 this.targetStatuses[target] = {
@@ -5727,6 +6130,9 @@ class EASMDashboard {
             }
             this.updateTargetBadgeCount();
             this.renderTargetsList();
+            if (this.selectedNode) {
+                this.showNodeInspector(this.selectedNode);
+            }
             await window.api.setTarget(target);
         } catch (err) {
             console.error(`Failed to set target ${target}:`, err);
@@ -5742,6 +6148,9 @@ class EASMDashboard {
             this.syncTargetNodesStyling();
             this.updateTargetBadgeCount();
             this.renderTargetsList();
+            if (this.selectedNode) {
+                this.showNodeInspector(this.selectedNode);
+            }
             await window.api.removeTarget(target);
         } catch (err) {
             console.error(`Failed to remove target ${target}:`, err);
@@ -5752,11 +6161,12 @@ class EASMDashboard {
         try {
             this.markedTargets.clear();
             this.targetStatuses = {};
-            if (this.cy) {
-                this.cy.nodes('.is-target').removeClass('is-target');
-            }
+            this.syncTargetNodesStyling();
             this.updateTargetBadgeCount();
             this.renderTargetsList();
+            if (this.selectedNode) {
+                this.showNodeInspector(this.selectedNode);
+            }
             await window.api.clearTargets();
             this.addScanLog('info', 'All targets cleared.');
         } catch (err) {

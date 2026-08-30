@@ -208,39 +208,38 @@ def test_graph_builder_target_root_hierarchy(tmp_path: Path):
     nodes = graph["elements"]["nodes"]
     edges = graph["elements"]["edges"]
 
-    # 1. Target Domain node exists and is marked as is_root
-    domain_nodes = [n for n in nodes if n["data"]["type"] == "domain"]
-    assert len(domain_nodes) >= 1
-    root_domain = next((n for n in domain_nodes if n["data"]["name"] == "alvo.com"), None)
-    assert root_domain is not None
-    assert root_domain["data"]["is_root"] is True
+    # 1. Target Root node exists as primary anchor with embedded DNS inventory
+    target_root = next((n for n in nodes if n["data"]["id"] == "target_root"), None)
+    assert target_root is not None
+    assert target_root["data"]["is_root"] is True
+    assert target_root["data"]["total_subdomains"] == 2
+    assert len(target_root["data"]["all_subdomains"]) == 2
 
-    # 2. Subdomains exist
-    sub_nodes = [n for n in nodes if n["data"]["type"] == "subdomain"]
-    assert len(sub_nodes) == 2
-    sub_names = {n["data"]["name"] for n in sub_nodes}
-    assert "api.alvo.com" in sub_names
-    assert "vpn.alvo.com" in sub_names
-
-    # 3. IP node exists
+    # 2. IP node exists with associated FQDN metadata
     ip_nodes = [n for n in nodes if n["data"]["type"] == "ip"]
     assert len(ip_nodes) == 1
     assert ip_nodes[0]["data"]["ip"] == "10.20.30.40"
+    assert "api.alvo.com" in ip_nodes[0]["data"]["fqdns"]
 
-    # 4. Check hierarchy edges:
-    # Domain -> Subdomain (HAS_SUBDOMAIN)
-    dom_sub_edges = [e for e in edges if e["data"]["label"] == "HAS_SUBDOMAIN"]
-    assert len(dom_sub_edges) == 2
-    assert all(e["data"]["source"] == root_domain["data"]["id"] for e in dom_sub_edges)
+    # 3. Check hierarchy edges: Target Root -> IP (CONTAINS_TARGET)
+    target_edges = [e for e in edges if e["data"]["label"] == "CONTAINS_TARGET"]
+    assert len(target_edges) >= 1
+    assert any(e["data"]["source"] == "target_root" and e["data"]["target"] == ip_nodes[0]["data"]["id"] for e in target_edges)
 
-    # Subdomain (api.alvo.com) -> IP (RESOLVES_TO)
-    sub_ip_edges = [e for e in edges if e["data"]["label"] == "RESOLVES_TO"]
-    assert len(sub_ip_edges) >= 1
-
-    # IP -> Service (EXPOSES)
+    # 4. IP -> Service (EXPOSES)
     ip_srv_edges = [e for e in edges if e["data"]["label"] == "EXPOSES"]
     assert len(ip_srv_edges) >= 1
 
-    # Service -> Vulnerability (HAS_VULN)
+    # 5. Service -> Vulnerability (HAS_VULN)
     srv_vuln_edges = [e for e in edges if e["data"]["label"] == "HAS_VULN"]
     assert len(srv_vuln_edges) >= 1
+
+    # 6. Test explicit target promotion (api.alvo.com materializes as node when active target)
+    graph_with_target = builder.build_graph(active_targets=["api.alvo.com"])
+    target_nodes = graph_with_target["elements"]["nodes"]
+    target_edge_list = graph_with_target["elements"]["edges"]
+    sub_nodes = [n for n in target_nodes if n["data"]["type"] == "subdomain"]
+    assert len(sub_nodes) == 1
+    assert sub_nodes[0]["data"]["name"] == "api.alvo.com"
+    assert any(e["data"]["source"] == "target_root" and e["data"]["target"] == sub_nodes[0]["data"]["id"] for e in target_edge_list)
+    assert any(e["data"]["source"] == sub_nodes[0]["data"]["id"] and e["data"]["label"] == "RESOLVES_TO" for e in target_edge_list)

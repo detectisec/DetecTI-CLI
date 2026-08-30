@@ -266,8 +266,9 @@ async def get_graph_data(db: Optional[DatabaseManager] = Depends(get_db_manager)
         return {"elements": {"nodes": [], "edges": []}}
         
     try:
+        active_target_keys = list(_target_registry.keys())
         builder = GraphBuilder(db)
-        graph_data = builder.build_graph()
+        graph_data = builder.build_graph(active_targets=active_target_keys)
         return graph_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to build graph: {str(e)}")
