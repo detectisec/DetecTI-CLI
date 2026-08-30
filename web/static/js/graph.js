@@ -1357,11 +1357,12 @@ class EASMDashboard {
         if (!this.cy) return;
 
         // Get selected lead IDs
+        // Get selected lead IDs
         const selectedLeadIds = Array.from(this.selectedLeads);
         const visibleNodes = new Set();
 
-        // Rule: When NO leads are selected (default upon DB load), render NOTHING!
-        if (selectedLeadIds.length === 0) {
+        // Rule: When NO leads are selected (default upon DB load) AND NO search term is typed, render NOTHING!
+        if (selectedLeadIds.length === 0 && !this.searchTerm) {
             this.cy.nodes().hide();
             this.cy.edges().hide();
             this.visibleLeadNodes = new Set();
@@ -1372,62 +1373,78 @@ class EASMDashboard {
         this.cy.nodes().show();
         this.cy.edges().show();
 
-        // First pass: Find all selected lead nodes
-        selectedLeadIds.forEach(leadId => {
-            const node = this.cy.getElementById(leadId);
-            if (node.length > 0) {
-                visibleNodes.add(leadId);
-            }
-        });
+        // First pass: Find all selected lead nodes OR nodes matching search if no leads selected
+        let effectiveLeadIds = selectedLeadIds;
+        if (effectiveLeadIds.length === 0 && this.searchTerm) {
+            const term = this.searchTerm.toLowerCase();
+            this.cy.nodes().forEach(node => {
+                const data = node.data();
+                const fqdns = Array.isArray(data.fqdns) ? data.fqdns.join(' ') : '';
+                const allSubs = Array.isArray(data.all_subdomains) ? data.all_subdomains.map(s => s.name).join(' ') : '';
+                const allDoms = Array.isArray(data.all_domains) ? data.all_domains.map(d => d.name).join(' ') : '';
+                const searchStr = `${data.label || ''} ${data.name || ''} ${data.ip || ''} ${data.cve_id || ''} ${data.service || ''} ${data.product || ''} ${fqdns} ${allSubs} ${allDoms}`.toLowerCase();
+                if (searchStr.includes(term)) {
+                    visibleNodes.add(node.id());
+                }
+            });
+            effectiveLeadIds = Array.from(visibleNodes);
+        } else {
+            selectedLeadIds.forEach(leadId => {
+                const node = this.cy.getElementById(leadId);
+                if (node.length > 0) {
+                    visibleNodes.add(leadId);
+                }
+            });
+        }
 
-            // Second pass: For each selected lead, add ancestry towards root and downstream descendants
-            const addAncestors = (nodeId, visited = new Set()) => {
-                if (visited.has(nodeId)) return;
-                visited.add(nodeId);
-                
-                const node = this.cy.getElementById(nodeId);
-                if (!node.length) return;
-                
-                node.incomers('node').forEach(parentNode => {
-                    const parentId = parentNode.id();
-                    visibleNodes.add(parentId);
-                    addAncestors(parentId, visited);
+        // Second pass: For each selected lead, add ancestry towards root and downstream descendants
+        const addAncestors = (nodeId, visited = new Set()) => {
+            if (visited.has(nodeId)) return;
+            visited.add(nodeId);
+            
+            const node = this.cy.getElementById(nodeId);
+            if (!node.length) return;
+            
+            node.incomers('node').forEach(parentNode => {
+                const parentId = parentNode.id();
+                visibleNodes.add(parentId);
+                addAncestors(parentId, visited);
+            });
+
+            if (node.data('type') === 'ip') {
+                node.outgoers('node[type="network"]').forEach(netNode => {
+                    const netId = netNode.id();
+                    visibleNodes.add(netId);
+                    addAncestors(netId, visited);
                 });
+            }
 
-                if (node.data('type') === 'ip') {
-                    node.outgoers('node[type="network"]').forEach(netNode => {
+            if (node.data('type') === 'domain' || node.data('type') === 'subdomain') {
+                node.outgoers('node[type="ip"]').forEach(ipNode => {
+                    ipNode.outgoers('node[type="network"]').forEach(netNode => {
                         const netId = netNode.id();
                         visibleNodes.add(netId);
                         addAncestors(netId, visited);
                     });
-                }
-
-                if (node.data('type') === 'domain' || node.data('type') === 'subdomain') {
-                    node.outgoers('node[type="ip"]').forEach(ipNode => {
-                        ipNode.outgoers('node[type="network"]').forEach(netNode => {
-                            const netId = netNode.id();
-                            visibleNodes.add(netId);
-                            addAncestors(netId, visited);
-                        });
-                    });
-                }
-            };
-
-            const addDescendants = (nodeId, visited = new Set()) => {
-                if (visited.has(nodeId)) return;
-                visited.add(nodeId);
-                
-                const node = this.cy.getElementById(nodeId);
-                if (!node.length) return;
-                
-                node.outgoers('node').forEach(childNode => {
-                    const childId = childNode.id();
-                    visibleNodes.add(childId);
-                    addDescendants(childId, visited);
                 });
-            };
+            }
+        };
 
-        selectedLeadIds.forEach(leadId => {
+        const addDescendants = (nodeId, visited = new Set()) => {
+            if (visited.has(nodeId)) return;
+            visited.add(nodeId);
+            
+            const node = this.cy.getElementById(nodeId);
+            if (!node.length) return;
+            
+            node.outgoers('node').forEach(childNode => {
+                const childId = childNode.id();
+                visibleNodes.add(childId);
+                addDescendants(childId, visited);
+            });
+        };
+
+        effectiveLeadIds.forEach(leadId => {
             addAncestors(leadId);
             addDescendants(leadId);
         });
@@ -3620,6 +3637,11 @@ class EASMDashboard {
                     if (pNode.length > 0) parentData = pNode.data();
                 }
 
+                const fqdnsStr = Array.isArray(data.fqdns) ? data.fqdns.join(' ') : '';
+                const allSubsStr = Array.isArray(data.all_subdomains) ? data.all_subdomains.map(s => s.name).join(' ') : '';
+                const allDomsStr = Array.isArray(data.all_domains) ? data.all_domains.map(d => d.name).join(' ') : '';
+                const parentFqdnsStr = Array.isArray(parentData.fqdns) ? parentData.fqdns.join(' ') : '';
+
                 const searchableText = [
                     data.label,
                     data.name,
@@ -3630,10 +3652,14 @@ class EASMDashboard {
                     data.org,
                     data.country,
                     data.port ? data.port.toString() : '',
+                    fqdnsStr,
+                    allSubsStr,
+                    allDomsStr,
                     parentData.label,
                     parentData.name,
                     parentData.ip,
-                    parentData.org
+                    parentData.org,
+                    parentFqdnsStr
                 ].filter(Boolean).join(' ').toLowerCase();
                 
                 if (searchableText.includes(this.searchTerm)) {
