@@ -1357,12 +1357,11 @@ class EASMDashboard {
         if (!this.cy) return;
 
         // Get selected lead IDs
-        // Get selected lead IDs
         const selectedLeadIds = Array.from(this.selectedLeads);
         const visibleNodes = new Set();
 
-        // Rule: When NO leads are selected (default upon DB load) AND NO search term is typed, render NOTHING!
-        if (selectedLeadIds.length === 0 && !this.searchTerm) {
+        // Rule: When NO leads are selected (default upon DB load), render NOTHING!
+        if (selectedLeadIds.length === 0) {
             this.cy.nodes().hide();
             this.cy.edges().hide();
             this.visibleLeadNodes = new Set();
@@ -1373,29 +1372,13 @@ class EASMDashboard {
         this.cy.nodes().show();
         this.cy.edges().show();
 
-        // First pass: Find all selected lead nodes OR nodes matching search if no leads selected
-        let effectiveLeadIds = selectedLeadIds;
-        if (effectiveLeadIds.length === 0 && this.searchTerm) {
-            const term = this.searchTerm.toLowerCase();
-            this.cy.nodes().forEach(node => {
-                const data = node.data();
-                const fqdns = Array.isArray(data.fqdns) ? data.fqdns.join(' ') : '';
-                const allSubs = Array.isArray(data.all_subdomains) ? data.all_subdomains.map(s => s.name).join(' ') : '';
-                const allDoms = Array.isArray(data.all_domains) ? data.all_domains.map(d => d.name).join(' ') : '';
-                const searchStr = `${data.label || ''} ${data.name || ''} ${data.ip || ''} ${data.cve_id || ''} ${data.service || ''} ${data.product || ''} ${fqdns} ${allSubs} ${allDoms}`.toLowerCase();
-                if (searchStr.includes(term)) {
-                    visibleNodes.add(node.id());
-                }
-            });
-            effectiveLeadIds = Array.from(visibleNodes);
-        } else {
-            selectedLeadIds.forEach(leadId => {
-                const node = this.cy.getElementById(leadId);
-                if (node.length > 0) {
-                    visibleNodes.add(leadId);
-                }
-            });
-        }
+        // First pass: Find all selected lead nodes
+        selectedLeadIds.forEach(leadId => {
+            const node = this.cy.getElementById(leadId);
+            if (node.length > 0) {
+                visibleNodes.add(leadId);
+            }
+        });
 
         // Second pass: For each selected lead, add ancestry towards root and downstream descendants
         const addAncestors = (nodeId, visited = new Set()) => {
@@ -1444,7 +1427,7 @@ class EASMDashboard {
             });
         };
 
-        effectiveLeadIds.forEach(leadId => {
+        selectedLeadIds.forEach(leadId => {
             addAncestors(leadId);
             addDescendants(leadId);
         });
@@ -3004,8 +2987,8 @@ class EASMDashboard {
         const searchInput = document.getElementById('search-input');
         if (searchInput) {
             searchInput.addEventListener('input', (e) => {
-                this.searchTerm = e.target.value.toLowerCase();
-                this.applyLeadFilter({ relayout: false });
+                this.searchTerm = e.target.value.toLowerCase().trim();
+                this.applyFilters({ relayout: false });
             });
         }
 
@@ -3014,7 +2997,7 @@ class EASMDashboard {
             clearSearchBtn.addEventListener('click', () => {
                 if (searchInput) searchInput.value = '';
                 this.searchTerm = '';
-                this.applyLeadFilter({ relayout: false });
+                this.applyFilters({ relayout: false });
             });
         }
 
@@ -3637,10 +3620,10 @@ class EASMDashboard {
                     if (pNode.length > 0) parentData = pNode.data();
                 }
 
-                const fqdnsStr = Array.isArray(data.fqdns) ? data.fqdns.join(' ') : '';
-                const allSubsStr = Array.isArray(data.all_subdomains) ? data.all_subdomains.map(s => s.name).join(' ') : '';
-                const allDomsStr = Array.isArray(data.all_domains) ? data.all_domains.map(d => d.name).join(' ') : '';
-                const parentFqdnsStr = Array.isArray(parentData.fqdns) ? parentData.fqdns.join(' ') : '';
+                const isRoot = node.id() === 'target_root' || data.is_root === true;
+                const fqdnsStr = (!isRoot && Array.isArray(data.fqdns)) ? data.fqdns.join(' ') : '';
+                const targetsListStr = isRoot && Array.isArray(data.targets_list) ? data.targets_list.join(' ') : '';
+                const parentFqdnsStr = (!isRoot && Array.isArray(parentData.fqdns)) ? parentData.fqdns.join(' ') : '';
 
                 const searchableText = [
                     data.label,
@@ -3649,12 +3632,12 @@ class EASMDashboard {
                     data.cve_id,
                     data.service,
                     data.product,
+                    data.banner,
                     data.org,
                     data.country,
                     data.port ? data.port.toString() : '',
                     fqdnsStr,
-                    allSubsStr,
-                    allDomsStr,
+                    targetsListStr,
                     parentData.label,
                     parentData.name,
                     parentData.ip,
