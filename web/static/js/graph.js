@@ -4356,11 +4356,18 @@ class EASMDashboard {
         const showSuccess = () => {
             if (buttonEl) {
                 const originalText = buttonEl.innerHTML;
-                buttonEl.innerHTML = '<i data-lucide="check" class="badge-icon"></i> Copied!';
+                const hasLabel = originalText.toLowerCase().includes('copy');
+                buttonEl.innerHTML = hasLabel 
+                    ? '<i data-lucide="check" class="badge-icon"></i> Copied!'
+                    : '<i data-lucide="check" style="width: 11px; height: 11px; color: #2ecc71;"></i>';
                 buttonEl.style.background = 'rgba(39, 174, 96, 0.3)';
                 buttonEl.style.borderColor = 'rgba(39, 174, 96, 0.7)';
                 buttonEl.style.color = '#2ecc71';
                 if (typeof lucide !== 'undefined') lucide.createIcons();
+                if (typeof this.showToast === 'function' && !hasLabel) {
+                    const previewText = textToCopy.length > 35 ? textToCopy.substring(0, 32) + '...' : textToCopy;
+                    this.showToast('success', `Copied '${previewText}' to clipboard`);
+                }
                 setTimeout(() => {
                     buttonEl.innerHTML = originalText;
                     buttonEl.style.background = '';
@@ -4807,7 +4814,7 @@ class EASMDashboard {
 
                 const actionToolbar = `
                     <div style="display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap;">
-                        <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 0.72rem; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.06); color: #fff; border: 1px solid rgba(255,255,255,0.15);" onclick="window.dashboard.copyFqdnsList('${data.id}')">
+                        <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 0.72rem; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.06); color: #fff; border: 1px solid rgba(255,255,255,0.15);" onclick="window.dashboard.copyFqdnsList('${data.id}', this)">
                             <i data-lucide="copy" style="width: 12px; height: 12px;"></i> Copy All (${totalFqdns})
                         </button>
                         <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 0.72rem; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; background: rgba(0,240,255,0.1); color: #00f0ff; border: 1px solid rgba(0,240,255,0.3);" onclick="window.dashboard.targetAllIpFqdns('${data.id}')">
@@ -4837,7 +4844,7 @@ class EASMDashboard {
                             <button type="button" style="margin: 0; padding: 2px 6px; font-size: 0.68rem; border-radius: 3px; border: 1px solid; cursor: pointer; transition: all 0.2s; ${targetBtnStyle}" onclick="event.stopPropagation(); window.dashboard.toggleTargetMark('${item.name}')" title="Toggle as target">
                                 ${targetBtnText}
                             </button>
-                            <button type="button" style="margin: 0; padding: 2px 5px; font-size: 0.68rem; background: rgba(255,255,255,0.05); color: var(--text-muted); border: 1px solid rgba(255,255,255,0.15); border-radius: 3px; cursor: pointer;" onclick="event.stopPropagation(); navigator.clipboard.writeText('${item.name}'); if(window.dashboard.showToast) window.dashboard.showToast('Copied ${item.name}');" title="Copy FQDN">
+                            <button type="button" style="margin: 0; padding: 2px 6px; font-size: 0.68rem; background: rgba(255,255,255,0.08); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.2); border-radius: 3px; cursor: pointer;" onclick="event.stopPropagation(); window.dashboard.copyTextList('${item.name}', this);" title="Copy FQDN">
                                 <i data-lucide="copy" style="width: 10px; height: 10px;"></i>
                             </button>
                         </div>
@@ -5824,7 +5831,7 @@ class EASMDashboard {
         });
     }
 
-    async copyFqdnsList(ipNodeId) {
+    async copyFqdnsList(ipNodeId, buttonEl = null) {
         let fqdns = [];
         if (this.cy) {
             const node = this.cy.getElementById(ipNodeId);
@@ -5843,8 +5850,7 @@ class EASMDashboard {
             }
         }
         if (fqdns.length === 0) return;
-        const text = fqdns.join('\n');
-        await navigator.clipboard.writeText(text);
+        this.copyTextList(fqdns, buttonEl);
         if (typeof this.showToast === 'function') {
             this.showToast('success', `Copied ${fqdns.length} FQDNs to clipboard`);
         }
