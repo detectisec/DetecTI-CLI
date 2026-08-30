@@ -4364,10 +4364,6 @@ class EASMDashboard {
                 buttonEl.style.borderColor = 'rgba(39, 174, 96, 0.7)';
                 buttonEl.style.color = '#2ecc71';
                 if (typeof lucide !== 'undefined') lucide.createIcons();
-                if (typeof this.showToast === 'function' && !hasLabel) {
-                    const previewText = textToCopy.length > 35 ? textToCopy.substring(0, 32) + '...' : textToCopy;
-                    this.showToast('success', `Copied '${previewText}' to clipboard`);
-                }
                 setTimeout(() => {
                     buttonEl.innerHTML = originalText;
                     buttonEl.style.background = '';
@@ -4375,6 +4371,13 @@ class EASMDashboard {
                     buttonEl.style.color = '';
                     if (typeof lucide !== 'undefined') lucide.createIcons();
                 }, 1800);
+            }
+            if (typeof this.showToast === 'function') {
+                const isMultiple = Array.isArray(items) && items.length > 1;
+                const msg = isMultiple 
+                    ? `Copied ${items.length} items to clipboard`
+                    : `Copied '${textToCopy.length > 40 ? textToCopy.substring(0, 37) + '...' : textToCopy}' to clipboard`;
+                this.showToast('success', msg);
             }
         };
 
@@ -6086,6 +6089,9 @@ class EASMDashboard {
             }
             this.updateTargetBadgeCount();
             this.renderTargetsList();
+            if (typeof this.showToast === 'function') {
+                this.showToast('success', `🎯 Marked ${cleanTargets.length} target(s)`);
+            }
             await Promise.all(cleanTargets.map(t => window.api.setTarget(t)));
         } catch (err) {
             console.error('Failed to set targets bulk:', err);
@@ -6107,6 +6113,9 @@ class EASMDashboard {
             this.syncTargetNodesStyling();
             this.updateTargetBadgeCount();
             this.renderTargetsList();
+            if (typeof this.showToast === 'function') {
+                this.showToast('info', `Removed ${cleanTargets.length} target(s) from scan list`);
+            }
             await Promise.all(cleanTargets.map(t => window.api.removeTarget(t)));
         } catch (err) {
             console.error('Failed to remove targets bulk:', err);
@@ -6139,6 +6148,9 @@ class EASMDashboard {
             if (this.selectedNode) {
                 this.showNodeInspector(this.selectedNode);
             }
+            if (typeof this.showToast === 'function') {
+                this.showToast('success', `🎯 Target set: ${target}`);
+            }
             await window.api.setTarget(target);
         } catch (err) {
             console.error(`Failed to set target ${target}:`, err);
@@ -6157,6 +6169,9 @@ class EASMDashboard {
             if (this.selectedNode) {
                 this.showNodeInspector(this.selectedNode);
             }
+            if (typeof this.showToast === 'function') {
+                this.showToast('info', `Target removed: ${target}`);
+            }
             await window.api.removeTarget(target);
         } catch (err) {
             console.error(`Failed to remove target ${target}:`, err);
@@ -6172,6 +6187,9 @@ class EASMDashboard {
             this.renderTargetsList();
             if (this.selectedNode) {
                 this.showNodeInspector(this.selectedNode);
+            }
+            if (typeof this.showToast === 'function') {
+                this.showToast('info', 'Cleared all scan targets');
             }
             await window.api.clearTargets();
             this.addScanLog('info', 'All targets cleared.');
