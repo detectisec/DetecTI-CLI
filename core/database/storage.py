@@ -1312,6 +1312,53 @@ class DatabaseManager:
             "total_processed": len(findings),
         }
 
+    def add_scan_log(self, level: str, message: str, target: Optional[str] = None, timestamp: Optional[str] = None) -> int:
+        """Insert a scan execution log entry into SQLite."""
+        if not timestamp:
+            timestamp = datetime.now().strftime("%H:%M:%S")
+        with sqlite3.connect(self.db_path) as conn:
+            cur = conn.execute("""
+                INSERT INTO scan_logs (timestamp, level, message, target)
+                VALUES (?, ?, ?, ?)
+            """, (timestamp, level, message, target))
+            conn.commit()
+            return cur.lastrowid or 0
+
+    def get_scan_logs(self, limit: int = 150, target: Optional[str] = None) -> List[Dict]:
+        """Retrieve recent scan execution logs from SQLite."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if target:
+                rows = conn.execute("""
+                    SELECT id, timestamp, level, message, target, created_at
+                    FROM scan_logs
+                    WHERE target = ?
+                    ORDER BY id ASC
+                    LIMIT ?
+                """, (target, limit)).fetchall()
+            else:
+                rows = conn.execute("""
+                    SELECT id, timestamp, level, message, target, created_at
+                    FROM (
+                        SELECT id, timestamp, level, message, target, created_at
+                        FROM scan_logs
+                        ORDER BY id DESC
+                        LIMIT ?
+                    )
+                    ORDER BY id ASC
+                """, (limit,)).fetchall()
+
+            return [
+                {
+                    "id": row["id"],
+                    "timestamp": row["timestamp"],
+                    "level": row["level"],
+                    "message": row["message"],
+                    "target": row["target"],
+                }
+                for row in rows
+            ]
+
     @staticmethod
     def get_db_path_for_target(target: str, data_dir: Optional[Path] = None) -> Path:
         """Generate standardized database path for a target."""

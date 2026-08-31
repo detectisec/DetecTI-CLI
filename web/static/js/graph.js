@@ -5849,8 +5849,44 @@ class EASMDashboard {
                 this.updateTargetBadgeCount();
                 this.renderTargetsList();
             }
+
+            // Restore historical scan logs and check if active polling is needed
+            await this.loadScanLogs();
         } catch (err) {
             console.error('Failed to load targets from API:', err);
+        }
+    }
+
+    async loadScanLogs() {
+        try {
+            const res = await window.api.getScanLogs(100);
+            const consoleEl = document.getElementById('scan-live-console');
+            if (consoleEl && res && Array.isArray(res.logs) && res.logs.length > 0) {
+                consoleEl.innerHTML = '';
+                res.logs.forEach(log => {
+                    const line = document.createElement('div');
+                    line.className = `console-line ${log.level || 'info'}`;
+                    const timeStr = log.timestamp || '';
+                    line.textContent = timeStr ? `[${timeStr}] ${log.message}` : log.message;
+                    consoleEl.appendChild(line);
+                });
+                consoleEl.scrollTop = consoleEl.scrollHeight;
+            }
+
+            // Check if any scan is actively running in background and auto-resume polling
+            const status = await window.api.getScanStatus();
+            if (status && status.running_scans > 0) {
+                if (Array.isArray(status.targets)) {
+                    status.targets.forEach(t => {
+                        this.targetStatuses[t.ip] = t;
+                    });
+                    this.updateTargetBadgeCount();
+                    this.renderTargetsList();
+                }
+                this.startStatusPolling();
+            }
+        } catch (err) {
+            console.warn('Failed to restore persistent scan logs:', err);
         }
     }
 

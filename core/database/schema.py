@@ -112,6 +112,16 @@ CREATE TABLE IF NOT EXISTS scan_results (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Scan Live Logs Persistence
+CREATE TABLE IF NOT EXISTS scan_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    level TEXT NOT NULL,
+    message TEXT NOT NULL,
+    target TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_subdomains_domain_id ON subdomains(domain_id);
 CREATE INDEX IF NOT EXISTS idx_services_ip_id ON services(ip_id);
@@ -120,4 +130,6 @@ CREATE INDEX IF NOT EXISTS idx_vulnerabilities_ip_id ON vulnerabilities(ip_id);
 CREATE INDEX IF NOT EXISTS idx_vulnerabilities_cve_id ON vulnerabilities(cve_id);
 CREATE INDEX IF NOT EXISTS idx_exploits_vulnerability_id ON exploits(vulnerability_id);
 CREATE INDEX IF NOT EXISTS idx_scan_results_target ON scan_results(target);
+CREATE INDEX IF NOT EXISTS idx_scan_logs_target ON scan_logs(target);
+CREATE INDEX IF NOT EXISTS idx_scan_logs_id ON scan_logs(id);
 """

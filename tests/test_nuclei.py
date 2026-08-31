@@ -159,3 +159,35 @@ async def test_nuclei_runner_scan_targets_empty():
     assert res["total_findings"] == 0
 
 
+def test_scan_logs_persistence():
+    with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as tf:
+        db_path = Path(tf.name)
+
+    try:
+        dm = DatabaseManager(db_path)
+
+        id1 = dm.add_scan_log(level="info", message="Started scan on target 192.0.2.1", target="192.0.2.1", timestamp="12:00:01")
+        id2 = dm.add_scan_log(level="success", message="Discovered port 443 open", target="192.0.2.1", timestamp="12:00:05")
+        id3 = dm.add_scan_log(level="warning", message="Rate limit approaching on 198.51.100.1", target="198.51.100.1", timestamp="12:00:10")
+
+        assert id1 > 0
+        assert id2 > id1
+        assert id3 > id2
+
+        logs = dm.get_scan_logs(limit=10)
+        assert len(logs) == 3
+        assert logs[0]["message"] == "Started scan on target 192.0.2.1"
+        assert logs[1]["level"] == "success"
+        assert logs[2]["target"] == "198.51.100.1"
+
+        target_logs = dm.get_scan_logs(limit=10, target="192.0.2.1")
+        assert len(target_logs) == 2
+        assert target_logs[0]["target"] == "192.0.2.1"
+        assert target_logs[1]["target"] == "192.0.2.1"
+
+    finally:
+        if db_path.exists():
+            db_path.unlink()
+
+
+

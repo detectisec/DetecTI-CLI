@@ -161,6 +161,14 @@ class APIClient {
     async getScanStatus() {
         return this.request('/scan/status');
     }
+
+    async getScanLogs(limit = 100, target = null) {
+        let endpoint = `/scan/logs?limit=${encodeURIComponent(limit)}`;
+        if (target) {
+            endpoint += `&target=${encodeURIComponent(target)}`;
+        }
+        return this.request(endpoint);
+    }
 }
 
 // Global API client instance

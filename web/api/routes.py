@@ -493,16 +493,25 @@ class UnverifyServicesRequest(BaseModel):
     all_services: Optional[bool] = False
 
 
-def _append_scan_log(level: str, message: str, target: Optional[str] = None):
+def _append_scan_log(level: str, message: str, target: Optional[str] = None, db: Optional[DatabaseManager] = None):
+    ts = datetime.now().strftime("%H:%M:%S")
     entry = {
-        "timestamp": datetime.now().strftime("%H:%M:%S"),
+        "timestamp": ts,
         "level": level,
         "message": message,
         "target": target,
     }
     _scan_log_history.append(entry)
-    if len(_scan_log_history) > 150:
+    if len(_scan_log_history) > 200:
         _scan_log_history.pop(0)
+
+    # Persist to active SQLite database
+    resolved_db = db or _resolve_db_manager(None, None, target=target)
+    if resolved_db and Path(resolved_db.db_path).exists():
+        try:
+            resolved_db.add_scan_log(level=level, message=message, target=target, timestamp=ts)
+        except Exception:
+            pass
 
 
 @router.get("/targets")
@@ -599,12 +608,13 @@ async def clear_all_targets() -> Dict:
     }
 
 
-def _resolve_db_manager(request: Request, db: Optional[DatabaseManager] = None, target: Optional[str] = None) -> Optional[DatabaseManager]:
+def _resolve_db_manager(request: Optional[Request] = None, db: Optional[DatabaseManager] = None, target: Optional[str] = None) -> Optional[DatabaseManager]:
     if db and Path(db.db_path).exists():
         return db
-    app_db = getattr(request.app.state, "db_manager", None)
-    if app_db and Path(app_db.db_path).exists():
-        return app_db
+    if request:
+        app_db = getattr(request.app.state, "db_manager", None)
+        if app_db and Path(app_db.db_path).exists():
+            return app_db
     if target:
         cand = Path.cwd() / "data" / "dbs" / f"{target}.sqlite"
         if cand.exists():
@@ -1446,16 +1456,64 @@ async def cancel_active_scan(req: CancelScanRequest) -> Dict:
     }
 
 
+@router.get("/scan/logs")
+async def get_scan_logs_endpoint(
+    request: Request,
+    limit: int = Query(100, ge=1, le=500),
+    target: Optional[str] = Query(None),
+    db: Optional[DatabaseManager] = Depends(get_db_manager),
+) -> Dict:
+    """Retrieve scan activity logs from database with fallback to memory buffer."""
+    active_db = _resolve_db_manager(request, db, target=target)
+    if active_db and Path(active_db.db_path).exists():
+        try:
+            db_logs = active_db.get_scan_logs(limit=limit, target=target)
+            if db_logs:
+                return {
+                    "logs": db_logs,
+                    "total": len(db_logs),
+                    "source": "sqlite",
+                }
+        except Exception:
+            pass
+
+    # Fallback to in-memory history
+    filtered = _scan_log_history
+    if target:
+        filtered = [l for l in _scan_log_history if l.get("target") == target]
+
+    return {
+        "logs": filtered[-limit:],
+        "total": len(filtered[-limit:]),
+        "source": "memory",
+    }
+
+
 @router.get("/scan/status")
-async def get_scan_status() -> Dict:
+async def get_scan_status(
+    request: Request,
+    db: Optional[DatabaseManager] = Depends(get_db_manager),
+) -> Dict:
     """Get real-time scan status, target registry, and recent activity logs."""
     running_masscan = sum(1 for t in _target_registry.values() if t.get("status") == "scanning")
     running_nuclei = sum(1 for t in _target_registry.values() if t.get("nuclei_status") == "scanning")
+
+    # Fetch logs from DB if available, else memory buffer
+    recent_logs = _scan_log_history[-50:]
+    active_db = _resolve_db_manager(request, db)
+    if active_db and Path(active_db.db_path).exists():
+        try:
+            db_logs = active_db.get_scan_logs(limit=60)
+            if db_logs:
+                recent_logs = db_logs
+        except Exception:
+            pass
+
     return {
         "running_scans": running_masscan + running_nuclei,
         "running_masscan": running_masscan,
         "running_nuclei": running_nuclei,
         "targets": list(_target_registry.values()),
         "total_targets": len(_target_registry),
-        "recent_logs": _scan_log_history[-40:],
+        "recent_logs": recent_logs,
     }
