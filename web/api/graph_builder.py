@@ -277,11 +277,24 @@ class GraphBuilder:
             if fqdn:
                 ip_to_fqdns.setdefault(str(ip_id), []).append(fqdn)
         
+        fqdn_set = spawned_fqdn_ids or set()
+        ips_resolved_by_visible_fqdns = set()
         targets_set = set(t.strip().lower() for t in targets_list) if targets_list else set()
+        
+        # Calculate which IPs already receive RESOLVES_TO from a visible FQDN node
+        for sub_id, ip_ids in subdomain_to_ips.items():
+            if f"sub_{sub_id}" in fqdn_set:
+                for ip_id in ip_ids:
+                    ips_resolved_by_visible_fqdns.add(str(ip_id))
+
+        for dom_id, ip_ids in domain_to_ips.items():
+            if f"dom_{dom_id}" in fqdn_set:
+                for ip_id in ip_ids:
+                    ips_resolved_by_visible_fqdns.add(str(ip_id))
 
         for ip_id, ip, org, country, city, region_code, asn, postal_code, latitude, longitude in ip_rows:
             fqdns = ip_to_fqdns.get(str(ip_id), [])
-            is_tgt = bool(ip and ip.strip().lower() in targets_set)
+            is_explicit_ip_tgt = bool(ip and ip.strip().lower() in targets_set)
             node_dict = {
                 "data": {
                     "id": f"ip_{ip_id}",
@@ -298,15 +311,18 @@ class GraphBuilder:
                     "asn": asn or "Unknown",
                     "fqdns": fqdns,
                     "fqdn_count": len(fqdns),
-                    "is_target": is_tgt
+                    "is_target": is_explicit_ip_tgt
                 }
             }
-            if is_tgt:
+            if is_explicit_ip_tgt:
                 node_dict["classes"] = "is-target"
             nodes.append(node_dict)
 
-            # Every Host IP directly relates to target_root via CONTAINS_TARGET
-            if root_target_node:
+            # Connect Target Root -> Host IP via CONTAINS_TARGET ONLY if:
+            # 1. IP is explicitly listed as a direct target (raw IP in targets_list); OR
+            # 2. IP has NO parent FQDN node currently rendered on the graph canvas
+            has_visible_fqdn_parent = str(ip_id) in ips_resolved_by_visible_fqdns
+            if root_target_node and (is_explicit_ip_tgt or not has_visible_fqdn_parent):
                 edges.append({
                     "data": {
                         "id": f"e_root_ip_{ip_id}",
@@ -317,7 +333,6 @@ class GraphBuilder:
                 })
         
         # Connect Explicit FQDN targets -> IPs (RESOLVES_TO) ONLY if the node exists in graph
-        fqdn_set = spawned_fqdn_ids or set()
         for sub_id, ip_ids in subdomain_to_ips.items():
             sub_node_id = f"sub_{sub_id}"
             if sub_node_id in fqdn_set:
