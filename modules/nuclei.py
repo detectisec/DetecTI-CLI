@@ -115,10 +115,14 @@ class NucleiRunner:
         rate_limit: int = 150,
         concurrency: int = 25,
         custom_flags: Optional[str] = None,
-        timeout: float = 600.0,
+        timeout: Optional[float] = None,
+        idle_timeout: float = 90.0,
+        max_timeout: Optional[float] = 3600.0,
         log_callback: Optional[Callable[[str, str], Any]] = None,
     ) -> Dict[str, Any]:
-        """Execute nuclei against a list of formatted targets with real-time JSONL parsing."""
+        """Execute nuclei against a list of formatted targets with real-time JSONL parsing,
+        anti-hang flags, an adaptive idle watchdog, and graceful SIGINT termination.
+        """
         if not self.is_available():
             return {
                 "success": False,
@@ -135,6 +139,8 @@ class NucleiRunner:
                 "error": None,
                 "total_findings": 0,
             }
+
+        import time
 
         # Normalize severities
         sev_list = [s.strip().lower() for s in (severities or ["critical", "high"]) if s.strip()]
@@ -156,6 +162,11 @@ class NucleiRunner:
             for t in targets:
                 tf.write(f"{t.strip()}\n")
 
+        # Core Command with Anti-Hang & Stats Heartbeat Flags:
+        # -timeout 5: Prevents hung sockets from stalling concurrency workers
+        # -retries 1: Avoids retry storms on dropped packets / unresponsive ports
+        # -mhe 3: Skips host after 3 consecutive failures to prevent scanning dead targets
+        # -stats -si 15: Emits progress heartbeat every 15s to keep idle watchdog active
         cmd: List[str] = [
             self.binary_path,
             "-list", target_file_path,
@@ -163,8 +174,11 @@ class NucleiRunner:
             "-severity", ",".join(sev_list),
             "-rl", str(max(10, rate_limit)),
             "-c", str(max(1, concurrency)),
-            "-stats=false",
-            "-silent",
+            "-timeout", "5",
+            "-retries", "1",
+            "-mhe", "3",
+            "-stats",
+            "-si", "15",
         ]
 
         if unique_tags:
@@ -179,11 +193,29 @@ class NucleiRunner:
 
         findings: List[Dict[str, Any]] = []
         raw_errors: List[str] = []
+        last_activity = [time.time()]
 
         if log_callback:
-            log_callback("info", f"Starting Nuclei scan on {len(targets)} target(s) [Severities: {','.join(sev_list)}]")
+            log_callback("info", f"Starting Nuclei scan on {len(targets)} target(s) [Severities: {','.join(sev_list)}] (Rate: {rate_limit} req/s, Concurrency: {concurrency}, Stats Heartbeat: 15s)")
 
         proc = None
+
+        async def _graceful_terminate(p):
+            """Send SIGINT to allow Nuclei to flush findings and close sockets cleanly."""
+            if p and p.returncode is None:
+                try:
+                    import signal
+                    p.send_signal(signal.SIGINT)
+                    try:
+                        await asyncio.wait_for(p.wait(), timeout=3.5)
+                    except (asyncio.TimeoutError, Exception):
+                        p.kill()
+                except Exception:
+                    try:
+                        p.kill()
+                    except Exception:
+                        pass
+
         try:
             logger.info(f"Executing Nuclei: {' '.join(cmd)}")
             proc = await asyncio.create_subprocess_exec(
@@ -198,6 +230,7 @@ class NucleiRunner:
                     line = await proc.stdout.readline()
                     if not line:
                         break
+                    last_activity[0] = time.time()
                     line_str = line.decode("utf-8", errors="replace").strip()
                     if not line_str:
                         continue
@@ -212,7 +245,7 @@ class NucleiRunner:
                                 matched = parsed_finding.get("matched_at") or parsed_finding.get("host")
                                 log_callback("warn" if sev in ["CRITICAL", "HIGH"] else "info", f"[{sev}] {name} on {matched}")
                     except json.JSONDecodeError:
-                        if log_callback and ("[" in line_str or "ERR" in line_str):
+                        if log_callback and ("[" in line_str or "ERR" in line_str or "Templates:" in line_str):
                             log_callback("info", line_str)
 
             async def read_stderr():
@@ -221,14 +254,41 @@ class NucleiRunner:
                     line = await proc.stderr.readline()
                     if not line:
                         break
+                    last_activity[0] = time.time()
                     err_str = line.decode("utf-8", errors="replace").strip()
                     if err_str:
-                        raw_errors.append(err_str)
-                        logger.debug(f"Nuclei stderr: {err_str}")
+                        # If it's a stats heartbeat line (e.g. [0:00:15] | Templates: ...), log as info/debug heartbeat
+                        if "Templates:" in err_str or "Requests:" in err_str or "[stats]" in err_str.lower():
+                            logger.debug(f"Nuclei stats heartbeat: {err_str}")
+                        else:
+                            raw_errors.append(err_str)
+                            logger.debug(f"Nuclei stderr: {err_str}")
 
-            await asyncio.wait_for(
-                asyncio.gather(read_stdout(), read_stderr(), proc.wait()),
-                timeout=timeout
+            async def watchdog():
+                """Monitor stream activity and trigger graceful exit if idle or max timeout reached."""
+                start_t = time.time()
+                while proc.returncode is None:
+                    await asyncio.sleep(2.0)
+                    now_t = time.time()
+                    # 1. Check Idle Watchdog (no response or activity on sockets for > idle_timeout)
+                    if idle_timeout and (now_t - last_activity[0]) > idle_timeout:
+                        logger.warning(f"Nuclei idle watchdog triggered: zero activity/heartbeat for >{idle_timeout}s.")
+                        raise asyncio.TimeoutError(f"Nuclei scan idle for >{idle_timeout}s without response")
+                    # 2. Check Absolute Max Timeout (safety cap)
+                    if max_timeout and (now_t - start_t) > max_timeout:
+                        logger.warning(f"Nuclei reached absolute max execution ceiling of {max_timeout}s.")
+                        raise asyncio.TimeoutError(f"Nuclei scan reached max execution ceiling of {max_timeout}s")
+                    # 3. Check legacy custom timeout if explicitly passed
+                    if timeout and (now_t - start_t) > timeout:
+                        logger.warning(f"Nuclei reached custom timeout of {timeout}s.")
+                        raise asyncio.TimeoutError(f"Nuclei scan timed out after {timeout}s")
+
+            # Run streams, process wait, and watchdog concurrently
+            await asyncio.gather(
+                read_stdout(),
+                read_stderr(),
+                proc.wait(),
+                watchdog(),
             )
 
             if log_callback:
@@ -244,39 +304,52 @@ class NucleiRunner:
                 "error": None if not raw_errors else "\n".join(raw_errors[:5]),
             }
 
-        except asyncio.TimeoutError:
-            if proc:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-            msg = f"Nuclei scan timed out after {timeout}s"
-            logger.error(msg)
+        except asyncio.TimeoutError as te:
+            await _graceful_terminate(proc)
+            msg = str(te) if str(te) else f"Nuclei scan timed out"
+            logger.warning(f"{msg}. Preserving {len(findings)} accumulated findings.")
             if log_callback:
-                log_callback("error", msg)
+                log_callback("warn" if findings else "error", f"{msg} ({len(findings)} findings preserved).")
             return {
-                "success": False,
+                "success": len(findings) > 0,
                 "targets": targets,
+                "severities": sev_list,
+                "tags": unique_tags,
                 "findings": findings,
                 "total_findings": len(findings),
-                "error": msg,
+                "error": msg if not findings else None,
+                "partial": True,
+            }
+        except asyncio.CancelledError:
+            await _graceful_terminate(proc)
+            logger.info(f"Nuclei scan cancelled by user. Preserving {len(findings)} accumulated findings.")
+            if log_callback:
+                log_callback("warn" if findings else "info", f"Nuclei scan cancelled by user ({len(findings)} findings preserved).")
+            return {
+                "success": len(findings) > 0,
+                "targets": targets,
+                "severities": sev_list,
+                "tags": unique_tags,
+                "findings": findings,
+                "total_findings": len(findings),
+                "error": "Scan cancelled by user",
+                "partial": True,
             }
         except Exception as e:
-            if proc:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-            msg = f"Nuclei execution failed: {str(e)}"
+            await _graceful_terminate(proc)
+            msg = f"Nuclei execution error: {str(e)}"
             logger.error(msg, exc_info=True)
             if log_callback:
                 log_callback("error", msg)
             return {
-                "success": False,
+                "success": len(findings) > 0,
                 "targets": targets,
+                "severities": sev_list,
+                "tags": unique_tags,
                 "findings": findings,
                 "total_findings": len(findings),
-                "error": msg,
+                "error": msg if not findings else None,
+                "partial": True,
             }
         finally:
             if os.path.exists(target_file_path):

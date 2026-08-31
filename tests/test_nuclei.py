@@ -150,3 +150,12 @@ def test_nuclei_verified_active_ports_filter():
         if db_path.exists():
             db_path.unlink()
 
+
+@pytest.mark.anyio
+async def test_nuclei_runner_scan_targets_empty():
+    runner = NucleiRunner()
+    res = await runner.scan_targets(targets=[], severities=["critical"])
+    assert res["success"] is True
+    assert res["total_findings"] == 0
+
+

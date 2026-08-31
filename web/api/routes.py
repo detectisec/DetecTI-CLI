@@ -1322,12 +1322,13 @@ async def start_nuclei_scan(
                 rate_limit=req.rate_limit or 150,
                 concurrency=req.concurrency or 25,
                 custom_flags=req.custom_flags,
-                timeout=600.0,
+                idle_timeout=90.0,
+                max_timeout=3600.0,
                 log_callback=_log_stream,
             )
 
-            if scan_res.get("success"):
-                findings = scan_res.get("findings", [])
+            findings = scan_res.get("findings", [])
+            if scan_res.get("success") or findings:
                 if target_to_scan in _target_registry:
                     _target_registry[target_to_scan]["nuclei_status"] = "completed"
                     _target_registry[target_to_scan]["vulns_count"] = len(findings)
@@ -1335,11 +1336,18 @@ async def start_nuclei_scan(
 
                 if active_db and Path(active_db.db_path).exists() and findings:
                     merge_info = active_db.merge_nuclei_findings(findings, fallback_ip=target_to_scan)
-                    _append_scan_log(
-                        "success",
-                        f"[Nuclei] Scan on {target_to_scan} completed: {len(findings)} vulnerability issue(s) discovered. ({merge_info.get('added_vulnerabilities', 0)} new, {merge_info.get('updated_vulnerabilities', 0)} updated in graph).",
-                        target=target_to_scan
-                    )
+                    if scan_res.get("partial"):
+                        _append_scan_log(
+                            "warning",
+                            f"[Nuclei] Scan on {target_to_scan} ended with preserved data: {len(findings)} vulnerability issue(s) persisted ({merge_info.get('added_vulnerabilities', 0)} new, {merge_info.get('updated_vulnerabilities', 0)} updated in graph).",
+                            target=target_to_scan
+                        )
+                    else:
+                        _append_scan_log(
+                            "success",
+                            f"[Nuclei] Scan on {target_to_scan} completed: {len(findings)} vulnerability issue(s) discovered. ({merge_info.get('added_vulnerabilities', 0)} new, {merge_info.get('updated_vulnerabilities', 0)} updated in graph).",
+                            target=target_to_scan
+                        )
                 else:
                     _append_scan_log(
                         "success",
