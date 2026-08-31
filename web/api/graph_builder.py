@@ -90,21 +90,39 @@ class GraphBuilder:
         cursor = conn.execute("SELECT id, name FROM domains ORDER BY name")
         domains_list = cursor.fetchall()
         
+        # Get all subdomains
+        cursor_s = conn.execute("SELECT id, name FROM subdomains ORDER BY name")
+        all_subs_raw = cursor_s.fetchall()
+        
         targets_list = []
         explicit_targets = set()
         if target_name:
             if target_type == "file":
                 from pathlib import Path
                 clean_path = str(target_name).strip()
-                file_obj = Path(clean_path)
-                if not file_obj.is_absolute() and not file_obj.exists():
-                    candidate = Path.cwd() / clean_path
-                    if candidate.exists():
-                        file_obj = candidate
+                candidates = [
+                    Path(clean_path),
+                    Path.cwd() / clean_path,
+                    Path.cwd() / "data" / clean_path,
+                    Path.cwd() / "data" / "targets" / clean_path,
+                    Path.cwd() / "tests" / clean_path,
+                ]
+                # Also try adding standard text extensions
+                if "." not in clean_path:
+                    for ext in [".txt", ".scope", ".list"]:
+                        candidates.append(Path(f"{clean_path}{ext}"))
+                        candidates.append(Path.cwd() / f"{clean_path}{ext}")
+                        candidates.append(Path.cwd() / "data" / f"{clean_path}{ext}")
+
+                file_obj = None
+                for cand in candidates:
+                    if cand.exists() and cand.is_file():
+                        file_obj = cand
+                        break
                 
-                if file_obj.exists() and file_obj.is_file():
+                if file_obj:
                     try:
-                        targets_list = [line.strip() for line in file_obj.read_text().splitlines() if line.strip() and not line.startswith("#")]
+                        targets_list = [line.strip() for line in file_obj.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip() and not line.startswith("#")]
                     except Exception:
                         pass
                 
@@ -112,7 +130,10 @@ class GraphBuilder:
                     cursor_ips = conn.execute("SELECT ip FROM ip_addresses ORDER BY ip")
                     file_ips = [r[0] for r in cursor_ips.fetchall()]
                     file_doms = [d[1] for d in domains_list]
-                    targets_list = sorted(list(set(file_doms + file_ips)))
+                    file_subs = [s[1] for s in all_subs_raw]
+                    targets_list = sorted(list(set(file_doms + file_subs + file_ips)))
+            elif target_type in ("domain", "ip", "subdomain"):
+                targets_list = [target_name]
 
             def _normalize_target_item(t: str) -> str:
                 t = str(t).strip().lower()

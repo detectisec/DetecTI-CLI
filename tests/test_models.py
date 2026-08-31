@@ -243,3 +243,17 @@ def test_graph_builder_target_root_hierarchy(tmp_path: Path):
     assert sub_nodes[0]["data"]["name"] == "api.alvo.com"
     assert any(e["data"]["source"] == "target_root" and e["data"]["target"] == sub_nodes[0]["data"]["id"] for e in target_edge_list)
     assert any(e["data"]["source"] == sub_nodes[0]["data"]["id"] and e["data"]["label"] == "RESOLVES_TO" for e in target_edge_list)
+
+    # 7. Test file target permanent materialization of explicit subdomains
+    import sqlite3
+    with sqlite3.connect(db_file) as conn:
+        conn.execute("UPDATE scan_results SET target = 'scope_targets.txt', target_type = 'file'")
+        conn.commit()
+
+    graph_file_target = builder.build_graph()
+    file_nodes = graph_file_target["elements"]["nodes"]
+    file_edges = graph_file_target["elements"]["edges"]
+    file_sub_nodes = [n for n in file_nodes if n["data"]["type"] == "subdomain"]
+    assert len(file_sub_nodes) >= 1
+    assert any(n["data"]["name"] == "api.alvo.com" for n in file_sub_nodes)
+    assert any(e["data"]["source"] == "target_root" and e["data"]["label"] == "CONTAINS_TARGET" for e in file_edges)
