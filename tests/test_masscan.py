@@ -245,3 +245,26 @@ def test_database_unverify_services():
         assert verified == set()
         assert unverified == {80, 443}
 
+
+def test_calculate_dynamic_timeout():
+    """Test adaptive dynamic timeout calculation for single and batch targets."""
+    from modules.masscan import calculate_dynamic_timeout
+
+    # 1. Top 100 ports with 1 target @ 1000 pps -> minimum floor 45s
+    t1 = calculate_dynamic_timeout("--top-ports 100", rate=1000, num_targets=1)
+    assert t1 >= 45.0
+
+    # 2. All 65536 ports with 1 target @ 250 pps -> needs at least 262s transmission time
+    # (65536 / 250) * 1.6 + 17 = ~436s
+    t2 = calculate_dynamic_timeout("0-65535", rate=250, num_targets=1)
+    assert t2 > 400.0
+
+    # 3. All 65536 ports with 10 targets @ 5000 pps
+    # (65536 * 10 / 5000) * 1.6 + 35 = ~244s
+    t3 = calculate_dynamic_timeout("0-65535", rate=5000, num_targets=10)
+    assert t3 > 200.0
+
+    # 4. Discrete small list with 5 targets
+    t4 = calculate_dynamic_timeout("80,443,8080", rate=1000, num_targets=5)
+    assert t4 >= 45.0
+

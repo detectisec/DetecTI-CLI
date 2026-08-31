@@ -376,6 +376,7 @@ from modules.masscan import (
     build_port_ranges_excluding,
     filter_ports_excluding,
     parse_port_spec_to_set,
+    calculate_dynamic_timeout,
 )
 from modules.nuclei import NucleiRunner
 
@@ -818,13 +819,16 @@ async def start_active_scan(
                 # -------------------------------------------------------------
                 # 2-PHASE PIPELINE FOR ALL PORTS (0-65535)
                 # -------------------------------------------------------------
+                total_batch_targets = len(target_ips)
+
                 # Phase 1: High-Priority Scan on Passive Unverified Ports
                 phase1_ports = unverified_passive_ports - verified_ports
                 if phase1_ports:
                     p1_spec = ",".join(str(p) for p in sorted(phase1_ports))
+                    p1_timeout = calculate_dynamic_timeout(p1_spec, rate=rate_arg, num_targets=total_batch_targets, min_timeout=45.0)
                     _append_scan_log(
                         "info",
-                        f"[Masscan Phase 1 (Priority)] Found {len(phase1_ports)} unverified passive port(s) [{p1_spec}] on {ip_to_scan}. Scanning immediately for fast active confirmation...",
+                        f"[Masscan Phase 1 (Priority)] Found {len(phase1_ports)} unverified passive port(s) [{p1_spec}] on {ip_to_scan}. Scanning immediately (timeout: {p1_timeout}s, batch size: {total_batch_targets})...",
                         target=ip_to_scan
                     )
                     p1_res = await runner.scan_target(
@@ -834,7 +838,8 @@ async def start_active_scan(
                         disable_ping=pn_arg,
                         banners=banners_arg,
                         custom_flags=flags_arg,
-                        timeout=60.0,
+                        timeout=p1_timeout,
+                        num_targets=total_batch_targets,
                     )
                     p1_found = p1_res.get("ports") or p1_res.get("open_ports") or []
                     if p1_found:
@@ -867,10 +872,11 @@ async def start_active_scan(
                         target=ip_to_scan
                     )
                 else:
+                    p2_timeout = calculate_dynamic_timeout(p2_spec, rate=rate_arg, num_targets=total_batch_targets, min_timeout=120.0)
                     ex_summary = ", ".join(str(p) for p in sorted(all_excluded)[:10]) + ("..." if len(all_excluded) > 10 else "")
                     _append_scan_log(
                         "info",
-                        f"[Masscan Phase 2 (Sweep)] Sweeping remaining {remaining_ports_count:,} ports on {ip_to_scan} (excluding {len(all_excluded)} already-tested/confirmed ports: [{ex_summary}] to avoid redundant network load)...",
+                        f"[Masscan Phase 2 (Sweep)] Sweeping remaining {remaining_ports_count:,} ports on {ip_to_scan} (rate: {rate_arg} pps, dynamic timeout: {p2_timeout}s, batch size: {total_batch_targets}, excluding {len(all_excluded)} already-tested/confirmed ports: [{ex_summary}])...",
                         target=ip_to_scan
                     )
 
@@ -881,7 +887,8 @@ async def start_active_scan(
                         disable_ping=pn_arg,
                         banners=banners_arg,
                         custom_flags=flags_arg,
-                        timeout=180.0,
+                        timeout=p2_timeout,
+                        num_targets=total_batch_targets,
                     )
 
                     p2_found = p2_res.get("ports") or p2_res.get("open_ports") or []
@@ -929,6 +936,7 @@ async def start_active_scan(
                 # -------------------------------------------------------------
                 # STANDARD SCAN WITH SMART VERIFIED PORT EXCLUSION
                 # -------------------------------------------------------------
+                total_batch_targets = len(target_ips)
                 filtered_ports, remaining_count, excluded_count, actual_ex = filter_ports_excluding(ports_arg, verified_ports)
                 
                 if not filtered_ports or remaining_count == 0:
@@ -943,17 +951,19 @@ async def start_active_scan(
                     )
                     return
 
+                std_timeout = calculate_dynamic_timeout(filtered_ports, rate=rate_arg, num_targets=total_batch_targets, min_timeout=60.0)
+
                 if excluded_count > 0:
                     ex_list_str = ", ".join(str(p) for p in sorted(actual_ex)[:10]) + ("..." if len(actual_ex) > 10 else "")
                     _append_scan_log(
                         "info",
-                        f"[Masscan Smart Filter] Excluded {excluded_count} port(s) [{ex_list_str}] because they are already Confirmed Active. Scanning {remaining_count} remaining unverified port(s) on {ip_to_scan} ({filtered_ports}, {rate_arg} pps)...",
+                        f"[Masscan Smart Filter] Excluded {excluded_count} port(s) [{ex_list_str}] because they are already Confirmed Active. Scanning {remaining_count} remaining unverified port(s) on {ip_to_scan} ({filtered_ports}, {rate_arg} pps, timeout: {std_timeout}s, batch size: {total_batch_targets})...",
                         target=ip_to_scan
                     )
                 else:
                     _append_scan_log(
                         "info",
-                        f"Starting active scan on {ip_to_scan} ({filtered_ports}, {rate_arg} pps)...",
+                        f"Starting active scan on {ip_to_scan} ({filtered_ports}, {rate_arg} pps, timeout: {std_timeout}s, batch size: {total_batch_targets})...",
                         target=ip_to_scan
                     )
 
@@ -964,7 +974,8 @@ async def start_active_scan(
                     disable_ping=pn_arg,
                     banners=banners_arg,
                     custom_flags=flags_arg,
-                    timeout=180.0,
+                    timeout=std_timeout,
+                    num_targets=total_batch_targets,
                 )
 
                 open_ports = scan_res.get("ports") or scan_res.get("open_ports") or []

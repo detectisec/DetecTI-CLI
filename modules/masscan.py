@@ -164,6 +164,48 @@ def filter_ports_excluding(
     return ",".join(ranges), len(remaining_ports), excluded_count, actual_ex
 
 
+def calculate_dynamic_timeout(
+    ports_spec: Optional[str],
+    rate: int = 1000,
+    num_targets: int = 1,
+    min_timeout: float = 45.0,
+) -> float:
+    """Compute adaptive execution timeout based on total port count, target count, and scan rate.
+    
+    Formula:
+        Total Probes = len(ports) * num_targets
+        Transmission Time = Total Probes / max(rate, 10)
+        Safety & Banner Buffer = 15.0s base + (num_targets * 2.0s)
+        Timeout = max(min_timeout, (Transmission Time * 1.6) + Safety Buffer)
+    """
+    clean_rate = max(10, min(rate, 25000))
+    targets_count = max(1, num_targets)
+    
+    if not ports_spec or not ports_spec.strip():
+        port_count = 100
+    else:
+        spec = ports_spec.strip()
+        if spec.startswith("-p"):
+            spec = spec[2:].strip()
+        if spec in ("-", "all", "0-65535", "1-65535", "-p0-65535", "-p1-65535"):
+            port_count = 65536
+        elif spec.startswith("--top-ports"):
+            parts = spec.split()
+            port_count = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 100
+        else:
+            try:
+                port_count = len(parse_port_spec_to_set(ports_spec))
+            except Exception:
+                port_count = 100
+
+    total_probes = max(1, port_count) * targets_count
+    transmission_time = total_probes / clean_rate
+    safety_buffer = 15.0 + (targets_count * 2.0)
+    
+    computed_timeout = (transmission_time * 1.6) + safety_buffer
+    return round(max(min_timeout, computed_timeout), 1)
+
+
 class MasscanRunner:
     """Async Masscan execution engine for targeted active port scanning."""
 
@@ -201,8 +243,9 @@ class MasscanRunner:
         disable_ping: bool = True,
         banners: bool = True,
         custom_flags: Optional[str] = None,
-        timeout: float = 120.0,
+        timeout: Optional[float] = None,
         target: Optional[str] = None,
+        num_targets: int = 1,
     ) -> Dict[str, Any]:
         """Execute masscan against a specific target IP and return parsed findings."""
         target_ip = target_ip or target or ""
@@ -218,6 +261,13 @@ class MasscanRunner:
         temp_out = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
         temp_out_path = temp_out.name
         temp_out.close()
+
+        # Compute dynamic timeout based on workload if not explicitly passed
+        min_needed_timeout = calculate_dynamic_timeout(ports, rate=rate, num_targets=num_targets)
+        if timeout is None or timeout <= 0:
+            effective_timeout = min_needed_timeout
+        else:
+            effective_timeout = max(timeout, min_needed_timeout)
 
         cmd = [self.binary_path, target_ip]
 
@@ -264,7 +314,7 @@ class MasscanRunner:
         # JSON output to temp file
         cmd.extend(["-oJ", temp_out_path])
 
-        logger.info(f"Executing masscan command: {' '.join(cmd)}")
+        logger.info(f"Executing masscan (timeout={effective_timeout}s): {' '.join(cmd)}")
 
         proc = None
         try:
@@ -276,23 +326,36 @@ class MasscanRunner:
 
             try:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout
+                    proc.communicate(), timeout=effective_timeout
                 )
             except asyncio.TimeoutError:
+                logger.warning(
+                    f"Masscan timed out after {effective_timeout}s on {target_ip}. Gracefully flushing with SIGINT..."
+                )
                 if proc:
                     try:
-                        proc.kill()
+                        import signal
+                        proc.send_signal(signal.SIGINT)
+                        try:
+                            await asyncio.wait_for(proc.wait(), timeout=3.0)
+                        except (asyncio.TimeoutError, Exception):
+                            proc.kill()
                     except Exception:
-                        pass
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+
                 # Parse all ports discovered by masscan before timeout occurred
                 discovered_ports = self._parse_json_file(temp_out_path, target_ip)
                 return {
                     "success": len(discovered_ports) > 0,
                     "target": target_ip,
-                    "error": f"Masscan execution timed out after {timeout} seconds",
+                    "error": f"Masscan execution timed out after {effective_timeout} seconds",
                     "ports": discovered_ports,
                     "open_ports": discovered_ports,
                     "count": len(discovered_ports),
+                    "timeout_seconds": effective_timeout,
                 }
 
             stderr_text = stderr_bytes.decode("utf-8", errors="replace")
@@ -317,6 +380,7 @@ class MasscanRunner:
                 "open_ports": open_ports,
                 "count": len(open_ports),
                 "command": " ".join(cmd),
+                "timeout_seconds": effective_timeout,
             }
 
         except Exception as exc:
