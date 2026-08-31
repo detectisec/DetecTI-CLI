@@ -2116,33 +2116,13 @@ class EASMDashboard {
                     }
                 },
 
-                // Marked Target IP Nodes (High-Visibility Crosshair Badge in Corner & Cyan Glow)
+                // Target Node (Alvo Ativo: IP / FQDN) — Sinalização por Contorno Ciano Neon (#00f0ff)
                 {
-                    selector: 'node[type="ip"].is-target, node.is-target, node[is_target="true"]',
+                    selector: 'node.is-target',
                     style: {
                         'border-color': '#00f0ff',
                         'border-width': '3px',
-                        'border-style': 'solid',
-                        'background-image': 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIiBmaWxsPSJub25lIj48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSIxNCIgZmlsbD0iIzBiMGYxOSIgc3Ryb2tlPSIjMDBmMGZmIiBzdHJva2Utd2lkdGg9IjIiLz48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSI3IiBzdHJva2U9IiMwMGYwZmYiIHN0cm9rZS13aWR0aD0iMS41Ii8+PGxpbmUgeDE9IjE2IiB5MT0iMiIgeDI9IjE2IiB5Mj0iNyIgc3Ryb2tlPSIjMDBmMGZmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxsaW5lIHgxPSIxNiIgeTE9IjI1IiB4Mj0iMTYiIHkyPSIzMCIgc3Ryb2tlPSIjMDBmMGZmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxsaW5lIHgxPSIyIiB5MT0iMTYiIHgyPSI3IiB5Mj0iMTYiIHN0cm9rZT0iIzAwZjBmZiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz48bGluZSB4MT0iMjUiIHkxPSIxNiIgeDI9IjMwIiB5Mj0iMTYiIHN0cm9rZT0iIzAwZjBmZiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSIyIiBmaWxsPSIjMDBmMGZmIi8+PC9zdmc+',
-                        'background-image-opacity': 1,
-                        'background-width': '22px',
-                        'background-height': '22px',
-                        'background-position-x': '92%',
-                        'background-position-y': '8%',
-                        'background-clip': 'none',
-                        'background-fit': 'none',
-                        'background-repeat': 'no-repeat',
-                        'box-shadow': '0 0 16px rgba(0, 240, 255, 0.85)'
-                    }
-                },
-                
-                // Revert target badge and glow cleanly when unmarked
-                {
-                    selector: 'node:not(.is-target):not([is_target="true"])',
-                    style: {
-                        'background-image': 'none',
-                        'background-image-opacity': 0,
-                        'box-shadow': 'none'
+                        'border-style': 'solid'
                     }
                 },
                 
@@ -5797,7 +5777,8 @@ class EASMDashboard {
 
     isTargetMarked(ip) {
         if (!ip) return false;
-        return this.markedTargets.has(ip.trim());
+        const clean = String(ip).replace(/^(ip_|dom_|sub_|target_)/, '').trim();
+        return this.markedTargets.has(clean) || this.markedTargets.has(String(ip).trim());
     }
 
     async toggleTargetMark(ip, node = null) {
@@ -5925,13 +5906,22 @@ class EASMDashboard {
         if (!this.cy) return;
         this.cy.batch(() => {
             this.cy.nodes().forEach(node => {
+                if (node.id() === 'target_root' || node.data('type') === 'target' || node.data('is_root') === true) {
+                    node.removeClass('is-target');
+                    node.data('is_target', 'false');
+                    return;
+                }
+
                 const rawName = node.data('name') || node.data('label') || node.data('ip') || node.id();
                 const cleanName = String(rawName || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
+                const nodeIp = node.data('ip') ? String(node.data('ip')).trim() : '';
+                const nodeLabel = node.data('label') ? String(node.data('label')).trim() : '';
+                const nodeName = node.data('name') ? String(node.data('name')).trim() : '';
 
                 const isTarget = this.markedTargets.has(cleanName) || 
-                                 (node.data('ip') && this.markedTargets.has(node.data('ip').trim())) || 
-                                 (node.data('name') && this.markedTargets.has(node.data('name').trim())) || 
-                                 (node.data('label') && this.markedTargets.has(node.data('label').trim()));
+                                 (nodeIp && this.markedTargets.has(nodeIp)) || 
+                                 (nodeName && this.markedTargets.has(nodeName)) || 
+                                 (nodeLabel && this.markedTargets.has(nodeLabel));
 
                 if (isTarget) {
                     node.addClass('is-target');
@@ -5942,6 +5932,9 @@ class EASMDashboard {
                 }
             });
         });
+        if (this.cy && typeof this.cy.style === 'function') {
+            this.cy.style().update();
+        }
     }
 
     getAssociatedIpNodes(node) {
@@ -6099,7 +6092,7 @@ class EASMDashboard {
             this.updateTargetBadgeCount();
             this.renderTargetsList();
             if (typeof this.showToast === 'function') {
-                this.showToast('success', `🎯 Marked ${cleanTargets.length} target(s)`);
+                this.showToast('success', `Marked ${cleanTargets.length} target(s)`);
             }
             await Promise.all(cleanTargets.map(t => window.api.setTarget(t)));
         } catch (err) {
@@ -6158,7 +6151,7 @@ class EASMDashboard {
                 this.showNodeInspector(this.selectedNode);
             }
             if (typeof this.showToast === 'function') {
-                this.showToast('success', `🎯 Target set: ${target}`);
+                this.showToast('success', `Target set: ${target}`);
             }
             await window.api.setTarget(target);
         } catch (err) {

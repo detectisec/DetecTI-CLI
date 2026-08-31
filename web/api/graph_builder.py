@@ -200,7 +200,7 @@ class GraphBuilder:
                     "is_target": True,
                     "is_root": False
                 }
-                nodes.append({"data": node_data})
+                nodes.append({"data": node_data, "classes": "is-target"})
                 if root_target_node:
                     edges.append({"data": {"id": f"e_target_dom_{domain_id}", "source": "target_root", "target": f"dom_{domain_id}", "label": "CONTAINS_TARGET"}})
 
@@ -216,7 +216,7 @@ class GraphBuilder:
                     "domain_name": sub_info["domain_name"],
                     "is_target": True
                 }
-                nodes.append({"data": node_data})
+                nodes.append({"data": node_data, "classes": "is-target"})
                 if root_target_node:
                     edges.append({"data": {"id": f"e_target_sub_{sub_id}", "source": "target_root", "target": f"sub_{sub_id}", "label": "CONTAINS_TARGET"}})
 
@@ -256,9 +256,12 @@ class GraphBuilder:
             if fqdn:
                 ip_to_fqdns.setdefault(str(ip_id), []).append(fqdn)
         
+        targets_set = set(t.strip().lower() for t in targets_list) if targets_list else set()
+
         for ip_id, ip, org, country, city, region_code, asn, postal_code, latitude, longitude in ip_rows:
             fqdns = ip_to_fqdns.get(str(ip_id), [])
-            nodes.append({
+            is_tgt = bool(ip and ip.strip().lower() in targets_set)
+            node_dict = {
                 "data": {
                     "id": f"ip_{ip_id}",
                     "label": ip,
@@ -273,9 +276,13 @@ class GraphBuilder:
                     "longitude": longitude,
                     "asn": asn or "Unknown",
                     "fqdns": fqdns,
-                    "fqdn_count": len(fqdns)
+                    "fqdn_count": len(fqdns),
+                    "is_target": is_tgt
                 }
-            })
+            }
+            if is_tgt:
+                node_dict["classes"] = "is-target"
+            nodes.append(node_dict)
 
             # Every Host IP directly relates to target_root via CONTAINS_TARGET
             if root_target_node:
