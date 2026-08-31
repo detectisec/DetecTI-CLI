@@ -6040,6 +6040,7 @@ class EASMDashboard {
                 this.showToast('success', `Marked ${cleanTargets.length} target(s)`);
             }
             await Promise.all(cleanTargets.map(t => window.api.setTarget(t)));
+            await this.loadGraph(true);
         } catch (err) {
             console.error('Failed to set targets bulk:', err);
         }
@@ -6064,6 +6065,7 @@ class EASMDashboard {
                 this.showToast('info', `Removed ${cleanTargets.length} target(s) from scan list`);
             }
             await Promise.all(cleanTargets.map(t => window.api.removeTarget(t)));
+            await this.loadGraph(true);
         } catch (err) {
             console.error('Failed to remove targets bulk:', err);
         }
@@ -6099,6 +6101,7 @@ class EASMDashboard {
                 this.showToast('success', `Target set: ${target}`);
             }
             await window.api.setTarget(target);
+            await this.loadGraph(true);
         } catch (err) {
             console.error(`Failed to set target ${target}:`, err);
         }
@@ -6120,6 +6123,7 @@ class EASMDashboard {
                 this.showToast('info', `Target removed: ${target}`);
             }
             await window.api.removeTarget(target);
+            await this.loadGraph(true);
         } catch (err) {
             console.error(`Failed to remove target ${target}:`, err);
         }
@@ -6139,6 +6143,7 @@ class EASMDashboard {
                 this.showToast('info', 'Cleared all scan targets');
             }
             await window.api.clearTargets();
+            await this.loadGraph(true);
             this.addScanLog('info', 'All targets cleared.');
         } catch (err) {
             console.error('Failed to clear all targets:', err);
