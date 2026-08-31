@@ -46,14 +46,12 @@ class EASMDashboard {
 
         const positions = {};
 
-        // 1. Partition nodes into Semantic Tiers
+        // 1. Partition nodes into Semantic Topological Tiers
         const tier0_target = [];
-        const tier1_network = [];
-        const tier1_domain = [];
-        const tier2_subdomain = [];
-        const tier3_ip = [];
-        const tier4_service = [];
-        const tier5_vuln = [];
+        const tier1_direct_targets = [];
+        const tier2_resolved_ips = [];
+        const tier3_service = [];
+        const tier4_vuln = [];
 
         nodes.forEach(node => {
             const data = node.data();
@@ -61,20 +59,24 @@ class EASMDashboard {
 
             if (type === 'target' || data.id === 'target_root' || data.is_root === true) {
                 tier0_target.push(node);
-            } else if (type === 'network') {
-                tier1_network.push(node);
-            } else if (type === 'domain') {
-                tier1_domain.push(node);
-            } else if (type === 'subdomain') {
-                tier2_subdomain.push(node);
-            } else if (type === 'ip') {
-                tier3_ip.push(node);
             } else if (['service', 'http', 'https', 'cluster_services'].includes(type)) {
-                tier4_service.push(node);
+                tier3_service.push(node);
             } else if (['vulnerability', 'cluster_vulns'].includes(type)) {
-                tier5_vuln.push(node);
+                tier4_vuln.push(node);
             } else {
-                tier3_ip.push(node);
+                // Determine if node is a direct target connected to target_root via CONTAINS_TARGET
+                const hasContainsTarget = node.incomers('edge[label="CONTAINS_TARGET"]').some(e => {
+                    const src = e.source();
+                    return src.id() === 'target_root' || src.data('is_root') === true;
+                });
+
+                if (hasContainsTarget || data.is_target === true || data.is_target === 'true') {
+                    tier1_direct_targets.push(node);
+                } else if (type === 'ip') {
+                    tier2_resolved_ips.push(node);
+                } else {
+                    tier1_direct_targets.push(node);
+                }
             }
         });
 
@@ -85,64 +87,26 @@ class EASMDashboard {
             positions[node.id()] = { x: 0, y: (i - (tier0_target.length - 1) / 2) * 180 };
         });
 
-        // Tier 1: Networks Top, Domains Bottom / Center (at x = X_TIER_GAP)
+        // Tier 1: Direct Targets (FQDNs, Subdomains, Domains, Direct IPs) at (x = X_TIER_GAP)
         const tier1X = X_TIER_GAP;
-        const netSpacing = Math.max(160, 800 / Math.max(1, tier1_network.length));
-        const domSpacing = Math.max(160, 800 / Math.max(1, tier1_domain.length));
+        const targetSpacing = Math.max(130, Math.min(220, 1000 / Math.max(1, tier1_direct_targets.length)));
+        const maxTargetRows = Math.min(10, Math.max(1, Math.ceil(Math.sqrt(tier1_direct_targets.length * 2))));
+        const tRows = Math.min(tier1_direct_targets.length, maxTargetRows);
 
-        tier1_network.forEach((node, i) => {
-            let y;
-            if (tier1_domain.length > 0) {
-                y = - ((tier1_network.length - i - 0.5) * netSpacing) - 90;
-            } else {
-                y = (i - (tier1_network.length - 1) / 2) * netSpacing;
-            }
-            positions[node.id()] = { x: tier1X, y };
+        let maxTier1X = tier1X;
+        tier1_direct_targets.forEach((node, idx) => {
+            const col = Math.floor(idx / tRows);
+            const row = idx % tRows;
+            const colCount = Math.min(tRows, tier1_direct_targets.length - col * tRows);
+            const y = (row - (colCount - 1) / 2) * targetSpacing;
+            const x = tier1X + (col * 180);
+            positions[node.id()] = { x, y };
+            maxTier1X = Math.max(maxTier1X, x);
         });
 
-        tier1_domain.forEach((node, i) => {
-            let y;
-            if (tier1_network.length > 0) {
-                y = ((i + 0.5) * domSpacing) + 90;
-            } else {
-                y = (i - (tier1_domain.length - 1) / 2) * domSpacing;
-            }
-            positions[node.id()] = { x: tier1X, y };
-        });
-
-        // Tier 2: Subdomains (to the right of their parent domain)
-        const tier2X = tier1X + X_TIER_GAP;
-        const subsByDomain = new Map();
-        tier2_subdomain.forEach(node => {
-            let domId = node.data('domain_id');
-            if (!domId) {
-                const parentDom = node.incomers('node[type="domain"]').first();
-                if (parentDom.length > 0) domId = parentDom.data('domain_id') || parentDom.id().replace('dom_', '');
-            }
-            domId = domId ? domId.replace('dom_', '') : 'unknown';
-            if (!subsByDomain.has(domId)) subsByDomain.set(domId, []);
-            subsByDomain.get(domId).push(node);
-        });
-
-        subsByDomain.forEach((subs, domId) => {
-            const parentPos = positions[`dom_${domId}`] || positions[domId];
-            const baseY = parentPos ? parentPos.y : 0;
-            const maxRows = Math.min(12, Math.max(1, Math.ceil(Math.sqrt(subs.length * 2.5))));
-            const rows = Math.min(subs.length, maxRows);
-            
-            subs.forEach((node, idx) => {
-                const col = Math.floor(idx / rows);
-                const row = idx % rows;
-                const colCount = Math.min(rows, subs.length - col * rows);
-                const y = baseY + (row - (colCount - 1) / 2) * 70;
-                const x = tier2X + (col * 170);
-                positions[node.id()] = { x, y };
-            });
-        });
-
-        // Pre-compute Services by IP and Vulns by Parent
+        // Pre-compute Services by IP/Host and Vulns by Parent
         const srvsByIp = new Map();
-        tier4_service.forEach(node => {
+        tier3_service.forEach(node => {
             let parentIpId = node.data('parent_ip') || node.data('ip_id');
             if (!parentIpId) {
                 const ipIncomer = node.incomers('node[type="ip"]').first();
@@ -154,7 +118,7 @@ class EASMDashboard {
         });
 
         const vulnsByParent = new Map();
-        tier5_vuln.forEach(node => {
+        tier4_vuln.forEach(node => {
             let parentId = node.data('parent_srv') || node.data('service_id');
             if (!parentId) {
                 const pIncomer = node.incomers('node').first();
@@ -165,83 +129,76 @@ class EASMDashboard {
             vulnsByParent.get(parentId).push(node);
         });
 
-        // Tier 3: Host IPs - Generous 2D Grid along X with strict dynamic clearance
-        let maxTier2X = tier2X;
-        tier2_subdomain.forEach(node => {
-            if (positions[node.id()]) maxTier2X = Math.max(maxTier2X, positions[node.id()].x);
+        // Tier 2: Resolved IPs (derived from Tier 1 FQDNs) + Direct IPs layout
+        const allIpNodes = [...tier1_direct_targets.filter(n => n.data('type') === 'ip'), ...tier2_resolved_ips];
+        const tier2StartX = maxTier1X + 240;
+
+        // Position Resolved IPs (Tier 2) near their parent FQDNs or in column
+        tier2_resolved_ips.forEach((node, idx) => {
+            const parentFqdn = node.incomers('edge[label="RESOLVES_TO"]').sources().first();
+            let baseY = 0;
+            if (parentFqdn.length > 0 && positions[parentFqdn.id()]) {
+                baseY = positions[parentFqdn.id()].y;
+            } else {
+                baseY = (idx - (tier2_resolved_ips.length - 1) / 2) * 150;
+            }
+            positions[node.id()] = { x: tier2StartX, y: baseY };
         });
-        const tier3StartX = tier2_subdomain.length > 0 ? maxTier2X + 240 : tier1X + 280;
 
-        const numIps = tier3_ip.length;
-        const ipRows = numIps <= 3 ? Math.max(1, numIps) : (numIps <= 6 ? 3 : (numIps <= 12 ? 6 : 9));
+        // Layout IPs (both direct targets in Tier 1 and resolved IPs in Tier 2)
+        const renderedIps = [...tier1_direct_targets.filter(n => n.data('type') === 'ip'), ...tier2_resolved_ips];
+        let maxSubTreeX = tier2StartX;
 
-        // Group IPs into columns
-        const ipColsList = [];
-        for (let i = 0; i < numIps; i += ipRows) {
-            ipColsList.push(tier3_ip.slice(i, i + ipRows));
-        }
+        renderedIps.forEach((node) => {
+            const ipPos = positions[node.id()] || { x: tier2StartX, y: 0 };
+            const ipX = ipPos.x;
+            const ipY = ipPos.y;
 
-        let curIpColX = tier3StartX;
+            // Tier 3: Place Services to the right of Host IP
+            const srvList = srvsByIp.get(node.id()) || [];
+            const sRows = Math.min(Math.max(1, srvList.length), 3);
+            const srvX = ipX + 130;
 
-        ipColsList.forEach(colIps => {
-            let maxColWidth = 100;
+            srvList.forEach((srvNode, sIdx) => {
+                const sc = Math.floor(sIdx / sRows);
+                const sr = sIdx % sRows;
+                const sColCount = Math.min(sRows, srvList.length - sc * sRows);
+                const sx = srvX + (sc * 90);
+                const sy = ipY + (sr - (sColCount - 1) / 2) * 60;
+                positions[srvNode.id()] = { x: sx, y: sy };
+                maxSubTreeX = Math.max(maxSubTreeX, sx);
 
-            colIps.forEach((node, rIdx) => {
-                const rowCount = colIps.length;
-                const ipX = curIpColX;
-                const ipY = (rIdx - (rowCount - 1) / 2) * 160;
-                positions[node.id()] = { x: ipX, y: ipY };
-
-                // Tier 4: Place Services to the right of Host IP
-                const srvList = srvsByIp.get(node.id()) || [];
-                const sRows = Math.min(Math.max(1, srvList.length), 3);
-                const srvX = ipX + 110;
-
-                srvList.forEach((srvNode, sIdx) => {
-                    const sc = Math.floor(sIdx / sRows);
-                    const sr = sIdx % sRows;
-                    const sColCount = Math.min(sRows, srvList.length - sc * sRows);
-                    const sx = srvX + (sc * 80);
-                    const sy = ipY + (sr - (sColCount - 1) / 2) * 55;
-                    positions[srvNode.id()] = { x: sx, y: sy };
-
-                    // Tier 5: Place Vulns to the right of Service
-                    const vList = vulnsByParent.get(srvNode.id()) || [];
-                    const vRows = Math.min(Math.max(1, vList.length), 2);
-                    vList.forEach((vNode, vIdx) => {
-                        const vc = Math.floor(vIdx / vRows);
-                        const vr = vIdx % vRows;
-                        const vColCount = Math.min(vRows, vList.length - vc * vRows);
-                        const vx = sx + 80 + (vc * 65);
-                        const vy = sy + (vr - (vColCount - 1) / 2) * 45;
-                        positions[vNode.id()] = { x: vx, y: vy };
-                    });
+                // Tier 4: Place Vulns to the right of Service
+                const vList = vulnsByParent.get(srvNode.id()) || [];
+                const vRows = Math.min(Math.max(1, vList.length), 2);
+                vList.forEach((vNode, vIdx) => {
+                    const vc = Math.floor(vIdx / vRows);
+                    const vr = vIdx % vRows;
+                    const vColCount = Math.min(vRows, vList.length - vc * vRows);
+                    const vx = sx + 90 + (vc * 70);
+                    const vy = sy + (vr - (vColCount - 1) / 2) * 45;
+                    positions[vNode.id()] = { x: vx, y: vy };
+                    maxSubTreeX = Math.max(maxSubTreeX, vx);
                 });
-
-                // Tier 5: Place Direct IP Vulns (if any)
-                const directVulns = vulnsByParent.get(node.id()) || [];
-                const totalSrvCols = Math.ceil(srvList.length / Math.max(1, sRows));
-                let directVulnX = srvList.length > 0 ? (srvX + (totalSrvCols * 80) + 30) : (ipX + 110);
-                let branchWidth = srvList.length > 0 ? (srvX - ipX + totalSrvCols * 80) : 0;
-
-                if (directVulns.length > 0) {
-                    const dRows = Math.min(Math.max(1, directVulns.length), 3);
-                    directVulns.forEach((vNode, vIdx) => {
-                        const vc = Math.floor(vIdx / dRows);
-                        const vr = vIdx % dRows;
-                        const vColCount = Math.min(dRows, directVulns.length - vc * dRows);
-                        const vx = directVulnX + (vc * 65);
-                        const vy = ipY + (vr - (vColCount - 1) / 2) * 45;
-                        positions[vNode.id()] = { x: vx, y: vy };
-                    });
-                    const totalDVulnCols = Math.ceil(directVulns.length / dRows);
-                    branchWidth = Math.max(branchWidth, (directVulnX - ipX) + (totalDVulnCols * 65));
-                }
-
-                maxColWidth = Math.max(maxColWidth, branchWidth);
             });
 
-            curIpColX += maxColWidth + 140; // Clearance to next IP column
+            // Tier 4: Place Direct IP Vulns (if any)
+            const directVulns = vulnsByParent.get(node.id()) || [];
+            const totalSrvCols = Math.ceil(srvList.length / Math.max(1, sRows));
+            let directVulnX = srvList.length > 0 ? (srvX + (totalSrvCols * 90) + 30) : (ipX + 130);
+
+            if (directVulns.length > 0) {
+                const dRows = Math.min(Math.max(1, directVulns.length), 3);
+                directVulns.forEach((vNode, vIdx) => {
+                    const vc = Math.floor(vIdx / dRows);
+                    const vr = vIdx % dRows;
+                    const vColCount = Math.min(dRows, directVulns.length - vc * dRows);
+                    const vx = directVulnX + (vc * 70);
+                    const vy = ipY + (vr - (vColCount - 1) / 2) * 45;
+                    positions[vNode.id()] = { x: vx, y: vy };
+                    maxSubTreeX = Math.max(maxSubTreeX, vx);
+                });
+            }
         });
 
         // Fallback: Ensure EVERY node in the graph gets a valid position
