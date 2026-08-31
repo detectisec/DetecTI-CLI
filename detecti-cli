@@ -250,24 +250,29 @@ def scan_command(
             except Exception as e:
                 print_error(f"Failed to store results in database: {e}")
 
-            # Automatically launch DetecTIHound WebGUI
+            # Automatically launch DetecTIHound WebGUI (only if not already running)
             try:
                 from web.process_manager import WebServerManager
                 
                 ws_manager = WebServerManager()
-                if ws_manager.is_running():
-                    ws_manager.stop_server()
-                
                 host = "0.0.0.0"
                 port = 8000
-                started = ws_manager.start_server(final_db_name or db_name, host, port)
                 real_ip = get_real_ip()
-                if started:
-                    print_success(f"🚀 DetecTIHound WebGUI started automatically with database: [bold cyan]{final_db_name or db_name}[/bold cyan]")
-                    console.print(f"  👉 [bold cyan]Local URL:[/bold cyan]   [bold underline cyan]http://localhost:{port}[/bold underline cyan]")
-                    console.print(f"  👉 [bold cyan]Network URL:[/bold cyan] [bold underline cyan]http://{real_ip}:{port}[/bold underline cyan]")
+
+                if ws_manager.is_running():
+                    status = ws_manager.get_status() or {}
+                    srv_port = status.get("port", port)
+                    print_info(f"🌐 DetecTIHound WebGUI is already active (PID: {status.get('pid', 'N/A')}).")
+                    console.print(f"  👉 [bold cyan]Local URL:[/bold cyan]   [bold underline cyan]http://localhost:{srv_port}[/bold underline cyan] (Select [bold cyan]{final_db_name or db_name}[/bold cyan] in database dropdown)")
+                    console.print(f"  👉 [bold cyan]Network URL:[/bold cyan] [bold underline cyan]http://{real_ip}:{srv_port}[/bold underline cyan]")
                 else:
-                    print_info(f"Open DetecTIHound: [bold cyan]{cli_name} hound start --db {final_db_name or db_name}[/bold cyan]")
+                    started = ws_manager.start_server(final_db_name or db_name, host, port)
+                    if started:
+                        print_success(f"🚀 DetecTIHound WebGUI started automatically with database: [bold cyan]{final_db_name or db_name}[/bold cyan]")
+                        console.print(f"  👉 [bold cyan]Local URL:[/bold cyan]   [bold underline cyan]http://localhost:{port}[/bold underline cyan]")
+                        console.print(f"  👉 [bold cyan]Network URL:[/bold cyan] [bold underline cyan]http://{real_ip}:{port}[/bold underline cyan]")
+                    else:
+                        print_info(f"Open DetecTIHound: [bold cyan]{cli_name} hound start --db {final_db_name or db_name}[/bold cyan]")
             except Exception as e:
                 print_warning(f"Could not automatically launch DetecTIHound WebGUI: {e}")
         elif not is_cve and not has_results:
