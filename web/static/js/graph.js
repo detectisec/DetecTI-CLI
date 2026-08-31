@@ -1983,27 +1983,6 @@ class EASMDashboard {
                         'box-shadow': '0 0 20px rgba(140, 82, 255, 0.7)'
                     }
                 },
-                
-                // Organization / Network Cluster nodes (Intermediate grouping for IP lists/queries)
-                {
-                    selector: 'node[type="network"]',
-                    style: {
-                        'background-color': '#3b82f6',
-                        'label': 'data(label)',
-                        'color': '#ffffff',
-                        'text-valign': 'center',
-                        'text-halign': 'center',
-                        'text-wrap': 'wrap',
-                        'text-max-width': '85px',
-                        'font-size': '10px',
-                        'font-weight': 'bold',
-                        'width': '75px',
-                        'height': '75px',
-                        'shape': 'octagon',
-                        'border-width': '2px',
-                        'border-color': '#60a5fa'
-                    }
-                },
 
                 // Domain nodes
                 {
@@ -2288,16 +2267,16 @@ class EASMDashboard {
                     }
                 },
                 
-                // Domain relationship edges
+                // Relationship edges
                 {
-                    selector: 'edge[label="HAS_SUBDOMAIN"]',
+                    selector: 'edge[label="CONTAINS_TARGET"]',
                     style: {
-                        'line-color': '#00d4ff',
-                        'target-arrow-color': '#00d4ff',
+                        'line-color': '#8c52ff',
+                        'target-arrow-color': '#8c52ff',
                         'width': '2px'
                     }
                 },
-                
+
                 {
                     selector: 'edge[label="RESOLVES_TO"]',
                     style: {
@@ -2305,33 +2284,6 @@ class EASMDashboard {
                         'target-arrow-color': '#4ecdc4',
                         'width': '1.5px',
                         'opacity': 0.85
-                    }
-                },
-                
-                {
-                    selector: 'edge[label="HOSTS_IP"], edge[label="CONTAINS_IP"]',
-                    style: {
-                        'line-color': '#70a1ff',
-                        'target-arrow-color': '#70a1ff',
-                        'width': '1.5px'
-                    }
-                },
-                
-                {
-                    selector: 'edge[label="BELONGS_TO"]',
-                    style: {
-                        'line-color': '#9b59b6',
-                        'target-arrow-color': '#9b59b6',
-                        'width': '1.5px'
-                    }
-                },
-                
-                {
-                    selector: 'edge[label="CONTAINS_TARGET"], edge[label="MATCHES_DOMAIN"], edge[label="MATCHES_ORG"], edge[label="MATCHES_ASN"]',
-                    style: {
-                        'line-color': '#8c52ff',
-                        'target-arrow-color': '#8c52ff',
-                        'width': '2px'
                     }
                 },
 
