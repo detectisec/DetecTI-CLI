@@ -1920,11 +1920,11 @@ class EASMDashboard {
             container: document.getElementById('cy'),
             
             style: [
-                // Root / Primary Query Target nodes (Distinct Round-Rectangle query anchor)
+                // Root / Primary Query Target nodes (Tactical Crosshair Octagon Anchor)
                 {
                     selector: 'node[type="target"], node[is_root="true"]',
                     style: {
-                        'background-color': '#8C52FF',
+                        'background-color': '#7c3aed',
                         'label': 'data(label)',
                         'color': '#ffffff',
                         'text-valign': 'center',
@@ -1932,12 +1932,13 @@ class EASMDashboard {
                         'font-size': '13px',
                         'font-weight': 'bold',
                         'font-family': 'Inter, sans-serif',
-                        'width': '95px',
-                        'height': '60px',
-                        'shape': 'round-rectangle',
-                        'border-width': '2.5px',
-                        'border-color': '#ffffff',
-                        'box-shadow': '0 0 20px rgba(140, 82, 255, 0.7)'
+                        'width': '105px',
+                        'height': '65px',
+                        'shape': 'octagon',
+                        'border-width': '3px',
+                        'border-style': 'solid',
+                        'border-color': '#00f0ff',
+                        'box-shadow': '0 0 25px rgba(0, 240, 255, 0.6), 0 0 10px rgba(124, 58, 237, 0.8)'
                     }
                 },
 
