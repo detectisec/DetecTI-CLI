@@ -1920,25 +1920,25 @@ class EASMDashboard {
             container: document.getElementById('cy'),
             
             style: [
-                // Root / Primary Query Target nodes (Tactical Crosshair Octagon Anchor)
+                // Root / Primary Query Target nodes (Rounded Target Ring Anchor)
                 {
                     selector: 'node[type="target"], node[is_root="true"]',
                     style: {
-                        'background-color': '#7c3aed',
+                        'background-color': '#8C52FF',
                         'label': 'data(label)',
                         'color': '#ffffff',
                         'text-valign': 'center',
                         'text-halign': 'center',
-                        'font-size': '13px',
+                        'font-size': '12.5px',
                         'font-weight': 'bold',
                         'font-family': 'Inter, sans-serif',
-                        'width': '105px',
-                        'height': '65px',
-                        'shape': 'octagon',
+                        'width': '98px',
+                        'height': '60px',
+                        'shape': 'round-rectangle',
                         'border-width': '3px',
                         'border-style': 'solid',
                         'border-color': '#00f0ff',
-                        'box-shadow': '0 0 25px rgba(0, 240, 255, 0.6), 0 0 10px rgba(124, 58, 237, 0.8)'
+                        'box-shadow': '0 0 22px rgba(0, 240, 255, 0.55), 0 0 10px rgba(140, 82, 255, 0.7)'
                     }
                 },
 
