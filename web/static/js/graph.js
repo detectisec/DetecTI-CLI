@@ -4465,7 +4465,10 @@ class EASMDashboard {
                                 <span style="color: #00b4d8; font-weight: 600; word-break: break-all;">${d.name}</span>
                                 <div style="display: flex; gap: 4px; align-items: center;">
                                     <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.72rem; color: ${isMarked ? '#ef4444' : '#00f0ff'}; border-color: ${isMarked ? '#ef4444' : 'rgba(0, 240, 255, 0.4)'}; background: ${isMarked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 240, 255, 0.15)'};" onclick="window.dashboard.toggleTargetMark('${d.name}')" title="${isMarked ? 'Remove Target' : 'Set as Target (FQDN)'}">
-                                        <i data-lucide="crosshair" style="width: 10px; height: 10px;"></i> ${isMarked ? 'Target' : 'Set Target'}
+                                        <i data-lucide="crosshair" style="width: 10px; height: 10px;"></i>
+                                    </button>
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.72rem; color: #00b4d8; border-color: rgba(0, 180, 216, 0.4); background: rgba(0, 180, 216, 0.15);" onclick="event.stopPropagation(); window.dashboard.copyTextList('${d.name}', this)" title="Copy Domain">
+                                        <i data-lucide="copy" style="width: 10px; height: 10px;"></i>
                                     </button>
                                 </div>
                             </div>
@@ -4511,9 +4514,14 @@ class EASMDashboard {
                             <div class="root-subdomain-item" data-subdomain="${(s.name || '').toLowerCase()}" style="display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; margin-bottom: 5px; background: rgba(78, 205, 196, 0.07); border: 1px solid rgba(78, 205, 196, 0.22); border-radius: 4px;">
                                 <div style="display: flex; align-items: center; justify-content: space-between;">
                                     <span style="font-family: monospace; font-size: 0.8rem; color: #4ecdc4; font-weight: 600; word-break: break-all;">${s.name}</span>
+                                <div style="display: flex; gap: 4px; align-items: center;">
                                     <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.72rem; color: ${isMarked ? '#ef4444' : '#00f0ff'}; border-color: ${isMarked ? '#ef4444' : 'rgba(0, 240, 255, 0.4)'}; background: ${isMarked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 240, 255, 0.15)'};" onclick="window.dashboard.toggleTargetMark('${s.name}')" title="${isMarked ? 'Remove Target' : 'Set as Target (FQDN)'}">
-                                        <i data-lucide="crosshair" style="width: 10px; height: 10px;"></i> ${isMarked ? 'Target' : 'Set Target'}
+                                        <i data-lucide="crosshair" style="width: 10px; height: 10px;"></i>
                                     </button>
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.72rem; color: #4ecdc4; border-color: rgba(78, 205, 196, 0.4); background: rgba(78, 205, 196, 0.15);" onclick="event.stopPropagation(); window.dashboard.copyTextList('${s.name}', this)" title="Copy Subdomain">
+                                        <i data-lucide="copy" style="width: 10px; height: 10px;"></i>
+                                    </button>
+                                </div>
                                 </div>
                                 ${ipsBadges ? `<div style="display: flex; flex-wrap: wrap; gap: 3px; align-items: center;">${ipsBadges}</div>` : ''}
                             </div>
@@ -4563,9 +4571,14 @@ class EASMDashboard {
                                         <span style="font-family: monospace; font-size: 0.82rem; color: #60a5fa; font-weight: bold;">${item.ip}</span>
                                         ${item.country && item.country !== 'Unknown' ? `<span style="font-size: 0.7rem; color: #94a3b8;">(${item.country})</span>` : ''}
                                     </div>
+                                <div style="display: flex; gap: 4px; align-items: center;">
                                     <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.72rem; color: ${isMarked ? '#ef4444' : '#00f0ff'}; border-color: ${isMarked ? '#ef4444' : 'rgba(0, 240, 255, 0.4)'}; background: ${isMarked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 240, 255, 0.15)'};" onclick="window.dashboard.toggleTargetMark('${item.ip}')" title="${isMarked ? 'Remove Target' : 'Set as Target (IP)'}">
-                                        <i data-lucide="crosshair" style="width: 10px; height: 10px;"></i> ${isMarked ? 'Target' : 'Set Target'}
+                                        <i data-lucide="crosshair" style="width: 10px; height: 10px;"></i>
                                     </button>
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.72rem; color: #60a5fa; border-color: rgba(59, 130, 246, 0.4); background: rgba(59, 130, 246, 0.15);" onclick="event.stopPropagation(); window.dashboard.copyTextList('${item.ip}', this)" title="Copy IP">
+                                        <i data-lucide="copy" style="width: 10px; height: 10px;"></i>
+                                    </button>
+                                </div>
                                 </div>
                                 ${item.org && item.org !== 'Unknown' ? `<div style="font-size: 0.72rem; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">🏢 ${this.escapeHtml(item.org)}</div>` : ''}
                                 ${fqdnsBadges ? `<div style="display: flex; flex-wrap: wrap; gap: 3px; align-items: center;">${fqdnsBadges} ${extraFqdns}</div>` : ''}
@@ -4651,9 +4664,14 @@ class EASMDashboard {
                             <div class="domain-subdomain-item" data-subdomain="${(subName || '').toLowerCase()}" style="display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; margin-bottom: 5px; background: rgba(78, 205, 196, 0.07); border: 1px solid rgba(78, 205, 196, 0.22); border-radius: 4px;">
                                 <div style="display: flex; align-items: center; justify-content: space-between;">
                                     <span style="font-family: monospace; font-size: 0.8rem; color: #4ecdc4; font-weight: 600; word-break: break-all;">${subName}</span>
+                                <div style="display: flex; gap: 4px; align-items: center;">
                                     <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.72rem; color: ${isMarked ? '#ef4444' : '#00f0ff'}; border-color: ${isMarked ? '#ef4444' : 'rgba(0, 240, 255, 0.4)'}; background: ${isMarked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 240, 255, 0.15)'};" onclick="window.dashboard.toggleTargetMark('${subName}')" title="${isMarked ? 'Remove Target' : 'Set as Target (FQDN)'}">
-                                        <i data-lucide="crosshair" style="width: 10px; height: 10px;"></i> ${isMarked ? 'Target' : 'Set Target'}
+                                        <i data-lucide="crosshair" style="width: 10px; height: 10px;"></i>
                                     </button>
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 6px; font-size: 0.72rem; color: #4ecdc4; border-color: rgba(78, 205, 196, 0.4); background: rgba(78, 205, 196, 0.15);" onclick="event.stopPropagation(); window.dashboard.copyTextList('${subName}', this)" title="Copy Subdomain">
+                                        <i data-lucide="copy" style="width: 10px; height: 10px;"></i>
+                                    </button>
+                                </div>
                                 </div>
                                 ${ipsBadges ? `<div style="display: flex; flex-wrap: wrap; gap: 3px; align-items: center;">${ipsBadges}</div>` : ''}
                             </div>
