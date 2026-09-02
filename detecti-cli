@@ -214,7 +214,6 @@ def scan_command(
             final_db_name = db_name
             
             db_manager = DatabaseManager(final_db_path)
-            db_manager.initialize_schema()
         except Exception as e:
             print_warning(f"Could not initialize database early: {e}")
 
