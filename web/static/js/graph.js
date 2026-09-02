@@ -1370,7 +1370,14 @@ class EASMDashboard {
             this.cy.nodes().hide();
             this.cy.edges().hide();
             const rootNode = this.cy.getElementById('target_root');
-            if (rootNode.length > 0) rootNode.show();
+            if (rootNode.length > 0) {
+                rootNode.show();
+                // Always gently center the root node when it becomes the only survivor
+                this.cy.animate({
+                    center: { eles: rootNode },
+                    zoom: 1.2
+                }, { duration: 500 });
+            }
             this.visibleLeadNodes = new Set(['target_root']);
             return;
         }
