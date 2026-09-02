@@ -3076,6 +3076,13 @@ class EASMDashboard {
         }
 
         // Inspector close button
+        const closeFloatingLeads = document.getElementById('close-floating-leads');
+        if (closeFloatingLeads) {
+            closeFloatingLeads.addEventListener('click', () => {
+                document.getElementById('floating-leads-modal').style.display = 'none';
+            });
+        }
+
         const closeInspectorBtn = document.getElementById('close-inspector');
         if (closeInspectorBtn) {
             closeInspectorBtn.addEventListener('click', () => {
@@ -5460,6 +5467,72 @@ class EASMDashboard {
 
         // 1. Determine Collapse / Uncollapse actions (100% in English)
         const collapseActions = [];
+
+        if (nodeId === 'target_root') {
+            collapseActions.push({
+                id: 'ctx-action-explore-leads',
+                label: 'Explore Leads...',
+                icon: 'compass',
+                disabled: false,
+                action: () => {
+                    const modal = document.getElementById('floating-leads-modal');
+                    const content = document.getElementById('floating-leads-content');
+                    const originalList = document.getElementById('lead-list');
+                    if (modal && content && originalList) {
+                        content.innerHTML = '';
+                        // Clone the original lead list to show in the modal
+                        const clone = originalList.cloneNode(true);
+                        clone.id = 'modal-lead-list';
+                        
+                        // Fix checkboxes in the clone to update the original selection
+                        const checkboxes = clone.querySelectorAll('.lead-checkbox-input');
+                        checkboxes.forEach(cb => {
+                            if (cb.id) cb.id = 'modal_' + cb.id;
+                            
+                            cb.addEventListener('change', (e) => {
+                                const leadItem = e.target.closest('.lead-item');
+                                if (!leadItem) return;
+                                const leadId = leadItem.dataset.leadId;
+                                window.toggleLeadVisibility(leadId, e.target.checked);
+                                // Also update the original sidebar checkbox to keep them in sync
+                                const originalCb = originalList.querySelector(`[data-lead-id="${leadId}"] .lead-checkbox-input`);
+                                if (originalCb) originalCb.checked = e.target.checked;
+                            });
+                        });
+                        
+                        // Make entire items clickable
+                        const leadItems = clone.querySelectorAll('.lead-item');
+                        leadItems.forEach(item => {
+                            item.addEventListener('click', (e) => {
+                                if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'LABEL') {
+                                    const cb = item.querySelector('.lead-checkbox-input');
+                                    if (cb) {
+                                        cb.checked = !cb.checked;
+                                        window.toggleLeadVisibility(item.dataset.leadId, cb.checked);
+                                        const originalCb = originalList.querySelector(`[data-lead-id="${item.dataset.leadId}"] .lead-checkbox-input`);
+                                        if (originalCb) originalCb.checked = cb.checked;
+                                    }
+                                }
+                            });
+                        });
+                        
+                        content.appendChild(clone);
+                        modal.style.display = 'flex';
+                        this.hideContextMenu();
+                    }
+                }
+            });
+            collapseActions.push({
+                id: 'ctx-action-expand-all',
+                label: 'Expand All Leads',
+                icon: 'layers',
+                disabled: false,
+                action: () => {
+                    this.selectAllLeads();
+                    this.hideContextMenu();
+                }
+            });
+        }
 
         if (data.is_cluster || nodeType === 'cluster_services' || nodeType === 'cluster_vulns') {
             const isServiceCluster = nodeType === 'cluster_services';
