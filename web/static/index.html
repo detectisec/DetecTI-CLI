@@ -170,36 +170,6 @@
                     </details>
                 </div>
 
-                <!-- Search Box (Above Lead Selector) -->
-                <div class="panel search-panel">
-                    <div class="search-group">
-                        <i data-lucide="search" class="ui-icon search-lead-icon"></i>
-                        <input type="text" id="search-input" placeholder="Search nodes (IP, domain, CVE, port...)" class="search-input">
-                        <button id="clear-search" class="clear-btn" aria-label="Clear Search"><i data-lucide="x" class="ui-icon"></i></button>
-                    </div>
-                </div>
-
-                <!-- Lead Selector Accordion Panel -->
-                <div class="panel lead-selector-panel lead-accordion-panel">
-                    <details class="sidebar-accordion" id="lead-selector-accordion" name="sidebar-accordion-group">
-                        <summary class="accordion-header">
-                            <span class="accordion-title"><i data-lucide="crosshair" class="ui-icon panel-title-icon"></i> Lead Selector</span>
-                            <i data-lucide="chevron-down" class="ui-icon accordion-icon"></i>
-                        </summary>
-                        <div class="accordion-body">
-                            <div id="lead-selector-container">
-                                <div class="lead-controls">
-                                    <button id="btn-select-all" onclick="selectAllLeads(true)" class="lead-control-btn">Select All</button>
-                                    <button id="btn-deselect-all" onclick="selectAllLeads(false)" class="lead-control-btn">Deselect All</button>
-                                </div>
-                                <div id="lead-list" class="lead-list">
-                                    <div class="lead-loading">Fetching leads...</div>
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-                </div>
-
                 <!-- Filters Accordion Panel -->
                 <div class="panel filters-accordion-panel lead-accordion-panel">
                     <details class="sidebar-accordion" id="filters-accordion" name="sidebar-accordion-group">
@@ -273,6 +243,13 @@
 
             <!-- Graph Container -->
             <main class="graph-container">
+                <div class="canvas-search-container" style="position: absolute; top: 20px; left: 20px; z-index: 100; width: 350px; background: #1e1e2d; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border: 1px solid #333; padding: 5px;">
+                    <div class="search-group" style="margin: 0; background: transparent; border: none; box-shadow: none;">
+                        <i data-lucide="search" class="ui-icon search-lead-icon"></i>
+                        <input type="text" id="search-input" placeholder="Search nodes (IP, domain, CVE, port...)" class="search-input" style="background: rgba(0,0,0,0.2); color: #fff;">
+                        <button id="clear-search" class="clear-btn" aria-label="Clear Search"><i data-lucide="x" class="ui-icon"></i></button>
+                    </div>
+                </div>
                 <div id="spacebar-pan-hint" class="spacebar-pan-hint"><i data-lucide="hand" class="ui-icon" style="width: 14px; height: 14px; vertical-align: middle;"></i> Pan Mode (Spacebar or Right-Click held) - Drag to move view</div>
                 <div id="cy" class="cytoscape-graph"></div>
                 
@@ -606,7 +583,7 @@
     </div>
 
     <script src="/static/js/api.js?v=10"></script>
-    <script src="/static/js/graph.js?v=72"></script>
+    <script src="/static/js/graph.js?v=73"></script>
     
     <script>
         // Debug logging & icon initialization
@@ -647,7 +624,9 @@
             <button onclick="window.dashboard.deselectAllLeads()" style="flex: 1; padding: 8px; background: rgba(255, 255, 255, 0.05); color: #ccc; border: 1px solid #444; border-radius: 4px; cursor: pointer;">Collapse All</button>
         </div>
         <div id="floating-leads-content" style="padding: 15px; overflow-y: auto; flex: 1;">
-            <!-- Leads will be cloned here -->
+            <div id="lead-list" class="lead-list">
+                <div class="lead-loading">Fetching leads...</div>
+            </div>
         </div>
     </div>
 
