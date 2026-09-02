@@ -4583,7 +4583,7 @@ class EASMDashboard {
                 // CLI Execution Logs & Audit Trail Accordion for Root Target
                 rootScanLogsAccordionHtml = `
                     <div class="risk-accordion-group" style="margin-top: 0.75rem; margin-bottom: 0.5rem;">
-                        <div class="risk-accordion-header" onclick="window.dashboard.toggleRiskAccordion(this); window.dashboard.loadRootAuditLogs('${data.name || data.label || ''}')">
+                        <div class="risk-accordion-header" onclick="window.dashboard.toggleRiskAccordion(this); window.dashboard.loadRootAuditLogs()">
                             <div class="risk-accordion-title">
                                 <i data-lucide="terminal" class="accordion-icon ui-icon" style="color: #8C52FF;"></i>
                                 <span style="color: #e9d5ff;">CLI Execution &amp; Audit Logs</span>
@@ -4597,7 +4597,7 @@ class EASMDashboard {
                         <div class="risk-accordion-body" style="display: none; max-height: 320px; overflow-y: auto; padding: 8px 6px; background: #0c0a14; border-top: 1px solid rgba(140, 82, 255, 0.2);">
                             <div style="margin-bottom: 6px; display: flex; gap: 6px;">
                                 <input type="text" id="root-audit-logs-filter" placeholder="Filter CLI logs (e.g. shodan, masscan, nuclei)..." oninput="window.dashboard.filterRootAuditLogs(this.value)" style="flex: 1; box-sizing: border-box; padding: 4px 8px; font-size: 0.78rem; background: #171425; border: 1px solid rgba(140, 82, 255, 0.3); border-radius: 4px; color: #f8fafc; font-family: monospace;">
-                                <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 0.72rem; background: rgba(140, 82, 255, 0.15); color: #00f0ff; border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 4px;" onclick="window.dashboard.loadRootAuditLogs('${data.name || data.label || ''}', true)">
+                                <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 0.72rem; background: rgba(140, 82, 255, 0.15); color: #00f0ff; border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 4px;" onclick="window.dashboard.loadRootAuditLogs('', true)">
                                     <i data-lucide="refresh-cw" style="width: 11px; height: 11px;"></i>
                                 </button>
                             </div>
