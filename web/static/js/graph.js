@@ -653,6 +653,11 @@ class EASMDashboard {
             // But preserve active leads when refreshing after a background scan
             if (!preserveSelection) {
                 this.selectedLeads.clear();
+                
+                // Auto-select leads if total is <= 50 to prevent blank graphs on small datasets
+                if (this.leads.length > 0 && this.leads.length <= 50) {
+                    this.leads.forEach(lead => this.selectedLeads.add(lead.id));
+                }
             } else {
                 const currentLeadIds = new Set(this.leads.map(l => l.id));
                 Array.from(this.selectedLeads).forEach(id => {
