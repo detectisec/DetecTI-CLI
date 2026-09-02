@@ -2530,6 +2530,11 @@ class EASMDashboard {
         // Background click handler (close inspector, context menu & unselect nodes)
         this.cy.on('tap', (event) => {
             this.hideContextMenu();
+            
+            // Close the floating leads modal if clicking anywhere on the graph
+            const floatingModal = document.getElementById('floating-leads-modal');
+            if (floatingModal) floatingModal.style.display = 'none';
+
             if (event.target === this.cy) {
                 this.cy.edges('edge[label="RESOLVES_TO"]').removeClass('ghost-active');
                 this.cy.nodes().removeClass('cy-selected').unselect();
