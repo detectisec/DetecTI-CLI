@@ -4419,8 +4419,8 @@ class EASMDashboard {
                                 <i data-lucide="list" class="accordion-icon ui-icon"></i>
                                 <span>Input Targets List</span>
                             </div>
-                            <div class="risk-accordion-status" style="display: flex; align-items: center; gap: 6px;">
-                                <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 212, 255, 0.2); color: #00d4ff; border-color: rgba(0, 212, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(data.targets_list).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i> Copy</button>
+                            <div class="risk-accordion-status" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: flex-end;">
+                                <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 212, 255, 0.2); color: #00d4ff; border-color: rgba(0, 212, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(data.targets_list).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i></button>
                                 <span class="risk-pill-counter" style="color: #00d4ff; background: rgba(0,212,255,0.15); border-color: rgba(0,212,255,0.4);">${data.targets_list.length}</span>
                                 <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
                             </div>
@@ -4463,9 +4463,9 @@ class EASMDashboard {
                                     <i data-lucide="globe" class="accordion-icon ui-icon"></i>
                                     <span>Enumerated Domains (${allDoms.length})</span>
                                 </div>
-                                <div class="risk-accordion-status" style="display: flex; align-items: center; gap: 6px;">
-                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 240, 255, 0.15); color: #00f0ff; border-color: rgba(0, 240, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.setTargetsBulk(${JSON.stringify(domNames).replace(/"/g, '&quot;')})" title="Set all items as Target"><i data-lucide="crosshair" class="badge-icon"></i> Target All</button>
-                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 180, 216, 0.2); color: #00b4d8; border-color: rgba(0, 180, 216, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(domNames).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i> Copy</button>
+                                <div class="risk-accordion-status" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: flex-end;">
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 240, 255, 0.15); color: #00f0ff; border-color: rgba(0, 240, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.setTargetsBulk(${JSON.stringify(domNames).replace(/"/g, '&quot;')})" title="Set all items as Target"><i data-lucide="crosshair" class="badge-icon"></i></button>
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 180, 216, 0.2); color: #00b4d8; border-color: rgba(0, 180, 216, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(domNames).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i></button>
                                     <span class="risk-pill-counter" style="color: #00b4d8; background: rgba(0, 180, 216, 0.15); border-color: rgba(0, 180, 216, 0.4);">${allDoms.length}</span>
                                     <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
                                 </div>
@@ -4511,9 +4511,9 @@ class EASMDashboard {
                                     <i data-lucide="globe" class="accordion-icon ui-icon"></i>
                                     <span>Enumerated Subdomains (${allSubs.length})</span>
                                 </div>
-                                <div class="risk-accordion-status" style="display: flex; align-items: center; gap: 6px;">
-                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 240, 255, 0.15); color: #00f0ff; border-color: rgba(0, 240, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.setTargetsBulk(${JSON.stringify(subNames).replace(/"/g, '&quot;')})" title="Set all items as Target"><i data-lucide="crosshair" class="badge-icon"></i> Target All</button>
-                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(78, 205, 196, 0.2); color: #4ecdc4; border-color: rgba(78, 205, 196, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(subNames).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i> Copy</button>
+                                <div class="risk-accordion-status" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: flex-end;">
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 240, 255, 0.15); color: #00f0ff; border-color: rgba(0, 240, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.setTargetsBulk(${JSON.stringify(subNames).replace(/"/g, '&quot;')})" title="Set all items as Target"><i data-lucide="crosshair" class="badge-icon"></i></button>
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(78, 205, 196, 0.2); color: #4ecdc4; border-color: rgba(78, 205, 196, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(subNames).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i></button>
                                     <span class="risk-pill-counter" style="color: #4ecdc4; background: rgba(78, 205, 196, 0.15); border-color: rgba(78, 205, 196, 0.4);">${allSubs.length}</span>
                                     <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
                                 </div>
@@ -4564,9 +4564,9 @@ class EASMDashboard {
                                     <i data-lucide="server" class="accordion-icon ui-icon" style="color: #60a5fa;"></i>
                                     <span>Enumerated Host IPs (${allIps.length})</span>
                                 </div>
-                                <div class="risk-accordion-status" style="display: flex; align-items: center; gap: 6px;">
-                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 240, 255, 0.15); color: #00f0ff; border-color: rgba(0, 240, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.setTargetsBulk(${JSON.stringify(ipStrings).replace(/"/g, '&quot;')})" title="Set all items as Target"><i data-lucide="crosshair" class="badge-icon"></i> Target All</button>
-                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(59, 130, 246, 0.2); color: #60a5fa; border-color: rgba(59, 130, 246, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(ipStrings).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i> Copy</button>
+                                <div class="risk-accordion-status" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: flex-end;">
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 240, 255, 0.15); color: #00f0ff; border-color: rgba(0, 240, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.setTargetsBulk(${JSON.stringify(ipStrings).replace(/"/g, '&quot;')})" title="Set all items as Target"><i data-lucide="crosshair" class="badge-icon"></i></button>
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(59, 130, 246, 0.2); color: #60a5fa; border-color: rgba(59, 130, 246, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(ipStrings).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i></button>
                                     <span class="risk-pill-counter" style="color: #60a5fa; background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.4);">${allIps.length}</span>
                                     <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
                                 </div>
@@ -4591,8 +4591,8 @@ class EASMDashboard {
                                 <i data-lucide="terminal" class="accordion-icon ui-icon" style="color: #8C52FF;"></i>
                                 <span style="color: #e9d5ff;">CLI Execution &amp; Audit Logs</span>
                             </div>
-                            <div class="risk-accordion-status" style="display: flex; align-items: center; gap: 6px;">
-                                <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(140, 82, 255, 0.2); color: #e9d5ff; border-color: rgba(140, 82, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyRootAuditLogs(this)"><i data-lucide="copy" class="badge-icon"></i> Copy</button>
+                            <div class="risk-accordion-status" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: flex-end;">
+                                <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(140, 82, 255, 0.2); color: #e9d5ff; border-color: rgba(140, 82, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyRootAuditLogs(this)"><i data-lucide="copy" class="badge-icon"></i></button>
                                 <span id="root-audit-logs-count" class="risk-pill-counter" style="color: #8C52FF; background: rgba(140, 82, 255, 0.15); border-color: rgba(140, 82, 255, 0.4);">...</span>
                                 <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
                             </div>
@@ -4652,9 +4652,9 @@ class EASMDashboard {
                                     <i data-lucide="globe" class="accordion-icon ui-icon"></i>
                                     <span>${accordionTitle} (${relatedSubs.length})</span>
                                 </div>
-                                <div class="risk-accordion-status" style="display: flex; align-items: center; gap: 6px;">
-                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 240, 255, 0.15); color: #00f0ff; border-color: rgba(0, 240, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.setTargetsBulk(${JSON.stringify(subNamesList).replace(/"/g, '&quot;')})" title="Set all items as Target"><i data-lucide="crosshair" class="badge-icon"></i> Target All</button>
-                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(78, 205, 196, 0.2); color: #4ecdc4; border-color: rgba(78, 205, 196, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(subNamesList).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i> Copy</button>
+                                <div class="risk-accordion-status" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: flex-end;">
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 240, 255, 0.15); color: #00f0ff; border-color: rgba(0, 240, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.setTargetsBulk(${JSON.stringify(subNamesList).replace(/"/g, '&quot;')})" title="Set all items as Target"><i data-lucide="crosshair" class="badge-icon"></i></button>
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(78, 205, 196, 0.2); color: #4ecdc4; border-color: rgba(78, 205, 196, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(subNamesList).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i></button>
                                     <span class="risk-pill-counter" style="color: #4ecdc4; background: rgba(78, 205, 196, 0.15); border-color: rgba(78, 205, 196, 0.4);">${relatedSubs.length}</span>
                                     <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
                                 </div>
