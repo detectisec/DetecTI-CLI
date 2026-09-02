@@ -1365,11 +1365,13 @@ class EASMDashboard {
         const selectedLeadIds = Array.from(this.selectedLeads);
         const visibleNodes = new Set();
 
-        // Rule: When NO leads are selected (default upon DB load), render NOTHING!
+        // Rule: When NO leads are selected (default upon DB load), render NOTHING except target_root!
         if (selectedLeadIds.length === 0) {
             this.cy.nodes().hide();
             this.cy.edges().hide();
-            this.visibleLeadNodes = new Set();
+            const rootNode = this.cy.getElementById('target_root');
+            if (rootNode.length > 0) rootNode.show();
+            this.visibleLeadNodes = new Set(['target_root']);
             return;
         }
 
