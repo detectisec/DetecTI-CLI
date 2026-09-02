@@ -4458,6 +4458,7 @@ class EASMDashboard {
                 const allDoms = Array.isArray(data.all_domains) ? data.all_domains : [];
                 if (allDoms.length > 0) {
                     const domNames = allDoms.map(d => d.name);
+                    const allMarked = domNames.length > 0 && domNames.every(name => this.isTargetMarked(name));
                     const domListHtml = allDoms.map(d => {
                         const isMarked = this.isTargetMarked(d.name);
                         return `
@@ -4483,7 +4484,7 @@ class EASMDashboard {
                                     <span>Enumerated Domains (${allDoms.length})</span>
                                 </div>
                                 <div class="risk-accordion-status" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: flex-end;">
-                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 240, 255, 0.15); color: #00f0ff; border-color: rgba(0, 240, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.setTargetsBulk(${JSON.stringify(domNames).replace(/"/g, '&quot;')})" title="Set all items as Target"><i data-lucide="crosshair" class="badge-icon"></i></button>
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; color: ${allMarked ? '#ef4444' : '#00f0ff'}; border-color: ${allMarked ? '#ef4444' : 'rgba(0, 240, 255, 0.4)'}; background: ${allMarked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 240, 255, 0.15)'};" onclick="event.stopPropagation(); window.dashboard.${allMarked ? 'removeTargetsBulk' : 'setTargetsBulk'}(${JSON.stringify(domNames).replace(/"/g, '&quot;')})" title="${allMarked ? 'Remove all from Targets' : 'Set all items as Target'}"><i data-lucide="crosshair" class="badge-icon"></i></button>
                                     <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 180, 216, 0.2); color: #00b4d8; border-color: rgba(0, 180, 216, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(domNames).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i></button>
                                     <span class="risk-pill-counter" style="color: #00b4d8; background: rgba(0, 180, 216, 0.15); border-color: rgba(0, 180, 216, 0.4);">${allDoms.length}</span>
                                     <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
@@ -4504,6 +4505,7 @@ class EASMDashboard {
                 const allSubs = Array.isArray(data.all_subdomains) ? data.all_subdomains : [];
                 if (allSubs.length > 0) {
                     const subNames = allSubs.map(s => s.name);
+                    const allMarked = subNames.length > 0 && subNames.every(name => this.isTargetMarked(name));
                     const subListHtml = allSubs.map(s => {
                         const isMarked = this.isTargetMarked(s.name);
                         const ipsBadges = (s.ips || []).map(ip => `
@@ -4536,7 +4538,7 @@ class EASMDashboard {
                                     <span>Enumerated Subdomains (${allSubs.length})</span>
                                 </div>
                                 <div class="risk-accordion-status" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: flex-end;">
-                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 240, 255, 0.15); color: #00f0ff; border-color: rgba(0, 240, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.setTargetsBulk(${JSON.stringify(subNames).replace(/"/g, '&quot;')})" title="Set all items as Target"><i data-lucide="crosshair" class="badge-icon"></i></button>
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; color: ${allMarked ? '#ef4444' : '#00f0ff'}; border-color: ${allMarked ? '#ef4444' : 'rgba(0, 240, 255, 0.4)'}; background: ${allMarked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 240, 255, 0.15)'};" onclick="event.stopPropagation(); window.dashboard.${allMarked ? 'removeTargetsBulk' : 'setTargetsBulk'}(${JSON.stringify(subNames).replace(/"/g, '&quot;')})" title="${allMarked ? 'Remove all from Targets' : 'Set all items as Target'}"><i data-lucide="crosshair" class="badge-icon"></i></button>
                                     <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(78, 205, 196, 0.2); color: #4ecdc4; border-color: rgba(78, 205, 196, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(subNames).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i></button>
                                     <span class="risk-pill-counter" style="color: #4ecdc4; background: rgba(78, 205, 196, 0.15); border-color: rgba(78, 205, 196, 0.4);">${allSubs.length}</span>
                                     <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
@@ -4557,6 +4559,7 @@ class EASMDashboard {
                 const allIps = Array.isArray(data.all_ips) ? data.all_ips : [];
                 if (allIps.length > 0) {
                     const ipStrings = allIps.map(item => item.ip);
+                    const allMarked = ipStrings.length > 0 && ipStrings.every(ip => this.isTargetMarked(ip));
                     const ipListHtml = allIps.map(item => {
                         const isMarked = this.isTargetMarked(item.ip);
                         const fqdnsBadges = (item.fqdns || []).slice(0, 3).map(f => `
@@ -4594,7 +4597,7 @@ class EASMDashboard {
                                     <span>Enumerated Host IPs (${allIps.length})</span>
                                 </div>
                                 <div class="risk-accordion-status" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: flex-end;">
-                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 240, 255, 0.15); color: #00f0ff; border-color: rgba(0, 240, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.setTargetsBulk(${JSON.stringify(ipStrings).replace(/"/g, '&quot;')})" title="Set all items as Target"><i data-lucide="crosshair" class="badge-icon"></i></button>
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; color: ${allMarked ? '#ef4444' : '#00f0ff'}; border-color: ${allMarked ? '#ef4444' : 'rgba(0, 240, 255, 0.4)'}; background: ${allMarked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 240, 255, 0.15)'};" onclick="event.stopPropagation(); window.dashboard.${allMarked ? 'removeTargetsBulk' : 'setTargetsBulk'}(${JSON.stringify(ipStrings).replace(/"/g, '&quot;')})" title="${allMarked ? 'Remove all from Targets' : 'Set all items as Target'}"><i data-lucide="crosshair" class="badge-icon"></i></button>
                                     <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(59, 130, 246, 0.2); color: #60a5fa; border-color: rgba(59, 130, 246, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(ipStrings).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i></button>
                                     <span class="risk-pill-counter" style="color: #60a5fa; background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.4);">${allIps.length}</span>
                                     <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
@@ -4653,6 +4656,7 @@ class EASMDashboard {
 
                 if (relatedSubs.length > 0) {
                     const subNamesList = relatedSubs.map(s => s.name || s.label);
+                    const allMarked = subNamesList.length > 0 && subNamesList.every(name => this.isTargetMarked(name));
                     const subListHtml = relatedSubs.map((sub) => {
                         const subName = sub.name || sub.label;
                         const isMarked = this.isTargetMarked(subName);
@@ -4687,7 +4691,7 @@ class EASMDashboard {
                                     <span>${accordionTitle} (${relatedSubs.length})</span>
                                 </div>
                                 <div class="risk-accordion-status" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: flex-end;">
-                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(0, 240, 255, 0.15); color: #00f0ff; border-color: rgba(0, 240, 255, 0.4);" onclick="event.stopPropagation(); window.dashboard.setTargetsBulk(${JSON.stringify(subNamesList).replace(/"/g, '&quot;')})" title="Set all items as Target"><i data-lucide="crosshair" class="badge-icon"></i></button>
+                                    <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; color: ${allMarked ? '#ef4444' : '#00f0ff'}; border-color: ${allMarked ? '#ef4444' : 'rgba(0, 240, 255, 0.4)'}; background: ${allMarked ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 240, 255, 0.15)'};" onclick="event.stopPropagation(); window.dashboard.${allMarked ? 'removeTargetsBulk' : 'setTargetsBulk'}(${JSON.stringify(subNamesList).replace(/"/g, '&quot;')})" title="${allMarked ? 'Remove all from Targets' : 'Set all items as Target'}"><i data-lucide="crosshair" class="badge-icon"></i></button>
                                     <button type="button" class="risk-focus-btn" style="margin: 0; padding: 2px 7px; font-size: 0.75rem; background: rgba(78, 205, 196, 0.2); color: #4ecdc4; border-color: rgba(78, 205, 196, 0.4);" onclick="event.stopPropagation(); window.dashboard.copyTextList(${JSON.stringify(subNamesList).replace(/"/g, '&quot;')}, this)"><i data-lucide="copy" class="badge-icon"></i></button>
                                     <span class="risk-pill-counter" style="color: #4ecdc4; background: rgba(78, 205, 196, 0.15); border-color: rgba(78, 205, 196, 0.4);">${relatedSubs.length}</span>
                                     <i data-lucide="chevron-down" class="accordion-chevron ui-icon"></i>
