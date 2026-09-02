@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS scan_logs (
     level TEXT NOT NULL,
     message TEXT NOT NULL,
     target TEXT,
+    input_target TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

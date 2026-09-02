@@ -493,13 +493,14 @@ class UnverifyServicesRequest(BaseModel):
     all_services: Optional[bool] = False
 
 
-def _append_scan_log(level: str, message: str, target: Optional[str] = None, db: Optional[DatabaseManager] = None):
+def _append_scan_log(level: str, message: str, target: Optional[str] = None, db: Optional[DatabaseManager] = None, input_target: Optional[str] = None):
     ts = datetime.now().strftime("%H:%M:%S")
     entry = {
         "timestamp": ts,
         "level": level,
         "message": message,
         "target": target,
+        "input_target": input_target,
     }
     _scan_log_history.append(entry)
     if len(_scan_log_history) > 200:
@@ -509,7 +510,7 @@ def _append_scan_log(level: str, message: str, target: Optional[str] = None, db:
     resolved_db = db or _resolve_db_manager(None, None, target=target)
     if resolved_db and Path(resolved_db.db_path).exists():
         try:
-            resolved_db.add_scan_log(level=level, message=message, target=target, timestamp=ts)
+            resolved_db.add_scan_log(level=level, message=message, target=target, timestamp=ts, input_target=input_target)
         except Exception:
             pass
 

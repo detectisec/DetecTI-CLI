@@ -1312,15 +1312,15 @@ class DatabaseManager:
             "total_processed": len(findings),
         }
 
-    def add_scan_log(self, level: str, message: str, target: Optional[str] = None, timestamp: Optional[str] = None) -> int:
+    def add_scan_log(self, level: str, message: str, target: Optional[str] = None, timestamp: Optional[str] = None, input_target: Optional[str] = None) -> int:
         """Insert a scan execution log entry into SQLite."""
         if not timestamp:
             timestamp = datetime.now().strftime("%H:%M:%S")
         with sqlite3.connect(self.db_path) as conn:
             cur = conn.execute("""
-                INSERT INTO scan_logs (timestamp, level, message, target)
-                VALUES (?, ?, ?, ?)
-            """, (timestamp, level, message, target))
+                INSERT INTO scan_logs (timestamp, level, message, target, input_target)
+                VALUES (?, ?, ?, ?, ?)
+            """, (timestamp, level, message, target, input_target))
             conn.commit()
             return cur.lastrowid or 0
 
@@ -1330,17 +1330,17 @@ class DatabaseManager:
             conn.row_factory = sqlite3.Row
             if target:
                 rows = conn.execute("""
-                    SELECT id, timestamp, level, message, target, created_at
+                    SELECT id, timestamp, level, message, target, input_target, created_at
                     FROM scan_logs
-                    WHERE target = ?
+                    WHERE target = ? OR input_target = ?
                     ORDER BY id ASC
                     LIMIT ?
-                """, (target, limit)).fetchall()
+                """, (target, target, limit)).fetchall()
             else:
                 rows = conn.execute("""
-                    SELECT id, timestamp, level, message, target, created_at
+                    SELECT id, timestamp, level, message, target, input_target, created_at
                     FROM (
-                        SELECT id, timestamp, level, message, target, created_at
+                        SELECT id, timestamp, level, message, target, input_target, created_at
                         FROM scan_logs
                         ORDER BY id DESC
                         LIMIT ?
@@ -1355,6 +1355,7 @@ class DatabaseManager:
                     "level": row["level"],
                     "message": row["message"],
                     "target": row["target"],
+                    "input_target": row["input_target"],
                 }
                 for row in rows
             ]

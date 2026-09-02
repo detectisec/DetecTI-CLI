@@ -196,6 +196,28 @@ def scan_command(
     if cvss_filter:
         console.print(f" [cyan]CVSS Filter:[/cyan] [bold yellow]{cvss_filter.upper()}[/bold yellow]")
 
+    # Shift-Left: Initialize Database before scan begins to capture live logs
+    is_cve = target.strip().upper().startswith("CVE-")
+    db_manager = None
+    final_db_name = None
+    if not is_cve:
+        try:
+            from core.database.storage import DatabaseManager
+            if create_db:
+                db_name = create_db if create_db.endswith('.sqlite') else f"{create_db}.sqlite"
+            else:
+                db_name = target_to_db_name(target)
+            
+            dbs_dir = Path.cwd() / "data" / "dbs"
+            dbs_dir.mkdir(parents=True, exist_ok=True)
+            final_db_path = dbs_dir / db_name
+            final_db_name = db_name
+            
+            db_manager = DatabaseManager(final_db_path)
+            db_manager.initialize_schema()
+        except Exception as e:
+            print_warning(f"Could not initialize database early: {e}")
+
     # Run async engine
     with Progress(
         SpinnerColumn(spinner_name="dots"),
@@ -208,7 +230,7 @@ def scan_command(
         def progress_cb(module_name: str, message: str) -> None:
             progress.update(task_id, description=f"[bold cyan][{module_name}][/bold cyan] {message}")
 
-        engine = ThreatTrackEngine(progress_callback=progress_cb)
+        engine = ThreatTrackEngine(progress_callback=progress_cb, db_manager=db_manager)
         result = asyncio.run(
             engine.scan(
                 target=target,
@@ -225,28 +247,11 @@ def scan_command(
         )
 
         # Automatic SQLite database storage for non-CVE targets with valid findings
-        is_cve = (result.target_type == "cve") or target.strip().upper().startswith("CVE-")
-        if not is_cve and has_results:
-            final_db_name = None
+        if not is_cve and has_results and db_manager:
             try:
-                from core.database.storage import DatabaseManager
-                
-                # Determine database path: use create_db if provided, else target root
-                if create_db:
-                    db_name = create_db if create_db.endswith('.sqlite') else f"{create_db}.sqlite"
-                else:
-                    db_name = target_to_db_name(target)
-                
-                dbs_dir = Path.cwd() / "data" / "dbs"
-                dbs_dir.mkdir(parents=True, exist_ok=True)
-                final_db_path = dbs_dir / db_name
-                final_db_name = db_name
-                
-                progress.update(task_id, description=f"[bold cyan]Storing results in SQLite database ({db_name})...")
-                db_manager = DatabaseManager(final_db_path)
+                progress.update(task_id, description=f"[bold cyan]Storing results in SQLite database ({final_db_name})...")
                 db_manager.store_scan_result(result)
-                
-                print_success(f"Scan results stored in database: [bold underline]{final_db_path.resolve()}[/bold underline]")
+                print_success(f"Scan results stored in database: [bold underline]{db_manager.db_path.resolve() if hasattr(db_manager.db_path, 'resolve') else db_manager.db_path}[/bold underline]")
             except Exception as e:
                 print_error(f"Failed to store results in database: {e}")
 

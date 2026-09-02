@@ -6942,8 +6942,10 @@ class EASMDashboard {
             else if (lvl.includes('info')) color = '#00f0ff';
 
             const timeStr = l.timestamp ? `[${this.escapeHtml(l.timestamp)}]` : '';
-            return `<div class="root-log-line" data-msg="${this.escapeHtml((l.message || '').toLowerCase())}" style="margin-bottom: 2px;">
+            const inputTargetStr = l.input_target ? `<span style="background: rgba(140, 82, 255, 0.15); color: #c084fc; border: 1px solid rgba(140, 82, 255, 0.4); border-radius: 4px; padding: 0 4px; font-size: 0.65rem; margin-right: 6px;">🎯 ${this.escapeHtml(l.input_target)}</span>` : '';
+            return `<div class="root-log-line" data-msg="${this.escapeHtml((l.message || '').toLowerCase())} ${this.escapeHtml((l.input_target || '').toLowerCase())}" style="margin-bottom: 2px;">
                 <span style="color: #64748b; margin-right: 4px;">${timeStr}</span>
+                ${inputTargetStr}
                 <span style="color: ${color}; font-weight: 600; margin-right: 6px;">[${this.escapeHtml(lvl.toUpperCase())}]</span>
                 <span style="color: #f1f5f9;">${this.escapeHtml(l.message || '')}</span>
             </div>`;
