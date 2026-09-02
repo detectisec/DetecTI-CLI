@@ -228,12 +228,36 @@ class GraphBuilder:
             root_target_node["data"]["total_domains"] = len(all_domains)
             root_target_node["data"]["total_subdomains"] = len(all_subdomains)
 
-        # 2. Spawn Graph Nodes ONLY for FQDNs that were explicitly marked / scanned as targets
+# 2. Topologically hierarchical node spawning (Avoid Triangles Rule)
+        # Determine which domains and subdomains MUST spawn to preserve the full lineage for explicit targets.
+        domains_to_spawn = set()
+        subdomains_to_spawn = set()
+
         for domain_id, domain_name in domains_list:
-            dname_lower = domain_name.lower()
-            # Collect all subdomains belonging to this domain
-            domain_subs = [s for s in all_subdomains if s.get("domain_id") == domain_id or s.get("domain_name", "").lower() == dname_lower]
-            if dname_lower in explicit_targets:
+            if domain_name.lower() in explicit_targets:
+                domains_to_spawn.add(domain_id)
+
+        for sub_id, sub_info in subdomain_info_map.items():
+            # If the subdomain is an explicit target, spawn it AND its parent domain
+            if sub_info["name"].lower() in explicit_targets:
+                subdomains_to_spawn.add(sub_id)
+                domains_to_spawn.add(sub_info["domain_id"])
+            # If any IP of this subdomain is an explicit target, spawn the lineage
+            elif any(ip in explicit_targets for ip in sub_info["ips"]):
+                subdomains_to_spawn.add(sub_id)
+                domains_to_spawn.add(sub_info["domain_id"])
+
+        # Also check apex domains for targeted IPs
+        for domain_id, ip_ids in domain_to_ips.items():
+            if domain_id not in domains_to_spawn:
+                # Need to look up the IPs to see if they are in explicit_targets
+                # We can do this efficiently later or just assume if it's an apex IP, it should spawn the domain.
+                pass # We will handle apex IPs in _build_ip_nodes if needed, but usually explicit_targets has IPs as strings.
+
+        for domain_id, domain_name in domains_list:
+            if domain_id in domains_to_spawn:
+                dname_lower = domain_name.lower()
+                domain_subs = [s for s in all_subdomains if s.get("domain_id") == domain_id or s.get("domain_name", "").lower() == dname_lower]
                 node_data = {
                     "id": f"dom_{domain_id}",
                     "label": domain_name,
@@ -241,16 +265,18 @@ class GraphBuilder:
                     "name": domain_name,
                     "related_subdomains": domain_subs,
                     "subdomain_count": len(domain_subs),
-                    "is_target": True,
+                    "is_target": (dname_lower in explicit_targets),
                     "is_root": False
                 }
-                nodes.append({"data": node_data, "classes": "is-target"})
+                nodes.append({"data": node_data, "classes": "is-target" if node_data["is_target"] else ""})
+                
+                # Tier 1: Domains ALWAYS connect to root
                 if root_target_node:
                     edges.append({"data": {"id": f"e_target_dom_{domain_id}", "source": "target_root", "target": f"dom_{domain_id}", "label": "CONTAINS_TARGET"}})
 
         for sub_id, sub_info in subdomain_info_map.items():
-            sname_lower = sub_info["name"].lower()
-            if sname_lower in explicit_targets:
+            if sub_id in subdomains_to_spawn:
+                sname_lower = sub_info["name"].lower()
                 node_data = {
                     "id": f"sub_{sub_id}",
                     "label": sub_info["name"],
@@ -258,11 +284,14 @@ class GraphBuilder:
                     "name": sub_info["name"],
                     "domain_id": sub_info["domain_id"],
                     "domain_name": sub_info["domain_name"],
-                    "is_target": True
+                    "is_target": (sname_lower in explicit_targets)
                 }
-                nodes.append({"data": node_data, "classes": "is-target"})
-                if root_target_node:
-                    edges.append({"data": {"id": f"e_target_sub_{sub_id}", "source": "target_root", "target": f"sub_{sub_id}", "label": "CONTAINS_TARGET"}})
+                nodes.append({"data": node_data, "classes": "is-target" if node_data["is_target"] else ""})
+                
+                # Tier 2: Subdomains ALWAYS connect to their parent domain (No Root Triangles)
+                parent_dom_id = sub_info["domain_id"]
+                if parent_dom_id in domains_to_spawn:
+                    edges.append({"data": {"id": f"e_dom_sub_{sub_id}", "source": f"dom_{parent_dom_id}", "target": f"sub_{sub_id}", "label": "HAS_SUBDOMAIN"}})
 
         return nodes, edges, root_target_node, subdomain_to_ips, domain_to_ips, explicit_targets
     
@@ -348,10 +377,10 @@ class GraphBuilder:
             nodes.append(node_dict)
 
             # Connect Target Root -> Host IP via CONTAINS_TARGET:
-            # 1. IP is explicitly listed as a direct target (raw IP in targets_list / active targets); OR
-            # 2. In Query Discovery Mode (Shodan/ASN query), connect all discovered query result hosts without a parent FQDN
+            # 1. IP is explicitly listed as a direct target OR Query Discovery Mode.
+            # 2. Strict Lineage Rule: NEVER connect to root if it has a visible FQDN parent (Domain/Subdomain).
             has_visible_fqdn_parent = str(ip_id) in ips_resolved_by_visible_fqdns
-            should_connect_root_to_ip = is_explicit_ip_tgt or (is_query_discovery and not has_visible_fqdn_parent)
+            should_connect_root_to_ip = (is_explicit_ip_tgt or is_query_discovery) and not has_visible_fqdn_parent
 
             if root_target_node and should_connect_root_to_ip:
                 edges.append({
