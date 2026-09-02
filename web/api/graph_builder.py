@@ -35,7 +35,7 @@ class GraphBuilder:
                 pass
 
             # 2. Build domain & subdomain nodes (only explicit targets spawned as graph nodes)
-            domain_nodes, domain_edges, root_target_node, subdomain_to_ips, domain_to_ips = self._build_domain_nodes(
+            domain_nodes, domain_edges, root_target_node, subdomain_to_ips, domain_to_ips, explicit_targets = self._build_domain_nodes(
                 conn, target_name, target_type, active_targets=active_targets
             )
             if root_target_node:
@@ -43,8 +43,9 @@ class GraphBuilder:
             nodes.extend(domain_nodes)
             edges.extend(domain_edges)
             
-            # 3. Build IP nodes connected to target root
+            # 3. Build IP nodes connected to target root or resolved by visible FQDNs
             spawned_fqdn_ids = {n["data"]["id"] for n in domain_nodes}
+            targets_list = root_target_node["data"].get("targets_list", []) if root_target_node else []
             ip_nodes, ip_edges = self._build_ip_nodes(
                 conn,
                 subdomain_to_ips,
@@ -52,20 +53,38 @@ class GraphBuilder:
                 spawned_fqdn_ids=spawned_fqdn_ids,
                 target_name=target_name,
                 target_type=target_type,
+                targets_list=targets_list,
+                explicit_targets=explicit_targets,
                 root_target_node=root_target_node
             )
-            nodes.extend(ip_nodes)
+
+            # Determine which IPs have actual topological connections on canvas (either via RESOLVES_TO or CONTAINS_TARGET)
+            connected_ip_ids = {
+                e["data"]["target"] for e in (domain_edges + ip_edges)
+                if e["data"].get("label") in ("RESOLVES_TO", "CONTAINS_TARGET") and str(e["data"].get("target", "")).startswith("ip_")
+            }
+
+            # In Scope-driven mode (file, domain, subdomain), omit orphaned passive IPs from canvas
+            # In Discovery query mode, all IPs have CONTAINS_TARGET and are kept
+            visible_ip_nodes = [n for n in ip_nodes if n["data"]["id"] in connected_ip_ids]
+            nodes.extend(visible_ip_nodes)
             edges.extend(ip_edges)
             
-            # 4. Build service nodes connected to IPs
+            # 4. Build service nodes connected to in-scope IPs
             service_nodes, service_edges = self._build_service_nodes(conn)
-            nodes.extend(service_nodes)
-            edges.extend(service_edges)
+            visible_service_nodes = [n for n in service_nodes if any(e["data"]["target"] == n["data"]["id"] and e["data"]["source"] in connected_ip_ids for e in service_edges)]
+            visible_service_edges = [e for e in service_edges if e["data"]["source"] in connected_ip_ids]
+            nodes.extend(visible_service_nodes)
+            edges.extend(visible_service_edges)
             
-            # 5. Build vulnerability nodes connected to services/IPs
+            # 5. Build vulnerability nodes connected to in-scope services/IPs
             vuln_nodes, vuln_edges = self._build_vulnerability_nodes(conn)
-            nodes.extend(vuln_nodes)
-            edges.extend(vuln_edges)
+            visible_srv_and_ip_ids = connected_ip_ids.union({n["data"]["id"] for n in visible_service_nodes})
+            visible_vuln_edges = [e for e in vuln_edges if e["data"]["source"] in visible_srv_and_ip_ids]
+            visible_vuln_node_ids = {e["data"]["target"] for e in visible_vuln_edges}
+            visible_vuln_nodes = [n for n in vuln_nodes if n["data"]["id"] in visible_vuln_node_ids]
+            nodes.extend(visible_vuln_nodes)
+            edges.extend(visible_vuln_edges)
         
         return {
             "elements": {
@@ -212,12 +231,16 @@ class GraphBuilder:
         # 2. Spawn Graph Nodes ONLY for FQDNs that were explicitly marked / scanned as targets
         for domain_id, domain_name in domains_list:
             dname_lower = domain_name.lower()
+            # Collect all subdomains belonging to this domain
+            domain_subs = [s for s in all_subdomains if s.get("domain_id") == domain_id or s.get("domain_name", "").lower() == dname_lower]
             if dname_lower in explicit_targets:
                 node_data = {
                     "id": f"dom_{domain_id}",
                     "label": domain_name,
                     "type": "domain",
                     "name": domain_name,
+                    "related_subdomains": domain_subs,
+                    "subdomain_count": len(domain_subs),
                     "is_target": True,
                     "is_root": False
                 }
@@ -241,7 +264,7 @@ class GraphBuilder:
                 if root_target_node:
                     edges.append({"data": {"id": f"e_target_sub_{sub_id}", "source": "target_root", "target": f"sub_{sub_id}", "label": "CONTAINS_TARGET"}})
 
-        return nodes, edges, root_target_node, subdomain_to_ips, domain_to_ips
+        return nodes, edges, root_target_node, subdomain_to_ips, domain_to_ips, explicit_targets
     
     def _build_ip_nodes(
         self,
@@ -252,6 +275,7 @@ class GraphBuilder:
         target_name: Optional[str] = None,
         target_type: Optional[str] = None,
         targets_list: Optional[List[str]] = None,
+        explicit_targets: Optional[Set[str]] = None,
         root_target_node: Optional[Dict] = None
     ) -> tuple[List[Dict], List[Dict]]:
         nodes = []
@@ -280,6 +304,8 @@ class GraphBuilder:
         fqdn_set = spawned_fqdn_ids or set()
         ips_resolved_by_visible_fqdns = set()
         targets_set = set(t.strip().lower() for t in targets_list) if targets_list else set()
+        if explicit_targets:
+            targets_set.update(explicit_targets)
         
         # Calculate which IPs already receive RESOLVES_TO from a visible FQDN node
         for sub_id, ip_ids in subdomain_to_ips.items():
@@ -291,6 +317,9 @@ class GraphBuilder:
             if f"dom_{dom_id}" in fqdn_set:
                 for ip_id in ip_ids:
                     ips_resolved_by_visible_fqdns.add(str(ip_id))
+
+        # Check if scan mode is Threat Intel Query / Shodan Discovery Mode
+        is_query_discovery = (target_type in ("query", "shodan", "asn", "org", "network"))
 
         for ip_id, ip, org, country, city, region_code, asn, postal_code, latitude, longitude in ip_rows:
             fqdns = ip_to_fqdns.get(str(ip_id), [])
@@ -318,11 +347,13 @@ class GraphBuilder:
                 node_dict["classes"] = "is-target"
             nodes.append(node_dict)
 
-            # Connect Target Root -> Host IP via CONTAINS_TARGET ONLY if:
-            # 1. IP is explicitly listed as a direct target (raw IP in targets_list); OR
-            # 2. IP has NO parent FQDN node currently rendered on the graph canvas
+            # Connect Target Root -> Host IP via CONTAINS_TARGET:
+            # 1. IP is explicitly listed as a direct target (raw IP in targets_list / active targets); OR
+            # 2. In Query Discovery Mode (Shodan/ASN query), connect all discovered query result hosts without a parent FQDN
             has_visible_fqdn_parent = str(ip_id) in ips_resolved_by_visible_fqdns
-            if root_target_node and (is_explicit_ip_tgt or not has_visible_fqdn_parent):
+            should_connect_root_to_ip = is_explicit_ip_tgt or (is_query_discovery and not has_visible_fqdn_parent)
+
+            if root_target_node and should_connect_root_to_ip:
                 edges.append({
                     "data": {
                         "id": f"e_root_ip_{ip_id}",
@@ -344,6 +375,24 @@ class GraphBuilder:
             if dom_node_id in fqdn_set:
                 for ip_id in ip_ids:
                     edges.append({"data": {"id": f"e_dom_ip_{dom_id}_{ip_id}", "source": dom_node_id, "target": f"ip_{ip_id}", "label": "RESOLVES_TO"}})
+
+        # Embed all discovered Host IPs inside root_target_node for instant inspector access
+        if root_target_node:
+            all_ips_summary = [
+                {
+                    "id": n["data"]["id"],
+                    "ip": n["data"]["ip"],
+                    "org": n["data"]["org"],
+                    "country": n["data"]["country"],
+                    "city": n["data"]["city"],
+                    "asn": n["data"]["asn"],
+                    "fqdns": n["data"]["fqdns"],
+                    "fqdn_count": n["data"]["fqdn_count"]
+                }
+                for n in nodes
+            ]
+            root_target_node["data"]["all_ips"] = all_ips_summary
+            root_target_node["data"]["total_ips"] = len(all_ips_summary)
         
         return nodes, edges
     

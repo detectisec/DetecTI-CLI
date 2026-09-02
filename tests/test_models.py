@@ -177,12 +177,13 @@ def test_graph_builder_target_root_hierarchy(tmp_path: Path):
         ),
     ]
 
-    # Host resolved from subdomain
+    # Host resolved from domain and subdomain
     host = HostResult(
         ip="10.20.30.40",
         org="Alvo Corp",
         country_name="Brazil",
-        hostnames=["api.alvo.com"],
+        hostnames=["alvo.com", "api.alvo.com"],
+        domains=["alvo.com"],
         ports=[
             PortData(port=443, transport="tcp", product="nginx", version="1.21.0", ssl=True, url="https://api.alvo.com:443")
         ],
@@ -221,10 +222,16 @@ def test_graph_builder_target_root_hierarchy(tmp_path: Path):
     assert ip_nodes[0]["data"]["ip"] == "10.20.30.40"
     assert "api.alvo.com" in ip_nodes[0]["data"]["fqdns"]
 
-    # 3. Check hierarchy edges: Target Root -> IP (CONTAINS_TARGET)
+    # 3. Check hierarchy edges: Target Root -> Domain (CONTAINS_TARGET) -> IP (RESOLVES_TO)
     target_edges = [e for e in edges if e["data"]["label"] == "CONTAINS_TARGET"]
     assert len(target_edges) >= 1
-    assert any(e["data"]["source"] == "target_root" and e["data"]["target"] == ip_nodes[0]["data"]["id"] for e in target_edges)
+    dom_nodes = [n for n in nodes if n["data"]["type"] == "domain"]
+    assert len(dom_nodes) == 1
+    assert any(e["data"]["source"] == "target_root" and e["data"]["target"] == dom_nodes[0]["data"]["id"] for e in target_edges)
+
+    resolves_edges = [e for e in edges if e["data"]["label"] == "RESOLVES_TO"]
+    assert len(resolves_edges) >= 1
+    assert any(e["data"]["source"] == dom_nodes[0]["data"]["id"] and e["data"]["target"] == ip_nodes[0]["data"]["id"] for e in resolves_edges)
 
     # 4. IP -> Service (EXPOSES)
     ip_srv_edges = [e for e in edges if e["data"]["label"] == "EXPOSES"]
