@@ -35,7 +35,7 @@ class EASMDashboard {
     }
 
     getAvailableLayout() {
-        return 'breadthfirst';
+        return 'cose-bilkent';
     }
 
     computeSemanticHierarchicalPositions(targetElements = null) {
@@ -89,7 +89,7 @@ class EASMDashboard {
 
         // Tier 1: Direct Targets (FQDNs, Subdomains, Domains, Direct IPs) at (x = X_TIER_GAP)
         const tier1X = X_TIER_GAP;
-        const targetSpacing = Math.max(130, Math.min(220, 1000 / Math.max(1, tier1_direct_targets.length)));
+        const targetSpacing = 600;
         const maxTargetRows = Math.min(10, Math.max(1, Math.ceil(Math.sqrt(tier1_direct_targets.length * 2))));
         const tRows = Math.min(tier1_direct_targets.length, maxTargetRows);
 
@@ -138,16 +138,28 @@ class EASMDashboard {
         tier2_resolved_ips.forEach((node, idx) => {
             const parentFqdn = node.incomers('edge[label="RESOLVES_TO"]').sources().first();
             let baseY = 0;
+            let targetX = tier2StartX;
+            
             if (parentFqdn.length > 0 && positions[parentFqdn.id()]) {
                 const pid = parentFqdn.id();
                 if (!parentOffsets[pid]) parentOffsets[pid] = 0;
-                // Offset each subsequent IP by 70px down, centered around the parent
-                baseY = positions[pid].y + (parentOffsets[pid] * 70);
+                
+                // CRITICAL FIX: IPs must be placed relative to their specific parent's X coordinate!
+                // Otherwise, parents in different grid columns sharing the same Y will cause their IPs to overlap perfectly.
+                targetX = positions[pid].x + 220;
+                
+                // For spacing, we also need to account for Services (Tier 3) height.
+                // A minimum of 70px, but more if it has multiple services.
+                const srvCount = srvsByIp.get(node.id()) ? srvsByIp.get(node.id()).length : 0;
+                const sRows = Math.min(Math.max(1, srvCount), 3);
+                const reqHeight = Math.max(70, sRows * 60);
+                
+                baseY = positions[pid].y + (parentOffsets[pid] * reqHeight);
                 parentOffsets[pid]++;
             } else {
                 baseY = (idx - (tier2_resolved_ips.length - 1) / 2) * 150;
             }
-            positions[node.id()] = { x: tier2StartX, y: baseY };
+            positions[node.id()] = { x: targetX, y: baseY };
         });
         
         // Center the IPs around their parents properly
@@ -156,8 +168,23 @@ class EASMDashboard {
             const parentFqdn = node.incomers('edge[label="RESOLVES_TO"]').sources().first();
             if (parentFqdn.length > 0 && parentOffsets[parentFqdn.id()] > 1) {
                 const pid = parentFqdn.id();
-                const totalHeight = (parentOffsets[pid] - 1) * 70;
-                positions[node.id()].y -= totalHeight / 2;
+                
+                // We must recalculate total height based on the average reqHeight, or just use the same multiplier.
+                // Actually, since we just need to shift them all uniformly, we can recalculate total height:
+                const childIps = parentFqdn.outgoers('edge[label="RESOLVES_TO"]').targets();
+                let totalHeight = 0;
+                childIps.forEach(ip => {
+                    const sCount = srvsByIp.get(ip.id()) ? srvsByIp.get(ip.id()).length : 0;
+                    const sr = Math.min(Math.max(1, sCount), 3);
+                    totalHeight += Math.max(70, sr * 60);
+                });
+                
+                // Shift up by half of the total height minus the height of one item (to center the block)
+                const srvCount = srvsByIp.get(node.id()) ? srvsByIp.get(node.id()).length : 0;
+                const sRows = Math.min(Math.max(1, srvCount), 3);
+                const currentHeight = Math.max(70, sRows * 60);
+                
+                positions[node.id()].y -= (totalHeight - currentHeight) / 2;
             }
         });
 
