@@ -35,7 +35,7 @@ class EASMDashboard {
     }
 
     getAvailableLayout() {
-        return 'cose-bilkent';
+        return 'breadthfirst';
     }
 
     computeSemanticHierarchicalPositions(targetElements = null) {
