@@ -66,7 +66,6 @@ class EASMDashboard {
             else t3_ips.push(node);
         });
 
-        // Sort to group relatives
         const sortByResolvedIp = (a, b) => {
             const getIpId = (n) => {
                 const target = n.outgoers('edge[label="RESOLVES_TO"]').targets().first();
@@ -82,21 +81,63 @@ class EASMDashboard {
             positions[node.id()] = { x: 0, y: (i - (t0_root.length - 1) / 2) * 350 };
         });
 
+        // Pre-compute child counts for perfect centering
+        const childCounts = {};
+        const countChild = (pid) => {
+            if (!childCounts[pid]) childCounts[pid] = 0;
+            childCounts[pid]++;
+        };
+        
+        const getParentId = (node, edgeLabels) => {
+            let parent = node.incomers(`edge[label="${edgeLabels.join('"], edge[label="')}"]`).sources().first();
+            if (parent.length === 0) parent = node.incomers('node').first();
+            return parent.length > 0 ? parent.id() : null;
+        };
+
+        t2_subdomains.forEach(n => { const pid = getParentId(n, ["HAS_SUBDOMAIN", "MATCHES_DOMAIN"]); if (pid) countChild(pid); });
+        t3_ips.forEach(n => { const pid = getParentId(n, ["RESOLVES_TO", "CONTAINS_IP"]); if (pid) countChild(pid); });
+        t4_services.forEach(n => {
+            let parent = n.incomers('node[type="ip"]').first();
+            if (parent.length === 0) parent = n.incomers('node').first();
+            if (parent.length > 0) countChild(parent.id());
+        });
+        t5_vulns.forEach(n => {
+            let parent = n.incomers('node').first();
+            if (parent.length > 0) countChild(parent.id());
+        });
+
         const childOffsets = {};
         const getOffset = (pid) => {
             if (!childOffsets[pid]) childOffsets[pid] = 0;
             return childOffsets[pid]++;
         };
 
-        let currentTierDepth = 280; // Start Tier 1 at X=280
+        const getGridCenterOffset = (totalItems, limit, rowIdx, spacing) => {
+            // A column has at most `limit` items. If this is the last column, it might have fewer.
+            // Wait, actually it's visually better to center the entire grid block globally, or just center each column independently!
+            // Let's center each column independently based on its actual height.
+            // Wait! totalItems isn't needed if we just center based on Math.min(totalItems, limit).
+            // Actually, if a block has 3 items, rowCount = 3. 
+            // If it has 12 items, col 0 has 10 items (rowCount = 10), col 1 has 2 items (rowCount = 2).
+            const isFullColumn = totalItems >= limit; // simplified
+            // For true perfection, we center the entire block using a constant shift, so rows align horizontally!
+            // If we center each column independently, a 2-item column will have its items at Y=0, while the 10-item column next to it has items at Y=-4, Y=-3, etc. This breaks the grid!
+            // We MUST use the exact same max row count for the whole block!
+            const blockMaxRows = Math.min(totalItems, limit);
+            return (rowIdx - (blockMaxRows - 1) / 2) * spacing;
+        };
 
-        // Tier 1: Domains (Grid of 10 rows)
+        let currentTierDepth = 280;
+
+        // Tier 1: Domains
         let maxT1Depth = currentTierDepth;
+        const t1Total = t1_domains.length;
+        const t1Rows = Math.min(t1Total, 10);
         t1_domains.forEach((node, idx) => {
             const col = Math.floor(idx / 10);
             const row = idx % 10;
             const x = currentTierDepth + (col * 220);
-            const y = (row - 4.5) * 400;
+            const y = (row - (t1Rows - 1) / 2) * 400;
             positions[node.id()] = { x, y };
             maxT1Depth = Math.max(maxT1Depth, x);
         });
@@ -105,30 +146,28 @@ class EASMDashboard {
 
         // Tier 2: Subdomains
         let maxT2Depth = currentTierDepth;
-        t2_subdomains.forEach((node, idx) => {
-            let parent = node.incomers('edge[label="HAS_SUBDOMAIN"], edge[label="MATCHES_DOMAIN"]').sources().first();
-            if (parent.length === 0) parent = node.incomers('node').first();
-            
-            if (parent.length > 0 && positions[parent.id()]) {
-                const pid = parent.id();
+        const t2TotalOrphans = t2_subdomains.filter(n => !getParentId(n, ["HAS_SUBDOMAIN", "MATCHES_DOMAIN"])).length;
+        let t2OrphanOffset = 0;
+
+        t2_subdomains.forEach((node) => {
+            const pid = getParentId(node, ["HAS_SUBDOMAIN", "MATCHES_DOMAIN"]);
+            if (pid && positions[pid]) {
+                const total = childCounts[pid];
                 const offset = getOffset(pid);
                 const col = Math.floor(offset / 10);
                 const row = offset % 10;
-                
-                // Align exactly at the current global tier depth, PLUS any grid wrapping columns
                 const x = currentTierDepth + (col * 220);
-                // Center vertically relative to parent
-                const y = positions[pid].y + (row * 200) - 900;
-                
+                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 200);
                 positions[node.id()] = { x, y };
                 maxT2Depth = Math.max(maxT2Depth, x);
             } else {
-                const col = Math.floor(idx / 10);
-                const row = idx % 10;
+                const col = Math.floor(t2OrphanOffset / 10);
+                const row = t2OrphanOffset % 10;
                 const x = currentTierDepth + (col * 220);
-                const y = (row - 4.5) * 200;
+                const y = getGridCenterOffset(t2TotalOrphans, 10, row, 200);
                 positions[node.id()] = { x, y };
                 maxT2Depth = Math.max(maxT2Depth, x);
+                t2OrphanOffset++;
             }
         });
         
@@ -136,27 +175,28 @@ class EASMDashboard {
 
         // Tier 3: IPs
         let maxT3Depth = currentTierDepth;
-        t3_ips.forEach((node, idx) => {
-            let parent = node.incomers('edge[label="RESOLVES_TO"], edge[label="CONTAINS_IP"]').sources().first();
-            if (parent.length === 0) parent = node.incomers('node').first();
-            
-            if (parent.length > 0 && positions[parent.id()]) {
-                const pid = parent.id();
+        const t3TotalOrphans = t3_ips.filter(n => !getParentId(n, ["RESOLVES_TO", "CONTAINS_IP"])).length;
+        let t3OrphanOffset = 0;
+
+        t3_ips.forEach((node) => {
+            const pid = getParentId(node, ["RESOLVES_TO", "CONTAINS_IP"]);
+            if (pid && positions[pid]) {
+                const total = childCounts[pid];
                 const offset = getOffset(pid);
                 const col = Math.floor(offset / 10);
                 const row = offset % 10;
-                
                 const x = currentTierDepth + (col * 220);
-                const y = positions[pid].y + (row * 200) - 900;
+                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 200);
                 positions[node.id()] = { x, y };
                 maxT3Depth = Math.max(maxT3Depth, x);
             } else {
-                const col = Math.floor(idx / 10);
-                const row = idx % 10;
+                const col = Math.floor(t3OrphanOffset / 10);
+                const row = t3OrphanOffset % 10;
                 const x = currentTierDepth + (col * 220);
-                const y = (row - 4.5) * 200;
+                const y = getGridCenterOffset(t3TotalOrphans, 10, row, 200);
                 positions[node.id()] = { x, y };
                 maxT3Depth = Math.max(maxT3Depth, x);
+                t3OrphanOffset++;
             }
         });
 
@@ -170,11 +210,12 @@ class EASMDashboard {
             
             if (parent.length > 0 && positions[parent.id()]) {
                 const pid = parent.id();
+                const total = childCounts[pid];
                 const offset = getOffset(pid);
                 const col = Math.floor(offset / 10);
                 const row = offset % 10;
                 const x = currentTierDepth + (col * 100);
-                const y = positions[pid].y + (row * 160) - 720;
+                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 160);
                 positions[node.id()] = { x, y };
                 maxT4Depth = Math.max(maxT4Depth, x);
             } else {
@@ -189,11 +230,12 @@ class EASMDashboard {
             let parent = node.incomers('node').first();
             if (parent.length > 0 && positions[parent.id()]) {
                 const pid = parent.id();
+                const total = childCounts[pid];
                 const offset = getOffset(pid);
                 const col = Math.floor(offset / 10);
                 const row = offset % 10;
                 const x = currentTierDepth + (col * 80);
-                const y = positions[pid].y + (row * 140) - 630;
+                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 140);
                 positions[node.id()] = { x, y };
             } else {
                 positions[node.id()] = { x: currentTierDepth, y: 0 };
