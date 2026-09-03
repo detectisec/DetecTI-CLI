@@ -76,19 +76,13 @@ class EASMDashboard {
         t1_domains.sort(sortByResolvedIp);
         t2_subdomains.sort(sortByResolvedIp);
 
-        // Tier 0
-        t0_root.forEach((node, i) => {
-            positions[node.id()] = { x: 0, y: (i - (t0_root.length - 1) / 2) * 350 };
-        });
-
         const getParentId = (node, edgeLabels) => {
             let parent = node.incomers(`edge[label="${edgeLabels.join('"], edge[label="')}"]`).sources().first();
             if (parent.length === 0) parent = node.incomers('node').first();
             return parent.length > 0 ? parent.id() : null;
         };
 
-        // Build parent-child relationships strictly
-        const childrenMap = {}; // pid -> array of nodes
+        const childrenMap = {}; 
         const addChild = (pid, node) => {
             if (!childrenMap[pid]) childrenMap[pid] = [];
             childrenMap[pid].push(node);
@@ -106,70 +100,18 @@ class EASMDashboard {
             if (parent.length > 0) addChild(parent.id(), n);
         });
 
-        // Calculate required Y-height (spread) for each node recursively (bottom-up)
-        // A node's height is the MAX of its own grid height (if it's a leaf/grid) OR the sum of its children's heights
         const heightCache = {};
         const visitedHeights = new Set();
         const getRequiredHeight = (node) => {
             if (heightCache[node.id()]) return heightCache[node.id()];
-            if (visitedHeights.has(node.id())) return 180; // break cycle
+            if (visitedHeights.has(node.id())) return 180;
             visitedHeights.add(node.id());
-
-            if (heightCache[node.id()]) return heightCache[node.id()];
             
             const children = childrenMap[node.id()] || [];
             if (children.length === 0) {
-                heightCache[node.id()] = 180; // Base height of a leaf node
+                heightCache[node.id()] = 180;
                 return 180;
             }
-            
-            // If it has children, the children form a grid of max 10 rows.
-            // The height of this node's children block is the sum of heights of the ROWS.
-            // Since children can also have children, their heights vary!
-            // We must pack the children into 10 rows. The height of a row is the MAX height of any cell in that row.
-            const rows = 10;
-            const rowHeights = new Array(rows).fill(0);
-            
-            children.forEach((c, idx) => {
-                const r = idx % rows;
-                const h = getRequiredHeight(c);
-                rowHeights[r] = Math.max(rowHeights[r], h);
-            });
-            
-            let totalHeight = rowHeights.reduce((sum, h) => sum + h, 0);
-            // Add a little padding between rows
-            totalHeight += (Math.min(children.length, rows) - 1) * 20;
-            
-            heightCache[node.id()] = Math.max(180, totalHeight);
-            return heightCache[node.id()];
-        };
-
-        // Layout parameters
-        const X_SPACINGS = {
-            t1: 280,
-            t2: 600,
-            t3: 1000,
-            t4: 1400,
-            t5: 1700
-        };
-
-        // Top-down placement
-        const visitedPlace = new Set();
-        const placeChildren = (parentId, children, baseX, tierX) => {
-            if (!children || children.length === 0) return;
-            if (visitedPlace.has(parentId)) return; // break cycle
-            visitedPlace.add(parentId);
-            
-            // SORT CHILDREN: nodes without children first, so they stay in the first columns (smaller X depth).
-            // This prevents empty subdomains from being pushed deeper than resolved IPs in grid wrapping.
-            children.sort((a, b) => {
-                const countA = childrenMap[a.id()] ? childrenMap[a.id()].length : 0;
-                const countB = childrenMap[b.id()] ? childrenMap[b.id()].length : 0;
-                if (countA !== countB) return countA - countB; return a.id().localeCompare(b.id());
-            });
-
-
-            if (!children || children.length === 0) return;
             
             const rows = 10;
             const rowHeights = new Array(rows).fill(0);
@@ -178,66 +120,141 @@ class EASMDashboard {
                 rowHeights[r] = Math.max(rowHeights[r], getRequiredHeight(c));
             });
             
-            // Calculate starting Y so the whole grid is centered at the parent's Y
+            let totalHeight = rowHeights.reduce((sum, h) => sum + h, 0);
+            totalHeight += (Math.min(children.length, rows) - 1) * 20;
+            
+            heightCache[node.id()] = Math.max(180, totalHeight);
+            return heightCache[node.id()];
+        };
+
+        // Calculate dynamic max columns to create STRICT global Tier X boundaries
+        const getMaxCols = (nodes) => {
+            let maxChildren = 0;
+            nodes.forEach(n => {
+                const cCount = childrenMap[n.id()] ? childrenMap[n.id()].length : 0;
+                maxChildren = Math.max(maxChildren, cCount);
+            });
+            return Math.max(1, Math.ceil(maxChildren / 10));
+        };
+        
+        const t1_cols = Math.max(1, Math.ceil(t1_domains.length / 10));
+        const t2_cols = getMaxCols(t1_domains);
+        const t3_cols = getMaxCols(t2_subdomains);
+        const t4_cols = getMaxCols(t3_ips);
+
+        const X_SPACINGS = {
+            t1: 280,
+            t2: 0,
+            t3: 0, 
+            t4: 0,
+            t5: 0
+        };
+        X_SPACINGS.t2 = X_SPACINGS.t1 + (t1_cols * 350) + 150;
+        X_SPACINGS.t3 = X_SPACINGS.t2 + (t2_cols * 350) + 150;
+        X_SPACINGS.t4 = X_SPACINGS.t3 + (t3_cols * 350) + 150;
+        X_SPACINGS.t5 = X_SPACINGS.t4 + (t4_cols * 350) + 150;
+
+        const getNextTierX = (currentTierX) => {
+            if (currentTierX === X_SPACINGS.t1) return X_SPACINGS.t2;
+            if (currentTierX === X_SPACINGS.t2) return X_SPACINGS.t3;
+            if (currentTierX === X_SPACINGS.t3) return X_SPACINGS.t4;
+            if (currentTierX === X_SPACINGS.t4) return X_SPACINGS.t5;
+            return currentTierX + 400;
+        };
+
+        const visitedPlace = new Set();
+        const placeChildren = (parentId, children, baseX, tierX) => {
+            if (!children || children.length === 0) return;
+            if (visitedPlace.has(parentId)) return;
+            visitedPlace.add(parentId);
+            
+            // Sort: unresolved first, resolved last
+            children.sort((a, b) => {
+                const countA = childrenMap[a.id()] ? childrenMap[a.id()].length : 0;
+                const countB = childrenMap[b.id()] ? childrenMap[b.id()].length : 0;
+                if (countA !== countB) return countA - countB;
+                return a.id().localeCompare(b.id());
+            });
+            
+            const rows = 10;
+            const rowHeights = new Array(rows).fill(0);
+            children.forEach((c, idx) => {
+                const r = idx % rows;
+                rowHeights[r] = Math.max(rowHeights[r], getRequiredHeight(c));
+            });
+            
             const totalHeight = rowHeights.reduce((sum, h) => sum + h, 0) + (Math.min(children.length, rows) - 1) * 20;
             const parentY = positions[parentId] ? positions[parentId].y : 0;
             let currentY = parentY - (totalHeight / 2);
             
-            // We need to track the Y coordinate for each row
             const rowStartYs = new Array(rows).fill(0);
             let yAccumulator = currentY;
             for(let r=0; r<rows; r++) {
                 if (rowHeights[r] === 0) continue;
-                // Center the row vertically within its allocated rowHeight
                 rowStartYs[r] = yAccumulator + (rowHeights[r] / 2);
                 yAccumulator += rowHeights[r] + 20;
             }
             
+            const nextGlobalTierX = getNextTierX(tierX);
+
             children.forEach((c, idx) => {
-                const cCol = Math.floor(idx / rows);
+                let cCol = Math.floor(idx / rows);
                 const cRow = idx % rows;
-                const x = tierX + (cCol * 350); // Column expansion depth
+                
+                const hasChildren = childrenMap[c.id()] && childrenMap[c.id()].length > 0;
+                let x = tierX + (cCol * 350);
+                
+                // FORCE RESOLVED NODES TO ANCHOR NEAR THE NEXT TIER!
+                if (hasChildren && tierX === X_SPACINGS.t2) {
+                    x = nextGlobalTierX - 350;
+                }
+                
                 const y = rowStartYs[cRow];
                 
                 if (!positions[c.id()]) {
                     positions[c.id()] = { x, y };
-                    // Recursively place this child's children
-                    let nextTierX = x + 400; // rough guess based on tier, we can refine
-                    if (tierX >= X_SPACINGS.t4) nextTierX = x + 300;
-                    placeChildren(c.id(), childrenMap[c.id()], x, nextTierX);
+                    placeChildren(c.id(), childrenMap[c.id()], x, nextGlobalTierX);
                 }
             });
         };
 
-        // 1. Calculate heights for all T1 domains
-        t1_domains.forEach(d => getRequiredHeight(d));
-        
-        // 2. Place T1 domains sequentially
         let globalY = 0;
+        t1_domains.forEach(d => getRequiredHeight(d));
         t1_domains.forEach(d => {
             const h = getRequiredHeight(d);
             const y = globalY + (h / 2);
             positions[d.id()] = { x: X_SPACINGS.t1, y };
-            globalY += h + 100; // 100px padding between huge domain blocks
-            
-            // Place subtrees
+            globalY += h + 100;
             placeChildren(d.id(), childrenMap[d.id()], X_SPACINGS.t1, X_SPACINGS.t2);
         });
 
-        // 3. Place any remaining orphans that weren't reached via T1 traversal
+        // Orphans
         [t2_subdomains, t3_ips, t4_services, t5_vulns].forEach((tierList, tierIdx) => {
-            const defaultX = Object.values(X_SPACINGS)[tierIdx + 1];
+            const defaultX = Object.values(X_SPACINGS)[tierIdx + 1] || (X_SPACINGS.t5 + 400);
+            const nextX = Object.values(X_SPACINGS)[tierIdx + 2] || (defaultX + 400);
             tierList.forEach(node => {
                 if (!positions[node.id()]) {
                     const h = getRequiredHeight(node);
                     positions[node.id()] = { x: defaultX, y: globalY + (h / 2) };
                     globalY += h + 50;
-                    placeChildren(node.id(), childrenMap[node.id()], defaultX, defaultX + 400);
+                    placeChildren(node.id(), childrenMap[node.id()], defaultX, nextX);
                 }
             });
         });
 
-        // Top-Down Swap
+        // TARGET_ROOT CENTERING
+        let minY = Infinity;
+        let maxY = -Infinity;
+        Object.values(positions).forEach(p => {
+            minY = Math.min(minY, p.y);
+            maxY = Math.max(maxY, p.y);
+        });
+        const centerY = (minY === Infinity) ? 0 : (minY + maxY) / 2;
+
+        t0_root.forEach((node) => {
+            positions[node.id()] = { x: 0, y: centerY };
+        });
+
         const topDownPositions = {};
         for (const [nodeId, pos] of Object.entries(positions)) {
             topDownPositions[nodeId] = { x: pos.y, y: pos.x };
