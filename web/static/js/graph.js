@@ -146,7 +146,14 @@ class EASMDashboard {
 
         // Position Resolved IPs (Tier 2) near their parent FQDNs or in column
         const parentOffsets = {};
-        tier2_resolved_ips.forEach((node, idx) => {
+        
+        // Guarantee topological ordering so parents are placed before children!
+        const tier2_domains = tier2_resolved_ips.filter(n => n.data('type') === 'domain');
+        const tier2_subdomains = tier2_resolved_ips.filter(n => n.data('type') === 'subdomain');
+        const tier2_ips = tier2_resolved_ips.filter(n => n.data('type') === 'ip' || n.data('type') === 'network');
+        const tier2_others = tier2_resolved_ips.filter(n => !['domain', 'subdomain', 'ip', 'network'].includes(n.data('type')));
+        
+        const placeTier2Node = (node, idx, totalLen) => {
             // Support multiple passive relation edges
             let parentFqdn = node.incomers('edge[label="RESOLVES_TO"], edge[label="MATCHES_DOMAIN"], edge[label="ASSOCIATED_DOMAIN"], edge[label="CONTAINS_IP"]').sources().first();
             if (parentFqdn.length === 0) parentFqdn = node.incomers('node').first();
@@ -159,11 +166,8 @@ class EASMDashboard {
                 if (!parentOffsets[pid]) parentOffsets[pid] = 0;
                 
                 // CRITICAL FIX: IPs must be placed relative to their specific parent's X coordinate!
-                // Otherwise, parents in different grid columns sharing the same Y will cause their IPs to overlap perfectly.
                 targetX = positions[pid].x + 220;
                 
-                // For spacing, we also need to account for Services (Tier 3) height.
-                // A minimum of 70px, but more if it has multiple services.
                 const srvCount = srvsByIp.get(node.id()) ? srvsByIp.get(node.id()).length : 0;
                 const sRows = Math.min(Math.max(1, srvCount), 3);
                 const reqHeight = Math.max(200, sRows * 180);
@@ -171,11 +175,15 @@ class EASMDashboard {
                 baseY = positions[pid].y + (parentOffsets[pid] * reqHeight);
                 parentOffsets[pid]++;
             } else {
-                baseY = (idx - (tier2_resolved_ips.length - 1) / 2) * 350;
+                baseY = (idx - (totalLen - 1) / 2) * 350;
             }
             positions[node.id()] = { x: targetX, y: baseY };
-        });
-        
+        };
+
+        tier2_domains.forEach((n, i) => placeTier2Node(n, i, tier2_domains.length));
+        tier2_subdomains.forEach((n, i) => placeTier2Node(n, i, tier2_subdomains.length));
+        tier2_ips.forEach((n, i) => placeTier2Node(n, i, tier2_ips.length));
+        tier2_others.forEach((n, i) => placeTier2Node(n, i, tier2_others.length));
         // Center the IPs around their parents properly
         // We need to shift them up by half the total offset height
         tier2_resolved_ips.forEach((node) => {
