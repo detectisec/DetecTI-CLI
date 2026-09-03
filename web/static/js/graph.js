@@ -70,7 +70,7 @@ class EASMDashboard {
                     return src.id() === 'target_root' || src.data('is_root') === true;
                 });
 
-                if (hasContainsTarget || data.is_target === true || data.is_target === 'true') {
+                if (hasContainsTarget) {
                     tier1_direct_targets.push(node);
                 } else {
                     // Passive IPs, domains, subdomains, networks go to Tier 2 (Resolved/Passive Infrastructure)
@@ -592,9 +592,9 @@ class EASMDashboard {
                         displayName = nodeData.ip;
                     }
                     
-                    // Check if node is a Tier 1 Target (direct target from target_root)
-                    let isTier1 = nodeData.is_target === true || nodeData.is_target === 'true';
-                    if (!isTier1 && elements.edges) {
+                    // Check if node is a Tier 1 Target (strictly requires CONTAINS_TARGET edge from target_root)
+                    let isTier1 = false;
+                    if (elements.edges) {
                         isTier1 = elements.edges.some(edge => {
                             const edgeData = edge.data || edge;
                             return edgeData.label === 'CONTAINS_TARGET' && edgeData.target === nodeData.id && (edgeData.source === 'target_root' || edgeData.source === 'root');
