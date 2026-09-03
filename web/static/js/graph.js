@@ -1470,7 +1470,7 @@ class EASMDashboard {
 
         // Vulnerability filter evaluator helper for clustering pass
         const hasVulnFilters = this.filters.matrix3d || this.filters.kev || this.filters.highEpss || this.filters.critical || this.filters.hideLowInfo || this.filters.nucleiOnly || this.filters.withPocs;
-        const vulnMatchesActiveFilter = (vulnNode) => {
+        const vulnMatchesActiveFilter = (vulnNode, parentContext = null) => {
             if (!vulnNode) return false;
             const data = typeof vulnNode.data === 'function' ? vulnNode.data() : vulnNode;
             const severity = String(data.severity || '').toUpperCase();
@@ -1478,9 +1478,17 @@ class EASMDashboard {
             
             if (this.filters.matrix3d) {
                 // Dimensão 1: Exposição e Validação Ativa (O Ativo)
-                // Regra Estrita: A vulnerabilidade DEVE ter rastreabilidade direta com um serviço confirmado ativo (Masscan/Active).
                 let hasDirectActiveService = false;
-                if (typeof vulnNode.incomers === 'function') {
+                
+                if (parentContext && ['service', 'http', 'https'].includes(parentContext.data('type'))) {
+                    const sData = parentContext.data();
+                    if (sData.verified_active === true || sData.is_active_scan === true) {
+                        hasDirectActiveService = true;
+                    } else {
+                        const sSources = Array.isArray(sData.sources) ? sData.sources : (sData.sources ? [sData.sources] : []);
+                        hasDirectActiveService = sSources.some(s => typeof s === 'string' && (s.toLowerCase().includes('masscan') || s.toLowerCase().includes('active')));
+                    }
+                } else if (typeof vulnNode.incomers === 'function') {
                     const parentServices = vulnNode.incomers('node[type="service"], node[type="http"], node[type="https"]');
                     if (parentServices.length > 0) {
                         hasDirectActiveService = parentServices.some(srv => {
@@ -1554,7 +1562,7 @@ class EASMDashboard {
                 serviceOutgoers = serviceOutgoers.filter(srv => {
                     const childVulns = srv.outgoers('node[type="vulnerability"]');
                     if (childVulns.length === 0) return false;
-                    return hasVulnFilters ? childVulns.some(vulnMatchesActiveFilter) : true;
+                    return hasVulnFilters ? childVulns.some(v => vulnMatchesActiveFilter(v, srv)) : true;
                 });
             } else if (this.filters.verifiedServicesOnly) {
                 serviceOutgoers = serviceOutgoers.filter(srv => {
@@ -1643,7 +1651,7 @@ class EASMDashboard {
 
             let directVulnOutgoers = ipNode.outgoers('node[type="vulnerability"]').filter(v => visibleNodes.has(v.id()) || v.id().startsWith('vuln_'));
             if (hasVulnFilters) {
-                directVulnOutgoers = directVulnOutgoers.filter(vulnMatchesActiveFilter);
+                directVulnOutgoers = directVulnOutgoers.filter(v => vulnMatchesActiveFilter(v, ipNode));
             }
 
             const isManuallyCollapsed = this.manualCollapsedClusters.has(clusterId);
@@ -1720,7 +1728,7 @@ class EASMDashboard {
 
             let vulnOutgoers = srvNode.outgoers('node[type="vulnerability"]').filter(v => visibleNodes.has(v.id()) || v.id().startsWith('vuln_'));
             if (hasVulnFilters) {
-                vulnOutgoers = vulnOutgoers.filter(vulnMatchesActiveFilter);
+                vulnOutgoers = vulnOutgoers.filter(v => vulnMatchesActiveFilter(v, srvNode));
             }
 
             const isManuallyCollapsed = this.manualCollapsedClusters.has(clusterId);
@@ -3642,7 +3650,7 @@ class EASMDashboard {
 
         // 2. Vulnerability filter evaluator
         const hasVulnFilters = this.filters.matrix3d || this.filters.kev || this.filters.highEpss || this.filters.critical || this.filters.hideLowInfo || this.filters.nucleiOnly || this.filters.withPocs;
-        const vulnMatchesFilter = (vulnNode) => {
+        const vulnMatchesFilter = (vulnNode, parentContext = null) => {
             if (!vulnNode) return false;
             const data = typeof vulnNode.data === 'function' ? vulnNode.data() : vulnNode;
             const severity = String(data.severity || '').toUpperCase();
@@ -3650,9 +3658,17 @@ class EASMDashboard {
 
             if (this.filters.matrix3d) {
                 // Dimensão 1: Exposição e Validação Ativa (O Ativo)
-                // Regra Estrita: A vulnerabilidade DEVE ter rastreabilidade direta com um serviço confirmado ativo (Masscan/Active).
                 let hasDirectActiveService = false;
-                if (typeof vulnNode.incomers === 'function') {
+                
+                if (parentContext && ['service', 'http', 'https'].includes(parentContext.data('type'))) {
+                    const sData = parentContext.data();
+                    if (sData.verified_active === true || sData.is_active_scan === true) {
+                        hasDirectActiveService = true;
+                    } else {
+                        const sSources = Array.isArray(sData.sources) ? sData.sources : (sData.sources ? [sData.sources] : []);
+                        hasDirectActiveService = sSources.some(s => typeof s === 'string' && (s.toLowerCase().includes('masscan') || s.toLowerCase().includes('active')));
+                    }
+                } else if (typeof vulnNode.incomers === 'function') {
                     const parentServices = vulnNode.incomers('node[type="service"], node[type="http"], node[type="https"]');
                     if (parentServices.length > 0) {
                         hasDirectActiveService = parentServices.some(srv => {
@@ -3713,10 +3729,23 @@ class EASMDashboard {
         const nodesToKeep = new Set();
 
         if (hasVulnFilters) {
-            // Find all matching vulnerabilities within lead scope
+                        // Find all matching vulnerabilities within lead scope
             this.cy.nodes('[type="vulnerability"]').forEach(node => {
                 if (this.visibleLeadNodes && !this.visibleLeadNodes.has(node.id())) return;
-                if (vulnMatchesFilter(node)) {
+                
+                let matchesAnyContext = false;
+                node.incomers('node').forEach(parent => {
+                    if (vulnMatchesFilter(node, parent)) {
+                        matchesAnyContext = true;
+                        nodesToKeep.add(parent.id());
+                        addAllAncestors(parent, nodesToKeep);
+                    }
+                });
+                
+                if (matchesAnyContext) {
+                    nodesToKeep.add(node.id());
+                } else if (vulnMatchesFilter(node)) {
+                    // Fallback for isolated nodes
                     nodesToKeep.add(node.id());
                     addAllAncestors(node, nodesToKeep);
                 }
@@ -3729,7 +3758,7 @@ class EASMDashboard {
                 const parentNode = this.cy.getElementById(parentId);
                 if (parentNode.length > 0) {
                     const childVulns = parentNode.outgoers('node[type="vulnerability"]');
-                    const matching = childVulns.filter(vulnMatchesFilter);
+                    const matching = childVulns.filter(v => vulnMatchesFilter(v, parentNode));
                     if (matching.length > 0) {
                         nodesToKeep.add(cNode.id());
                         nodesToKeep.add(parentId);
@@ -3746,9 +3775,9 @@ class EASMDashboard {
                 const parentNode = this.cy.getElementById(parentId);
                 if (parentNode.length > 0) {
                     const srvNodes = parentNode.outgoers('node[type="service"], node[type="http"], node[type="https"]');
-                    const matchingSrvs = srvNodes.filter(srv => srv.outgoers('node[type="vulnerability"]').some(vulnMatchesFilter));
+                    const matchingSrvs = srvNodes.filter(srv => srv.outgoers('node[type="vulnerability"]').some(v => vulnMatchesFilter(v, srv)));
                     const directVulns = parentNode.outgoers('node[type="vulnerability"]');
-                    let hasMatch = directVulns.some(vulnMatchesFilter) || matchingSrvs.length > 0;
+                    let hasMatch = directVulns.some(v => vulnMatchesFilter(v, parentNode)) || matchingSrvs.length > 0;
                     
                     if (matchingSrvs.length > 0) {
                         cNode.data('count', matchingSrvs.length);
@@ -3866,7 +3895,7 @@ class EASMDashboard {
                 const parentNode = this.cy.getElementById(parentId);
                 if (cNode.data('type') === 'cluster_vulns') {
                     const childVulns = parentNode.outgoers('node[type="vulnerability"]');
-                    const matching = childVulns.filter(vulnMatchesFilter);
+                    const matching = childVulns.filter(v => vulnMatchesFilter(v, parentNode));
                     if (matching.length === 0) {
                         nodesToKeep.delete(cNode.id());
                     } else {
@@ -3876,7 +3905,7 @@ class EASMDashboard {
                     }
                 } else if (cNode.data('type') === 'cluster_services') {
                     const srvNodes = parentNode.outgoers('node[type="service"], node[type="http"], node[type="https"]');
-                    const matchingSrvs = srvNodes.filter(srv => srv.outgoers('node[type="vulnerability"]').some(vulnMatchesFilter));
+                    const matchingSrvs = srvNodes.filter(srv => srv.outgoers('node[type="vulnerability"]').some(v => vulnMatchesFilter(v, srv)));
                     if (matchingSrvs.length === 0) {
                         nodesToKeep.delete(cNode.id());
                     } else {
