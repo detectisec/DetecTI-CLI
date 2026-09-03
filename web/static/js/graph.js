@@ -72,10 +72,9 @@ class EASMDashboard {
 
                 if (hasContainsTarget || data.is_target === true || data.is_target === 'true') {
                     tier1_direct_targets.push(node);
-                } else if (type === 'ip') {
-                    tier2_resolved_ips.push(node);
                 } else {
-                    tier1_direct_targets.push(node);
+                    // Passive IPs, domains, subdomains, networks go to Tier 2 (Resolved/Passive Infrastructure)
+                    tier2_resolved_ips.push(node);
                 }
             }
         });
@@ -136,7 +135,10 @@ class EASMDashboard {
         // Position Resolved IPs (Tier 2) near their parent FQDNs or in column
         const parentOffsets = {};
         tier2_resolved_ips.forEach((node, idx) => {
-            const parentFqdn = node.incomers('edge[label="RESOLVES_TO"]').sources().first();
+            // Support multiple passive relation edges
+            let parentFqdn = node.incomers('edge[label="RESOLVES_TO"], edge[label="MATCHES_DOMAIN"], edge[label="ASSOCIATED_DOMAIN"], edge[label="CONTAINS_IP"]').sources().first();
+            if (parentFqdn.length === 0) parentFqdn = node.incomers('node').first();
+            
             let baseY = 0;
             let targetX = tier2StartX;
             
@@ -165,13 +167,15 @@ class EASMDashboard {
         // Center the IPs around their parents properly
         // We need to shift them up by half the total offset height
         tier2_resolved_ips.forEach((node) => {
-            const parentFqdn = node.incomers('edge[label="RESOLVES_TO"]').sources().first();
+            let parentFqdn = node.incomers('edge[label="RESOLVES_TO"], edge[label="MATCHES_DOMAIN"], edge[label="ASSOCIATED_DOMAIN"], edge[label="CONTAINS_IP"]').sources().first();
+            if (parentFqdn.length === 0) parentFqdn = node.incomers('node').first();
+            
             if (parentFqdn.length > 0 && parentOffsets[parentFqdn.id()] > 1) {
                 const pid = parentFqdn.id();
                 
                 // We must recalculate total height based on the average reqHeight, or just use the same multiplier.
                 // Actually, since we just need to shift them all uniformly, we can recalculate total height:
-                const childIps = parentFqdn.outgoers('edge[label="RESOLVES_TO"]').targets();
+                const childIps = parentFqdn.outgoers('edge[label="RESOLVES_TO"], edge[label="MATCHES_DOMAIN"], edge[label="ASSOCIATED_DOMAIN"], edge[label="CONTAINS_IP"]').targets();
                 let totalHeight = 0;
                 childIps.forEach(ip => {
                     const sCount = srvsByIp.get(ip.id()) ? srvsByIp.get(ip.id()).length : 0;
