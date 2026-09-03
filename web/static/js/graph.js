@@ -79,6 +79,18 @@ class EASMDashboard {
             }
         });
 
+        // Sort Tier 1 and Tier 2 targets to group those that share the same resolved IP.
+        // This mathematically forces parallel FQDNs to render adjacently, minimizing RESOLVES_TO edge crossings.
+        const sortByResolvedIp = (a, b) => {
+            const getIpId = (n) => {
+                const target = n.outgoers('edge[label="RESOLVES_TO"]').targets().first();
+                return target.length > 0 ? target.id() : n.id();
+            };
+            return getIpId(a).localeCompare(getIpId(b));
+        };
+        tier1_direct_targets.sort(sortByResolvedIp);
+        tier2_resolved_ips.sort(sortByResolvedIp);
+
         const X_TIER_GAP = 280;
 
         // Tier 0: Center Target Root on Left at (0, 0)
