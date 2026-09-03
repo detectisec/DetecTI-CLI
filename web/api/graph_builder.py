@@ -377,7 +377,8 @@ class GraphBuilder:
             # 1. IP is explicitly listed as a direct target OR Query Discovery Mode.
             # 2. Strict Lineage Rule: NEVER connect to root if it has a visible FQDN parent (Domain/Subdomain).
             has_visible_fqdn_parent = str(ip_id) in ips_resolved_by_visible_fqdns
-            should_connect_root_to_ip = (is_explicit_ip_tgt or is_query_discovery) and not has_visible_fqdn_parent
+            # Always connect to target_root if the IP has no FQDN parent, so it doesn't float!
+            should_connect_root_to_ip = not has_visible_fqdn_parent
 
             if root_target_node and should_connect_root_to_ip:
                 edges.append({

@@ -6223,7 +6223,10 @@ class EASMDashboard {
             const outgoers = curr.outgoers('node');
             outgoers.forEach(child => {
                 if (child.data('type') === 'ip') {
-                    ipNodes.push(child);
+                    if (!visited.has(child.id())) {
+                        ipNodes.push(child);
+                        visited.add(child.id());
+                    }
                 }
                 // Continue traverse through structural hierarchy
                 if (child.data('type') === 'domain' || child.data('type') === 'subdomain' || child.data('type') === 'target' || child.data('type') === 'network') {
