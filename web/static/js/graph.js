@@ -81,31 +81,6 @@ class EASMDashboard {
             positions[node.id()] = { x: 0, y: (i - (t0_root.length - 1) / 2) * 350 };
         });
 
-        // Pre-compute child counts for perfect centering
-        const childCounts = {};
-        const countChild = (pid) => {
-            if (!childCounts[pid]) childCounts[pid] = 0;
-            childCounts[pid]++;
-        };
-        
-        const getParentId = (node, edgeLabels) => {
-            let parent = node.incomers(`edge[label="${edgeLabels.join('"], edge[label="')}"]`).sources().first();
-            if (parent.length === 0) parent = node.incomers('node').first();
-            return parent.length > 0 ? parent.id() : null;
-        };
-
-        t2_subdomains.forEach(n => { const pid = getParentId(n, ["HAS_SUBDOMAIN", "MATCHES_DOMAIN"]); if (pid) countChild(pid); });
-        t3_ips.forEach(n => { const pid = getParentId(n, ["RESOLVES_TO", "CONTAINS_IP"]); if (pid) countChild(pid); });
-        t4_services.forEach(n => {
-            let parent = n.incomers('node[type="ip"]').first();
-            if (parent.length === 0) parent = n.incomers('node').first();
-            if (parent.length > 0) countChild(parent.id());
-        });
-        t5_vulns.forEach(n => {
-            let parent = n.incomers('node').first();
-            if (parent.length > 0) countChild(parent.id());
-        });
-
         const getParentId = (node, edgeLabels) => {
             let parent = node.incomers(`edge[label="${edgeLabels.join('"], edge[label="')}"]`).sources().first();
             if (parent.length === 0) parent = node.incomers('node').first();
@@ -134,7 +109,12 @@ class EASMDashboard {
         // Calculate required Y-height (spread) for each node recursively (bottom-up)
         // A node's height is the MAX of its own grid height (if it's a leaf/grid) OR the sum of its children's heights
         const heightCache = {};
+        const visitedHeights = new Set();
         const getRequiredHeight = (node) => {
+            if (heightCache[node.id()]) return heightCache[node.id()];
+            if (visitedHeights.has(node.id())) return 180; // break cycle
+            visitedHeights.add(node.id());
+
             if (heightCache[node.id()]) return heightCache[node.id()];
             
             const children = childrenMap[node.id()] || [];
@@ -174,7 +154,12 @@ class EASMDashboard {
         };
 
         // Top-down placement
+        const visitedPlace = new Set();
         const placeChildren = (parentId, children, baseX, tierX) => {
+            if (!children || children.length === 0) return;
+            if (visitedPlace.has(parentId)) return; // break cycle
+            visitedPlace.add(parentId);
+
             if (!children || children.length === 0) return;
             
             const rows = 10;
@@ -205,12 +190,13 @@ class EASMDashboard {
                 const x = tierX + (cCol * 350); // Column expansion depth
                 const y = rowStartYs[cRow];
                 
-                positions[c.id()] = { x, y };
-                
-                // Recursively place this child's children
-                let nextTierX = tierX + 400; // rough guess based on tier, we can refine
-                if (tierX >= X_SPACINGS.t4) nextTierX = tierX + 300;
-                placeChildren(c.id(), childrenMap[c.id()], x, nextTierX);
+                if (!positions[c.id()]) {
+                    positions[c.id()] = { x, y };
+                    // Recursively place this child's children
+                    let nextTierX = x + 400; // rough guess based on tier, we can refine
+                    if (tierX >= X_SPACINGS.t4) nextTierX = x + 300;
+                    placeChildren(c.id(), childrenMap[c.id()], x, nextTierX);
+                }
             });
         };
 
