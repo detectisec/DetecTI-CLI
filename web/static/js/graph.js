@@ -136,13 +136,13 @@ class EASMDashboard {
         t1_domains.forEach((node, idx) => {
             const col = Math.floor(idx / 10);
             const row = idx % 10;
-            const x = currentTierDepth + (col * 220);
-            const y = (row - (t1Rows - 1) / 2) * 400;
+            const x = currentTierDepth + (col * 400);
+            const y = (row - (t1Rows - 1) / 2) * 12000;
             positions[node.id()] = { x, y };
             maxT1Depth = Math.max(maxT1Depth, x);
         });
         
-        currentTierDepth = maxT1Depth + 240;
+        currentTierDepth = maxT1Depth + 400;
 
         // Tier 2: Subdomains
         let maxT2Depth = currentTierDepth;
@@ -156,22 +156,22 @@ class EASMDashboard {
                 const offset = getOffset(pid);
                 const col = Math.floor(offset / 10);
                 const row = offset % 10;
-                const x = currentTierDepth + (col * 220);
-                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 200);
+                const x = currentTierDepth + (col * 400);
+                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 3000);
                 positions[node.id()] = { x, y };
                 maxT2Depth = Math.max(maxT2Depth, x);
             } else {
                 const col = Math.floor(t2OrphanOffset / 10);
                 const row = t2OrphanOffset % 10;
-                const x = currentTierDepth + (col * 220);
-                const y = getGridCenterOffset(t2TotalOrphans, 10, row, 200);
+                const x = currentTierDepth + (col * 400);
+                const y = getGridCenterOffset(t2TotalOrphans, 10, row, 3000);
                 positions[node.id()] = { x, y };
                 maxT2Depth = Math.max(maxT2Depth, x);
                 t2OrphanOffset++;
             }
         });
         
-        currentTierDepth = maxT2Depth + 260;
+        currentTierDepth = maxT2Depth + 400;
 
         // Tier 3: IPs
         let maxT3Depth = currentTierDepth;
@@ -185,22 +185,22 @@ class EASMDashboard {
                 const offset = getOffset(pid);
                 const col = Math.floor(offset / 10);
                 const row = offset % 10;
-                const x = currentTierDepth + (col * 220);
-                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 200);
+                const x = currentTierDepth + (col * 400);
+                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 3000);
                 positions[node.id()] = { x, y };
                 maxT3Depth = Math.max(maxT3Depth, x);
             } else {
                 const col = Math.floor(t3OrphanOffset / 10);
                 const row = t3OrphanOffset % 10;
-                const x = currentTierDepth + (col * 220);
-                const y = getGridCenterOffset(t3TotalOrphans, 10, row, 200);
+                const x = currentTierDepth + (col * 400);
+                const y = getGridCenterOffset(t3TotalOrphans, 10, row, 800);
                 positions[node.id()] = { x, y };
                 maxT3Depth = Math.max(maxT3Depth, x);
                 t3OrphanOffset++;
             }
         });
 
-        currentTierDepth = maxT3Depth + 260;
+        currentTierDepth = maxT3Depth + 400;
 
         // Tier 4: Services
         let maxT4Depth = currentTierDepth;
@@ -214,8 +214,8 @@ class EASMDashboard {
                 const offset = getOffset(pid);
                 const col = Math.floor(offset / 10);
                 const row = offset % 10;
-                const x = currentTierDepth + (col * 100);
-                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 160);
+                const x = currentTierDepth + (col * 300);
+                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 250);
                 positions[node.id()] = { x, y };
                 maxT4Depth = Math.max(maxT4Depth, x);
             } else {
@@ -223,7 +223,7 @@ class EASMDashboard {
             }
         });
         
-        currentTierDepth = maxT4Depth + 200;
+        currentTierDepth = maxT4Depth + 300;
 
         // Tier 5: Vulns
         t5_vulns.forEach((node) => {
@@ -234,7 +234,7 @@ class EASMDashboard {
                 const offset = getOffset(pid);
                 const col = Math.floor(offset / 10);
                 const row = offset % 10;
-                const x = currentTierDepth + (col * 80);
+                const x = currentTierDepth + (col * 250);
                 const y = positions[pid].y + getGridCenterOffset(total, 10, row, 140);
                 positions[node.id()] = { x, y };
             } else {
