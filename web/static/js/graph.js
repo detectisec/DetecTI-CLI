@@ -171,10 +171,10 @@ class EASMDashboard {
             if (parent.length > 0 && positions[parent.id()]) {
                 const pid = parent.id();
                 const offset = getOffset(pid);
-                const col = Math.floor(offset / 3);
-                const row = offset % 3;
+                const col = Math.floor(offset / 10);
+                const row = offset % 10;
                 const x = currentTierDepth + (col * 100);
-                const y = positions[pid].y + (row * 160) - 160;
+                const y = positions[pid].y + (row * 160) - 720;
                 positions[node.id()] = { x, y };
                 maxT4Depth = Math.max(maxT4Depth, x);
             } else {
@@ -190,10 +190,10 @@ class EASMDashboard {
             if (parent.length > 0 && positions[parent.id()]) {
                 const pid = parent.id();
                 const offset = getOffset(pid);
-                const col = Math.floor(offset / 2);
-                const row = offset % 2;
+                const col = Math.floor(offset / 10);
+                const row = offset % 10;
                 const x = currentTierDepth + (col * 80);
-                const y = positions[pid].y + (row * 140) - 70;
+                const y = positions[pid].y + (row * 140) - 630;
                 positions[node.id()] = { x, y };
             } else {
                 positions[node.id()] = { x: currentTierDepth, y: 0 };
