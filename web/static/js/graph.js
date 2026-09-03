@@ -106,140 +106,140 @@ class EASMDashboard {
             if (parent.length > 0) countChild(parent.id());
         });
 
-        const childOffsets = {};
-        const getOffset = (pid) => {
-            if (!childOffsets[pid]) childOffsets[pid] = 0;
-            return childOffsets[pid]++;
-        };
-
-        const getGridCenterOffset = (totalItems, limit, rowIdx, spacing) => {
-            // A column has at most `limit` items. If this is the last column, it might have fewer.
-            // Wait, actually it's visually better to center the entire grid block globally, or just center each column independently!
-            // Let's center each column independently based on its actual height.
-            // Wait! totalItems isn't needed if we just center based on Math.min(totalItems, limit).
-            // Actually, if a block has 3 items, rowCount = 3. 
-            // If it has 12 items, col 0 has 10 items (rowCount = 10), col 1 has 2 items (rowCount = 2).
-            const isFullColumn = totalItems >= limit; // simplified
-            // For true perfection, we center the entire block using a constant shift, so rows align horizontally!
-            // If we center each column independently, a 2-item column will have its items at Y=0, while the 10-item column next to it has items at Y=-4, Y=-3, etc. This breaks the grid!
-            // We MUST use the exact same max row count for the whole block!
-            const blockMaxRows = Math.min(totalItems, limit);
-            return (rowIdx - (blockMaxRows - 1) / 2) * spacing;
-        };
-
-        let currentTierDepth = 280;
-
-        // Tier 1: Domains
-        let maxT1Depth = currentTierDepth;
-        const t1Total = t1_domains.length;
-        const t1Rows = Math.min(t1Total, 10);
-        t1_domains.forEach((node, idx) => {
-            const col = Math.floor(idx / 10);
-            const row = idx % 10;
-            const x = currentTierDepth + (col * 400);
-            const y = (row - (t1Rows - 1) / 2) * 12000;
-            positions[node.id()] = { x, y };
-            maxT1Depth = Math.max(maxT1Depth, x);
-        });
-        
-        currentTierDepth = maxT1Depth + 400;
-
-        // Tier 2: Subdomains
-        let maxT2Depth = currentTierDepth;
-        const t2TotalOrphans = t2_subdomains.filter(n => !getParentId(n, ["HAS_SUBDOMAIN", "MATCHES_DOMAIN"])).length;
-        let t2OrphanOffset = 0;
-
-        t2_subdomains.forEach((node) => {
-            const pid = getParentId(node, ["HAS_SUBDOMAIN", "MATCHES_DOMAIN"]);
-            if (pid && positions[pid]) {
-                const total = childCounts[pid];
-                const offset = getOffset(pid);
-                const col = Math.floor(offset / 10);
-                const row = offset % 10;
-                const x = currentTierDepth + (col * 400);
-                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 3000);
-                positions[node.id()] = { x, y };
-                maxT2Depth = Math.max(maxT2Depth, x);
-            } else {
-                const col = Math.floor(t2OrphanOffset / 10);
-                const row = t2OrphanOffset % 10;
-                const x = currentTierDepth + (col * 400);
-                const y = getGridCenterOffset(t2TotalOrphans, 10, row, 3000);
-                positions[node.id()] = { x, y };
-                maxT2Depth = Math.max(maxT2Depth, x);
-                t2OrphanOffset++;
-            }
-        });
-        
-        currentTierDepth = maxT2Depth + 400;
-
-        // Tier 3: IPs
-        let maxT3Depth = currentTierDepth;
-        const t3TotalOrphans = t3_ips.filter(n => !getParentId(n, ["RESOLVES_TO", "CONTAINS_IP"])).length;
-        let t3OrphanOffset = 0;
-
-        t3_ips.forEach((node) => {
-            const pid = getParentId(node, ["RESOLVES_TO", "CONTAINS_IP"]);
-            if (pid && positions[pid]) {
-                const total = childCounts[pid];
-                const offset = getOffset(pid);
-                const col = Math.floor(offset / 10);
-                const row = offset % 10;
-                const x = currentTierDepth + (col * 400);
-                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 3000);
-                positions[node.id()] = { x, y };
-                maxT3Depth = Math.max(maxT3Depth, x);
-            } else {
-                const col = Math.floor(t3OrphanOffset / 10);
-                const row = t3OrphanOffset % 10;
-                const x = currentTierDepth + (col * 400);
-                const y = getGridCenterOffset(t3TotalOrphans, 10, row, 800);
-                positions[node.id()] = { x, y };
-                maxT3Depth = Math.max(maxT3Depth, x);
-                t3OrphanOffset++;
-            }
-        });
-
-        currentTierDepth = maxT3Depth + 400;
-
-        // Tier 4: Services
-        let maxT4Depth = currentTierDepth;
-        t4_services.forEach((node) => {
-            let parent = node.incomers('node[type="ip"]').first();
+        const getParentId = (node, edgeLabels) => {
+            let parent = node.incomers(`edge[label="${edgeLabels.join('"], edge[label="')}"]`).sources().first();
             if (parent.length === 0) parent = node.incomers('node').first();
-            
-            if (parent.length > 0 && positions[parent.id()]) {
-                const pid = parent.id();
-                const total = childCounts[pid];
-                const offset = getOffset(pid);
-                const col = Math.floor(offset / 10);
-                const row = offset % 10;
-                const x = currentTierDepth + (col * 300);
-                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 250);
-                positions[node.id()] = { x, y };
-                maxT4Depth = Math.max(maxT4Depth, x);
-            } else {
-                positions[node.id()] = { x: currentTierDepth, y: 0 };
-            }
-        });
-        
-        currentTierDepth = maxT4Depth + 300;
+            return parent.length > 0 ? parent.id() : null;
+        };
 
-        // Tier 5: Vulns
-        t5_vulns.forEach((node) => {
-            let parent = node.incomers('node').first();
-            if (parent.length > 0 && positions[parent.id()]) {
-                const pid = parent.id();
-                const total = childCounts[pid];
-                const offset = getOffset(pid);
-                const col = Math.floor(offset / 10);
-                const row = offset % 10;
-                const x = currentTierDepth + (col * 250);
-                const y = positions[pid].y + getGridCenterOffset(total, 10, row, 140);
-                positions[node.id()] = { x, y };
-            } else {
-                positions[node.id()] = { x: currentTierDepth, y: 0 };
+        // Build parent-child relationships strictly
+        const childrenMap = {}; // pid -> array of nodes
+        const addChild = (pid, node) => {
+            if (!childrenMap[pid]) childrenMap[pid] = [];
+            childrenMap[pid].push(node);
+        };
+
+        t2_subdomains.forEach(n => { const pid = getParentId(n, ["HAS_SUBDOMAIN", "MATCHES_DOMAIN"]); if(pid) addChild(pid, n); });
+        t3_ips.forEach(n => { const pid = getParentId(n, ["RESOLVES_TO", "CONTAINS_IP"]); if(pid) addChild(pid, n); });
+        t4_services.forEach(n => {
+            let parent = n.incomers('node[type="ip"]').first();
+            if (parent.length === 0) parent = n.incomers('node').first();
+            if (parent.length > 0) addChild(parent.id(), n);
+        });
+        t5_vulns.forEach(n => {
+            let parent = n.incomers('node').first();
+            if (parent.length > 0) addChild(parent.id(), n);
+        });
+
+        // Calculate required Y-height (spread) for each node recursively (bottom-up)
+        // A node's height is the MAX of its own grid height (if it's a leaf/grid) OR the sum of its children's heights
+        const heightCache = {};
+        const getRequiredHeight = (node) => {
+            if (heightCache[node.id()]) return heightCache[node.id()];
+            
+            const children = childrenMap[node.id()] || [];
+            if (children.length === 0) {
+                heightCache[node.id()] = 180; // Base height of a leaf node
+                return 180;
             }
+            
+            // If it has children, the children form a grid of max 10 rows.
+            // The height of this node's children block is the sum of heights of the ROWS.
+            // Since children can also have children, their heights vary!
+            // We must pack the children into 10 rows. The height of a row is the MAX height of any cell in that row.
+            const rows = 10;
+            const rowHeights = new Array(rows).fill(0);
+            
+            children.forEach((c, idx) => {
+                const r = idx % rows;
+                const h = getRequiredHeight(c);
+                rowHeights[r] = Math.max(rowHeights[r], h);
+            });
+            
+            let totalHeight = rowHeights.reduce((sum, h) => sum + h, 0);
+            // Add a little padding between rows
+            totalHeight += (Math.min(children.length, rows) - 1) * 20;
+            
+            heightCache[node.id()] = Math.max(180, totalHeight);
+            return heightCache[node.id()];
+        };
+
+        // Layout parameters
+        const X_SPACINGS = {
+            t1: 280,
+            t2: 600,
+            t3: 1000,
+            t4: 1400,
+            t5: 1700
+        };
+
+        // Top-down placement
+        const placeChildren = (parentId, children, baseX, tierX) => {
+            if (!children || children.length === 0) return;
+            
+            const rows = 10;
+            const rowHeights = new Array(rows).fill(0);
+            children.forEach((c, idx) => {
+                const r = idx % rows;
+                rowHeights[r] = Math.max(rowHeights[r], getRequiredHeight(c));
+            });
+            
+            // Calculate starting Y so the whole grid is centered at the parent's Y
+            const totalHeight = rowHeights.reduce((sum, h) => sum + h, 0) + (Math.min(children.length, rows) - 1) * 20;
+            const parentY = positions[parentId] ? positions[parentId].y : 0;
+            let currentY = parentY - (totalHeight / 2);
+            
+            // We need to track the Y coordinate for each row
+            const rowStartYs = new Array(rows).fill(0);
+            let yAccumulator = currentY;
+            for(let r=0; r<rows; r++) {
+                if (rowHeights[r] === 0) continue;
+                // Center the row vertically within its allocated rowHeight
+                rowStartYs[r] = yAccumulator + (rowHeights[r] / 2);
+                yAccumulator += rowHeights[r] + 20;
+            }
+            
+            children.forEach((c, idx) => {
+                const cCol = Math.floor(idx / rows);
+                const cRow = idx % rows;
+                const x = tierX + (cCol * 350); // Column expansion depth
+                const y = rowStartYs[cRow];
+                
+                positions[c.id()] = { x, y };
+                
+                // Recursively place this child's children
+                let nextTierX = tierX + 400; // rough guess based on tier, we can refine
+                if (tierX >= X_SPACINGS.t4) nextTierX = tierX + 300;
+                placeChildren(c.id(), childrenMap[c.id()], x, nextTierX);
+            });
+        };
+
+        // 1. Calculate heights for all T1 domains
+        t1_domains.forEach(d => getRequiredHeight(d));
+        
+        // 2. Place T1 domains sequentially
+        let globalY = 0;
+        t1_domains.forEach(d => {
+            const h = getRequiredHeight(d);
+            const y = globalY + (h / 2);
+            positions[d.id()] = { x: X_SPACINGS.t1, y };
+            globalY += h + 100; // 100px padding between huge domain blocks
+            
+            // Place subtrees
+            placeChildren(d.id(), childrenMap[d.id()], X_SPACINGS.t1, X_SPACINGS.t2);
+        });
+
+        // 3. Place any remaining orphans that weren't reached via T1 traversal
+        [t2_subdomains, t3_ips, t4_services, t5_vulns].forEach((tierList, tierIdx) => {
+            const defaultX = Object.values(X_SPACINGS)[tierIdx + 1];
+            tierList.forEach(node => {
+                if (!positions[node.id()]) {
+                    const h = getRequiredHeight(node);
+                    positions[node.id()] = { x: defaultX, y: globalY + (h / 2) };
+                    globalY += h + 50;
+                    placeChildren(node.id(), childrenMap[node.id()], defaultX, defaultX + 400);
+                }
+            });
         });
 
         // Top-Down Swap
