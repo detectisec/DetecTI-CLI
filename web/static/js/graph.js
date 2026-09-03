@@ -165,14 +165,20 @@ class EASMDashboard {
                 const pid = parentFqdn.id();
                 if (!parentOffsets[pid]) parentOffsets[pid] = 0;
                 
-                // CRITICAL FIX: IPs must be placed relative to their specific parent's X coordinate!
-                targetX = positions[pid].x + 220;
+                const offset = parentOffsets[pid];
+                const col = Math.floor(offset / 10);
+                const row = offset % 10;
+                
+                // CRITICAL FIX: Wrap every 10 items into a new pseudo-tier block to prevent massive linear stretching
+                targetX = positions[pid].x + 220 + (col * 220);
                 
                 const srvCount = srvsByIp.get(node.id()) ? srvsByIp.get(node.id()).length : 0;
                 const sRows = Math.min(Math.max(1, srvCount), 3);
                 const reqHeight = Math.max(200, sRows * 180);
                 
-                baseY = positions[pid].y + (parentOffsets[pid] * reqHeight);
+                // Center the block relative to parent based on the max items in this column
+                // Wait, previously we just added from parent.y. To keep it simple and consistent:
+                baseY = positions[pid].y + (row * reqHeight);
                 parentOffsets[pid]++;
             } else {
                 baseY = (idx - (totalLen - 1) / 2) * 350;
@@ -195,20 +201,29 @@ class EASMDashboard {
                 
                 // We must recalculate total height based on the average reqHeight, or just use the same multiplier.
                 // Actually, since we just need to shift them all uniformly, we can recalculate total height:
+                // New centering approach: Find the actual min and max Y of all siblings placed so far
                 const childIps = parentFqdn.outgoers('edge[label="RESOLVES_TO"], edge[label="MATCHES_DOMAIN"], edge[label="ASSOCIATED_DOMAIN"], edge[label="CONTAINS_IP"]').targets();
-                let totalHeight = 0;
+                let minY = Infinity;
+                let maxY = -Infinity;
+                
                 childIps.forEach(ip => {
-                    const sCount = srvsByIp.get(ip.id()) ? srvsByIp.get(ip.id()).length : 0;
-                    const sr = Math.min(Math.max(1, sCount), 3);
-                    totalHeight += Math.max(70, sr * 60);
+                    if (positions[ip.id()]) {
+                        minY = Math.min(minY, positions[ip.id()].y);
+                        maxY = Math.max(maxY, positions[ip.id()].y);
+                    }
                 });
                 
-                // Shift up by half of the total height minus the height of one item (to center the block)
-                const srvCount = srvsByIp.get(node.id()) ? srvsByIp.get(node.id()).length : 0;
-                const sRows = Math.min(Math.max(1, srvCount), 3);
-                const currentHeight = Math.max(200, sRows * 180);
-                
-                positions[node.id()].y -= (totalHeight - currentHeight) / 2;
+                if (minY !== Infinity && maxY !== -Infinity) {
+                    const blockCenterY = (minY + maxY) / 2;
+                    const parentY = positions[pid].y;
+                    const shiftY = blockCenterY - parentY;
+                    
+                    // We only want to calculate the shift ONCE per parent, but we are inside a loop over nodes.
+                    // Instead of shifting node.y based on a global totalHeight, we shift it by the offset calculated from its original Y
+                    // Actually, if we just shift EVERY node up by (maxY - minY)/2 from its CURRENT Y... wait, no.
+                    // The easiest way is to shift node.y by the difference between the block center and the parent Y.
+                    positions[node.id()].y -= shiftY;
+                }
             }
         });
 
