@@ -35,10 +35,10 @@ class EASMDashboard {
     }
 
     getAvailableLayout() {
-        return 'breadthfirst';
+        return 'hierarchical-topdown';
     }
 
-    computeSemanticHierarchicalPositions(targetElements = null) {
+    computeSemanticHierarchicalPositions(targetElements = null, isLeftRight = false) {
         if (!this.cy) return {};
         const elements = targetElements || this.cy.elements(':visible');
         const nodes = elements.nodes ? elements.nodes() : elements.filter('node');
@@ -101,11 +101,8 @@ class EASMDashboard {
         });
 
         const heightCache = {};
-        const visitedHeights = new Set();
         const getRequiredHeight = (node) => {
             if (heightCache[node.id()]) return heightCache[node.id()];
-            if (visitedHeights.has(node.id())) return 180;
-            visitedHeights.add(node.id());
             
             const children = childrenMap[node.id()] || [];
             if (children.length === 0) {
@@ -163,7 +160,7 @@ class EASMDashboard {
         };
 
         const visitedPlace = new Set();
-        const placeChildren = (parentId, children, baseX, tierX) => {
+        const placeChildren = (parentId, children, baseX, tierX, xOffset = 0) => {
             if (!children || children.length === 0) return;
             if (visitedPlace.has(parentId)) return;
             visitedPlace.add(parentId);
@@ -172,7 +169,8 @@ class EASMDashboard {
             children.sort((a, b) => {
                 const countA = childrenMap[a.id()] ? childrenMap[a.id()].length : 0;
                 const countB = childrenMap[b.id()] ? childrenMap[b.id()].length : 0;
-                if (countA !== countB) return countA - countB;
+                if (countA === 0 && countB > 0) return -1;
+                if (countA > 0 && countB === 0) return 1;
                 return a.id().localeCompare(b.id());
             });
             
@@ -201,19 +199,12 @@ class EASMDashboard {
                 let cCol = Math.floor(idx / rows);
                 const cRow = idx % rows;
                 
-                const hasChildren = childrenMap[c.id()] && childrenMap[c.id()].length > 0;
-                let x = tierX + (cCol * 350);
-                
-                // FORCE RESOLVED NODES TO ANCHOR NEAR THE NEXT TIER!
-                if (hasChildren && tierX === X_SPACINGS.t2) {
-                    x = nextGlobalTierX - 350;
-                }
-                
+                let x = tierX + xOffset + (cCol * 350);
                 const y = rowStartYs[cRow];
                 
                 if (!positions[c.id()]) {
                     positions[c.id()] = { x, y };
-                    placeChildren(c.id(), childrenMap[c.id()], x, nextGlobalTierX);
+                    placeChildren(c.id(), childrenMap[c.id()], x, nextGlobalTierX, xOffset + (cCol * 350));
                 }
             });
         };
@@ -255,6 +246,10 @@ class EASMDashboard {
             positions[node.id()] = { x: 0, y: centerY };
         });
 
+        if (isLeftRight) {
+            return positions;
+        }
+
         const topDownPositions = {};
         for (const [nodeId, pos] of Object.entries(positions)) {
             topDownPositions[nodeId] = { x: pos.y, y: pos.x };
@@ -278,9 +273,11 @@ class EASMDashboard {
             : (this.cy ? this.cy.nodes(':visible').length : 50);
 
         switch (layoutName) {
-            case 'breadthfirst':
-            case 'hierarchical':
-                const computedPositions = this.computeSemanticHierarchicalPositions(targetElements);
+            case 'breadthfirst': // Legacy fallback
+            case 'hierarchical-topdown':
+            case 'hierarchical-leftright':
+                const isLeftRight = layoutName === 'hierarchical-leftright';
+                const computedPositions = this.computeSemanticHierarchicalPositions(targetElements, isLeftRight);
                 return {
                     ...baseOptions,
                     name: 'preset',
