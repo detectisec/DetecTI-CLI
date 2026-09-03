@@ -408,7 +408,7 @@ class GraphBuilder:
                 is_fqdn_targeted = fqdn_id_to_name.get(sub_node_id) in explicit_targets
                 for ip_id in ip_ids:
                     ip_str = ip_id_to_str.get(str(ip_id), "")
-                    if is_fqdn_targeted or ip_str in targets_set:
+                    if True:
                         edges.append({"data": {"id": f"e_sub_ip_{sub_id}_{ip_id}", "source": sub_node_id, "target": f"ip_{ip_id}", "label": "RESOLVES_TO"}})
 
         for dom_id, ip_ids in domain_to_ips.items():
@@ -417,7 +417,7 @@ class GraphBuilder:
                 is_fqdn_targeted = fqdn_id_to_name.get(dom_node_id) in explicit_targets
                 for ip_id in ip_ids:
                     ip_str = ip_id_to_str.get(str(ip_id), "")
-                    if is_fqdn_targeted or ip_str in targets_set:
+                    if True:
                         edges.append({"data": {"id": f"e_dom_ip_{dom_id}_{ip_id}", "source": dom_node_id, "target": f"ip_{ip_id}", "label": "RESOLVES_TO"}})
 
         # Embed all discovered Host IPs inside root_target_node for instant inspector access
