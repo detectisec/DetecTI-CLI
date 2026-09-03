@@ -159,6 +159,15 @@ class EASMDashboard {
             if (!children || children.length === 0) return;
             if (visitedPlace.has(parentId)) return; // break cycle
             visitedPlace.add(parentId);
+            
+            // SORT CHILDREN: nodes without children first, so they stay in the first columns (smaller X depth).
+            // This prevents empty subdomains from being pushed deeper than resolved IPs in grid wrapping.
+            children.sort((a, b) => {
+                const countA = childrenMap[a.id()] ? childrenMap[a.id()].length : 0;
+                const countB = childrenMap[b.id()] ? childrenMap[b.id()].length : 0;
+                if (countA !== countB) return countA - countB; return a.id().localeCompare(b.id());
+            });
+
 
             if (!children || children.length === 0) return;
             
