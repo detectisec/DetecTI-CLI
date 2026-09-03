@@ -581,6 +581,15 @@ class EASMDashboard {
                         displayName = nodeData.ip;
                     }
                     
+                    // Check if node is a Tier 1 Target (direct target from target_root)
+                    let isTier1 = nodeData.is_target === true || nodeData.is_target === 'true';
+                    if (!isTier1 && elements.edges) {
+                        isTier1 = elements.edges.some(edge => {
+                            const edgeData = edge.data || edge;
+                            return edgeData.label === 'CONTAINS_TARGET' && edgeData.target === nodeData.id && (edgeData.source === 'target_root' || edgeData.source === 'root');
+                        });
+                    }
+                    
                     const lead = {
                         id: nodeData.id,
                         type: nodeData.type || 'unknown',
@@ -600,6 +609,7 @@ class EASMDashboard {
                         max_epss: maxEpss,
                         high_epss_count: highEpssCount,
                         three_d_score: threeDScore,
+                        is_tier1: isTier1,
                         ip_count: nodeData.type === 'domain' ? this.countConnectedIPs(nodeData.id, elements) : 0
                     };
                     
@@ -654,9 +664,10 @@ class EASMDashboard {
             if (!preserveSelection) {
                 this.selectedLeads.clear();
                 
-                // Auto-select leads if total is <= 50 to prevent blank graphs on small datasets
-                if (this.leads.length > 0 && this.leads.length <= 50) {
-                    this.leads.forEach(lead => this.selectedLeads.add(lead.id));
+                // Auto-select ONLY Tier 1 targets if their total is <= 50 to prevent blank graphs
+                const tier1Leads = this.leads.filter(l => l.is_tier1);
+                if (tier1Leads.length > 0 && tier1Leads.length <= 50) {
+                    tier1Leads.forEach(lead => this.selectedLeads.add(lead.id));
                 }
             } else {
                 const currentLeadIds = new Set(this.leads.map(l => l.id));
