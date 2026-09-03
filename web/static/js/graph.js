@@ -260,6 +260,13 @@ class EASMDashboard {
             }
         });
 
+        // Flip from Left-Right to Top-Down layout
+        Object.keys(positions).forEach(id => {
+            const tempX = positions[id].x;
+            positions[id].x = positions[id].y;
+            positions[id].y = tempX;
+        });
+
         return positions;
     }
 
