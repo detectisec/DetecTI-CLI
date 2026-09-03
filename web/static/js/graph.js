@@ -703,9 +703,10 @@ class EASMDashboard {
 
             console.log(`✓ Created ${this.leads.length} leads total (preserveSelection: ${preserveSelection})`);
             console.log('=== LEAD SELECTOR DEBUG END ===');
+            this.renderLeadSelector();
             
             // Always try to render, even if we have 0 leads
-            this.renderLeadSelector();
+            
             
         } catch (error) {
             console.error('❌ CRITICAL ERROR in populateLeadSelector:', error);
@@ -1334,7 +1335,7 @@ class EASMDashboard {
                 }
             });
 
-            // Set initial state
+            // Set initial state based on what's explicitly selected
             if (this.selectedLeads.has(lead.id)) {
                 checkbox.checked = true;
                 leadItem.classList.add('selected');
@@ -4037,6 +4038,25 @@ class EASMDashboard {
                 node.hide();
             }
         });
+
+        // Sync visual checkbox states for the modal based on what actually survived the rendering passes
+        // We only update existing DOM elements to avoid expensive redraws or focus loss
+        if (this.leads) {
+            this.leads.forEach(lead => {
+                const checkbox = document.getElementById(`chk_${lead.id}`);
+                if (checkbox) {
+                    const node = this.cy.getElementById(lead.id);
+                    const isVisible = node.length > 0 && !node.hidden();
+                    checkbox.checked = isVisible;
+                    
+                    const leadItem = checkbox.closest('.lead-item');
+                    if (leadItem) {
+                        if (isVisible) leadItem.classList.add('selected');
+                        else leadItem.classList.remove('selected');
+                    }
+                }
+            });
+        }
     }
 
     renderRiskMetricsAccordion(nodeData, elements) {
@@ -5996,7 +6016,7 @@ class EASMDashboard {
             });
             
             console.log(`🚨 FORCE POPULATE: Created ${this.leads.length} leads`);
-            this.renderLeadSelector();
+            
             
         } catch (error) {
             console.error('Error in forcePopulateFromCytoscape:', error);
@@ -6459,7 +6479,7 @@ class EASMDashboard {
             if (matchingLead) {
                 this.selectedLeads.add(matchingLead.id);
                 this.applyLeadFilter({ relayout: true });
-                this.renderLeadSelector();
+                
             }
         } catch (err) {
             console.error(`Failed to set target ${target}:`, err);
