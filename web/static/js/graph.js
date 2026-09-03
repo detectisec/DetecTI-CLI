@@ -95,7 +95,7 @@ class EASMDashboard {
 
         // Tier 0: Center Target Root on Left at (0, 0)
         tier0_target.forEach((node, i) => {
-            positions[node.id()] = { x: 0, y: (i - (tier0_target.length - 1) / 2) * 180 };
+            positions[node.id()] = { x: 0, y: (i - (tier0_target.length - 1) / 2) * 350 };
         });
 
         // Tier 1: Direct Targets (FQDNs, Subdomains, Domains, Direct IPs) at (x = X_TIER_GAP)
@@ -166,12 +166,12 @@ class EASMDashboard {
                 // A minimum of 70px, but more if it has multiple services.
                 const srvCount = srvsByIp.get(node.id()) ? srvsByIp.get(node.id()).length : 0;
                 const sRows = Math.min(Math.max(1, srvCount), 3);
-                const reqHeight = Math.max(70, sRows * 60);
+                const reqHeight = Math.max(200, sRows * 180);
                 
                 baseY = positions[pid].y + (parentOffsets[pid] * reqHeight);
                 parentOffsets[pid]++;
             } else {
-                baseY = (idx - (tier2_resolved_ips.length - 1) / 2) * 150;
+                baseY = (idx - (tier2_resolved_ips.length - 1) / 2) * 350;
             }
             positions[node.id()] = { x: targetX, y: baseY };
         });
@@ -198,7 +198,7 @@ class EASMDashboard {
                 // Shift up by half of the total height minus the height of one item (to center the block)
                 const srvCount = srvsByIp.get(node.id()) ? srvsByIp.get(node.id()).length : 0;
                 const sRows = Math.min(Math.max(1, srvCount), 3);
-                const currentHeight = Math.max(70, sRows * 60);
+                const currentHeight = Math.max(200, sRows * 180);
                 
                 positions[node.id()].y -= (totalHeight - currentHeight) / 2;
             }
@@ -223,7 +223,7 @@ class EASMDashboard {
                 const sr = sIdx % sRows;
                 const sColCount = Math.min(sRows, srvList.length - sc * sRows);
                 const sx = srvX + (sc * 90);
-                const sy = ipY + (sr - (sColCount - 1) / 2) * 60;
+                const sy = ipY + (sr - (sColCount - 1) / 2) * 180;
                 positions[srvNode.id()] = { x: sx, y: sy };
                 maxSubTreeX = Math.max(maxSubTreeX, sx);
 
@@ -235,7 +235,7 @@ class EASMDashboard {
                     const vr = vIdx % vRows;
                     const vColCount = Math.min(vRows, vList.length - vc * vRows);
                     const vx = sx + 90 + (vc * 70);
-                    const vy = sy + (vr - (vColCount - 1) / 2) * 45;
+                    const vy = sy + (vr - (vColCount - 1) / 2) * 160;
                     positions[vNode.id()] = { x: vx, y: vy };
                     maxSubTreeX = Math.max(maxSubTreeX, vx);
                 });
@@ -253,7 +253,7 @@ class EASMDashboard {
                     const vr = vIdx % dRows;
                     const vColCount = Math.min(dRows, directVulns.length - vc * dRows);
                     const vx = directVulnX + (vc * 70);
-                    const vy = ipY + (vr - (vColCount - 1) / 2) * 45;
+                    const vy = ipY + (vr - (vColCount - 1) / 2) * 160;
                     positions[vNode.id()] = { x: vx, y: vy };
                     maxSubTreeX = Math.max(maxSubTreeX, vx);
                 });
