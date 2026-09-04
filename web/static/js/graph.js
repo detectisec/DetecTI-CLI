@@ -4845,28 +4845,7 @@ class EASMDashboard {
 
             let resolvedIpsHtml = '';
             if (rawType === 'domain' || rawType === 'subdomain') {
-                const resolvedIps = [];
-                if (this.cy) {
-                    const nodeEle = this.cy.getElementById(data.id);
-                    if (nodeEle.length > 0) {
-                        nodeEle.outgoers('node[type="ip"]').forEach(ipNode => {
-                            const ipData = ipNode.data();
-                            const ipVal = ipData.ip || ipData.label || ipData.name;
-                            if (ipVal && !resolvedIps.some(r => r.ip === ipVal)) {
-                                resolvedIps.push({ id: ipNode.id(), ip: ipVal });
-                            }
-                        });
-                    }
-                }
-                if (resolvedIps.length === 0) {
-                    const connected = this.findConnectedIPs(data.id, elements);
-                    connected.forEach(item => {
-                        const ipVal = item.ip || item.label || item.name;
-                        if (ipVal && !resolvedIps.some(r => r.ip === ipVal)) {
-                            resolvedIps.push({ id: item.id, ip: ipVal });
-                        }
-                    });
-                }
+                const resolvedIps = data.resolved_ips || [];
 
                 if (resolvedIps.length > 0) {
                     const ipsBadges = resolvedIps.map(item => `

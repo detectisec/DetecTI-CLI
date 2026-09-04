@@ -261,6 +261,7 @@ class GraphBuilder:
         subdomain_to_ips: Dict[str, set] = {}
         domain_to_ips: Dict[str, set] = {}
         subdomain_info_map: Dict[str, Dict] = {}
+        domain_resolved_ips_map: Dict[str, list] = {}
         
         for sub_id, sub_name, domain_id, domain_name, ip_id, ip_addr in cursor_subs.fetchall():
             is_apex = (sub_name.strip().lower() == domain_name.strip().lower())
@@ -268,6 +269,10 @@ class GraphBuilder:
                 subdomain_to_ips.setdefault(sub_id, set()).add(ip_id)
                 if is_apex:
                     domain_to_ips.setdefault(domain_id, set()).add(ip_id)
+                    # Track domain resolved IPs (apex)
+                    domain_ips_list = domain_resolved_ips_map.setdefault(domain_id, [])
+                    if not any(r["id"] == f"ip_{ip_id}" for r in domain_ips_list):
+                        domain_ips_list.append({"id": f"ip_{ip_id}", "ip": ip_addr})
 
             if not is_apex:
                 if sub_id not in subdomain_info_map:
@@ -276,10 +281,12 @@ class GraphBuilder:
                         "name": sub_name,
                         "domain_id": domain_id,
                         "domain_name": domain_name,
-                        "ips": []
+                        "ips": [],
+                        "resolved_ips": []
                     }
                 if ip_addr and ip_addr not in subdomain_info_map[sub_id]["ips"]:
                     subdomain_info_map[sub_id]["ips"].append(ip_addr)
+                    subdomain_info_map[sub_id]["resolved_ips"].append({"id": f"ip_{ip_id}", "ip": ip_addr})
 
         all_domains = [{"id": d[0], "name": d[1]} for d in domains_list]
         all_subdomains = list(subdomain_info_map.values())
@@ -333,6 +340,7 @@ class GraphBuilder:
                     "name": domain_name,
                     "related_subdomains": domain_subs,
                     "subdomain_count": len(domain_subs),
+                    "resolved_ips": domain_resolved_ips_map.get(domain_id, []),
                     "is_target": (dname_lower in explicit_targets),
                     "is_root": False
                 }
@@ -354,6 +362,7 @@ class GraphBuilder:
                     "name": sub_info["name"],
                     "domain_id": sub_info["domain_id"],
                     "domain_name": sub_info["domain_name"],
+                    "resolved_ips": sub_info.get("resolved_ips", []),
                     "is_target": (sname_lower in explicit_targets)
                 }
                 nodes.append({"data": node_data, "classes": "is-target" if node_data["is_target"] else ""})
