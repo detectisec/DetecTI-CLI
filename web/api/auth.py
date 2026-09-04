@@ -9,8 +9,14 @@ from jose import JWTError, jwt
 
 from core.database.config_db import ConfigDBManager, verify_password
 
-# Secret key for JWT (can be stored in .env in production, using a default for simplicity if missing)
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "b33ff8f39572c0ecfc115b882650eb340e4f8d22797e887d2ef1c1d683701254")
+from dotenv import load_dotenv
+load_dotenv()
+
+# Secret key for JWT
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    # Emite um aviso ou falha se não houver chave (força rodar o setup)
+    raise ValueError("JWT_SECRET_KEY is missing from environment/ .env file. Please run the setup command.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30  # 30 minutos
 

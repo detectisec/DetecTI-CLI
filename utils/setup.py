@@ -248,6 +248,25 @@ class SetupManager:
         try:
             import getpass
             import sys
+            def update_env_jwt(password: str):
+                import hashlib
+                import re
+                jwt_secret = hashlib.sha256(password.encode('utf-8')).hexdigest()
+                env_path = self.root_dir / '.env'
+                if env_path.exists():
+                    with open(env_path, 'r') as f:
+                        env_content = f.read()
+                    if 'JWT_SECRET_KEY=' in env_content:
+                        env_content = re.sub(r'JWT_SECRET_KEY=.*', f'JWT_SECRET_KEY={jwt_secret}', env_content)
+                    else:
+                        if env_content and not env_content.endswith('\n'):
+                            env_content += '\n'
+                        env_content += f'JWT_SECRET_KEY={jwt_secret}\n'
+                    with open(env_path, 'w') as f:
+                        f.write(env_content)
+                else:
+                    with open(env_path, 'w') as f:
+                        f.write(f'JWT_SECRET_KEY={jwt_secret}\n')
             import os
             sys.path.insert(0, str(self.root_dir))
             from core.database.config_db import ConfigDBManager, get_password_hash
@@ -264,6 +283,7 @@ class SetupManager:
                         pwd2 = getpass.getpass("  Confirm new password: ")
                         if pwd1 == pwd2 and len(pwd1) >= 4:
                             config_db.update_user_password("admin", get_password_hash(pwd1))
+                            update_env_jwt(pwd1)
                             self.console.print("  [green]✔ Admin password updated successfully.[/green]")
                             break
                         elif len(pwd1) < 4:
@@ -279,6 +299,7 @@ class SetupManager:
                     pwd2 = getpass.getpass("  Confirm password: ")
                     if pwd1 == pwd2 and len(pwd1) >= 4:
                         config_db.create_user("admin", get_password_hash(pwd1))
+                        update_env_jwt(pwd1)
                         self.console.print("  [green]✔ Admin user created successfully.[/green]")
                         break
                     elif len(pwd1) < 4:
