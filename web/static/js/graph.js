@@ -659,8 +659,7 @@ class EASMDashboard {
                 
                 // Auto-select leads that are already marked as targets in the backend
                 this.leads.forEach(lead => {
-                    const cleanId = lead.id.replace(/^(ip_|dom_|sub_)/, '');
-                    if (this.markedTargets.has(cleanId)) {
+                    if (this.isTargetMarked(lead.display_name || lead.label)) {
                         this.selectedLeads.add(lead.id);
                     }
                 });
@@ -6113,15 +6112,17 @@ class EASMDashboard {
         const targetStr = String(target).trim();
         const targetLower = targetStr.toLowerCase();
         
+        // Ensure we always return the string (IP or FQDN), never the database ID.
+        // The backend active scanners (masscan/nuclei) need the actual address, not an internal ID.
         if (this.leads && Array.isArray(this.leads)) {
             const matchingLead = this.leads.find(l => {
-                const lName = (l.name || l.display_name || '').toLowerCase();
+                const lName = (l.name || l.display_name || l.label || '').toLowerCase();
                 const lId = (l.id || '').toLowerCase();
                 return lName === targetLower || lId === targetLower || lId === `dom_${targetLower}` || lId === `sub_${targetLower}` || lId === `ip_${targetLower}`;
             });
             
             if (matchingLead) {
-                return matchingLead.id.replace(/^(ip_|dom_|sub_)/, '');
+                return matchingLead.display_name || matchingLead.label || matchingLead.name || targetStr;
             }
         }
         return targetStr.replace(/^(ip_|dom_|sub_|target_)/, '');
@@ -6804,10 +6805,16 @@ class EASMDashboard {
             
             let displayName = ip;
             if (this.leads && Array.isArray(this.leads)) {
-                const lead = this.leads.find(l => l.id.replace(/^(ip_|dom_|sub_)/, '') === ip);
+                const lead = this.leads.find(l => l.display_name === ip || l.label === ip || l.name === ip);
                 if (lead) displayName = lead.display_name || lead.label || ip;
             } else if (this.nodeIndex) {
-                const node = this.nodeIndex.get(`ip_${ip}`) || this.nodeIndex.get(`dom_${ip}`) || this.nodeIndex.get(`sub_${ip}`);
+                let node = null;
+                for (const [id, n] of this.nodeIndex.entries()) {
+                    if (n.display_name === ip || n.label === ip || n.name === ip || n.ip === ip) {
+                        node = n;
+                        break;
+                    }
+                }
                 if (node) displayName = node.display_name || node.label || node.name || node.ip || ip;
             }
             const status = statusObj.status || 'idle';
