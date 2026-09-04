@@ -239,9 +239,7 @@ class SetupManager:
 
     def run_automated_setup(self) -> bool:
         """Run automated setup: creates directories, .env file, configures capabilities, and updates databases."""
-        self.console.print("
-[bold cyan]🚀 Starting DetecTI-CLI Automated Environment Setup...[/bold cyan]
-")
+        self.console.print("\n[bold cyan]🚀 Starting DetecTI-CLI Automated Environment Setup...[/bold cyan]\n")
 
         all_success = True
 
