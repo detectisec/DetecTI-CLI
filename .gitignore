@@ -45,3 +45,10 @@ validar*
 # Databases: Ignore all test/scan databases except the default example dataset
 data/dbs/*.sqlite
 !data/dbs/example.com.sqlite
+
+# Temporary AI / Agent scripts
+fix_*.py
+patch_*.py
+update_*.py
+scratch_*.py
+temp_*.py
