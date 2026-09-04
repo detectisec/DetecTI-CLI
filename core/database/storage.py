@@ -228,6 +228,20 @@ class DatabaseManager:
             if not raw_name:
                 return
             cand = raw_name.strip().lower()
+            
+            # Sanitize URL artifacts into pure FQDNs
+            if cand.startswith("http://"):
+                cand = cand[7:]
+            elif cand.startswith("https://"):
+                cand = cand[8:]
+            if "/" in cand:
+                cand = cand.split("/")[0]
+            if ":" in cand:
+                if cand.startswith("[") and "]" in cand:
+                    cand = cand.split("]")[0][1:]
+                elif cand.count(":") == 1:
+                    cand = cand.split(":")[0]
+                    
             if cand.startswith("*."):
                 cand = cand[2:]
             
