@@ -990,6 +990,11 @@ class EASMDashboard {
         }
 
         try {
+            if (selfData && selfData.vuln_ids) {
+                const vulns = selfData.vuln_ids.map(id => this.nodeIndex.get(id)).filter(Boolean);
+                const filtered = this.filterVulnsByActiveFilters(vulns);
+                return this.sortVulnsBy3DRiskMatrix(filtered);
+            }
             // 1. Find all vulnerabilities via connected services (Service -> Vulnerability)
             const connectedServices = this.findConnectedServices(nodeId, elements);
             connectedServices.forEach(service => {
@@ -1067,6 +1072,9 @@ class EASMDashboard {
         }
 
         try {
+            if (selfData && selfData.service_ids) {
+                return selfData.service_ids.map(id => this.nodeIndex.get(id)).filter(Boolean);
+            }
             // Find services connected FROM this node (IP/domain exposes services)
             const nodeOut = this.outEdges.get(nodeId) || [];
             nodeOut.forEach(edgeData => {
@@ -4780,12 +4788,6 @@ class EASMDashboard {
             let subdomainsAccordionHtml = '';
             if (rawType === 'domain' || rawType === 'subdomain') {
                 let relatedSubs = Array.isArray(data.related_subdomains) ? data.related_subdomains : [];
-                if (relatedSubs.length === 0) {
-                    const connected = this.findConnectedSubdomains(data.id, elements);
-                    if (connected.length > 0) {
-                        relatedSubs = connected.map(s => ({ id: s.id, name: s.name || s.label, ips: [] }));
-                    }
-                }
 
                 if (relatedSubs.length > 0) {
                     const subNamesList = relatedSubs.map(s => s.id ? s.id.replace(/^(dom_|sub_)/, '') : (s.name || s.label));

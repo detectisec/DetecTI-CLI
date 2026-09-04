@@ -355,14 +355,17 @@ class GraphBuilder:
         for sub_id, sub_info in subdomain_info_map.items():
             if sub_id in subdomains_to_spawn:
                 sname_lower = sub_info["name"].lower()
+                parent_dom_id = sub_info["domain_id"]
+                sub_related = [s for s in all_subdomains if s.get("domain_id") == parent_dom_id and s.get("id") != sub_id]
                 node_data = {
                     "id": f"sub_{sub_id}",
                     "label": sub_info["name"],
                     "type": "subdomain",
                     "name": sub_info["name"],
-                    "domain_id": sub_info["domain_id"],
+                    "domain_id": parent_dom_id,
                     "domain_name": sub_info["domain_name"],
                     "resolved_ips": sub_info.get("resolved_ips", []),
+                    "related_subdomains": sub_related,
                     "is_target": (sname_lower in explicit_targets)
                 }
                 nodes.append({"data": node_data, "classes": "is-target" if node_data["is_target"] else ""})
@@ -384,7 +387,9 @@ class GraphBuilder:
                        COUNT(DISTINCT CASE WHEN v.severity = 'HIGH' THEN v.id END) as high_count,
                        MAX(v.epss_score) as max_epss,
                        COUNT(DISTINCT CASE WHEN v.epss_score >= 0.20 THEN v.id END) as high_epss_count,
-                       COUNT(DISTINCT e.id) as poc_count
+                       COUNT(DISTINCT e.id) as poc_count,
+                       GROUP_CONCAT(DISTINCT s.id) as srv_ids,
+                       GROUP_CONCAT(DISTINCT (CASE WHEN v.cve_id IS NOT NULL AND TRIM(v.cve_id) != '' AND UPPER(v.cve_id) != 'UNKNOWN' THEN LOWER(REPLACE(v.cve_id, ' ', '_')) ELSE v.id END)) as vuln_ids
                 FROM ip_addresses ip
                 LEFT JOIN services s ON ip.id = s.ip_id
                 LEFT JOIN vulnerabilities v ON ip.id = v.ip_id OR s.id = v.service_id
@@ -392,8 +397,12 @@ class GraphBuilder:
                 GROUP BY ip.id, ip.ip
             """)
             for row in cursor_ips.fetchall():
-                ip_id, ip, s_cnt, vs_cnt, v_cnt, has_kev, k_cnt, c_cnt, h_cnt, max_epss, h_epss_cnt, poc_cnt = row
+                ip_id, ip, s_cnt, vs_cnt, v_cnt, has_kev, k_cnt, c_cnt, h_cnt, max_epss, h_epss_cnt, poc_cnt, srv_ids_str, vuln_ids_str = row
                 max_epss = max_epss or 0.0
+                
+                s_list = [f"srv_{x}" for x in str(srv_ids_str).split(",")] if srv_ids_str else []
+                v_list = [f"vuln_{x}" for x in str(vuln_ids_str).split(",")] if vuln_ids_str else []
+
                 stats = {
                     "service_count": s_cnt,
                     "verified_service_count": vs_cnt,
@@ -404,7 +413,9 @@ class GraphBuilder:
                     "high_count": h_cnt,
                     "max_epss": max_epss,
                     "high_epss_count": h_epss_cnt,
-                    "poc_count": poc_cnt
+                    "poc_count": poc_cnt,
+                    "service_ids": s_list,
+                    "vuln_ids": v_list
                 }
                 ip_stats[ip_id] = stats
                 score = (k_cnt * 1000000) + (poc_cnt * 200000) + (h_epss_cnt * 100000) + (max_epss * 50000) + (c_cnt * 50000) + (h_cnt * 20000) + (vs_cnt * 5000) + (v_cnt * 1000) + (s_cnt * 100)
@@ -419,7 +430,7 @@ class GraphBuilder:
             
             subdomain_stats = {}
             for sub_id, sub_info in subdomain_info_map.items():
-                s_stats = {"service_count": 0, "verified_service_count": 0, "vuln_count": 0, "has_kev": False, "kev_count": 0, "critical_count": 0, "high_count": 0, "max_epss": 0.0, "high_epss_count": 0, "poc_count": 0}
+                s_stats = {"service_count": 0, "verified_service_count": 0, "vuln_count": 0, "has_kev": False, "kev_count": 0, "critical_count": 0, "high_count": 0, "max_epss": 0.0, "high_epss_count": 0, "poc_count": 0, "service_ids": set(), "vuln_ids": set()}
                 ips = subdomain_to_ips.get(sub_id, set())
                 for ip_id in ips:
                     if ip_id in ip_stats:
@@ -428,7 +439,11 @@ class GraphBuilder:
                             s_stats[k] += st[k]
                         s_stats["has_kev"] = s_stats["has_kev"] or st["has_kev"]
                         s_stats["max_epss"] = max(s_stats["max_epss"], st["max_epss"])
-                subdomain_stats[sub_id] = s_stats
+                        s_stats["service_ids"].update(st.get("service_ids", []))
+                        s_stats["vuln_ids"].update(st.get("vuln_ids", []))
+                
+                s_stats_final = {**s_stats, "service_ids": list(s_stats["service_ids"]), "vuln_ids": list(s_stats["vuln_ids"])}
+                subdomain_stats[sub_id] = s_stats_final
                 score = (s_stats["kev_count"] * 1000000) + (s_stats["poc_count"] * 200000) + (s_stats["high_epss_count"] * 100000) + (s_stats["max_epss"] * 50000) + (s_stats["critical_count"] * 50000) + (s_stats["high_count"] * 20000) + (s_stats["verified_service_count"] * 5000) + (s_stats["vuln_count"] * 1000) + (s_stats["service_count"] * 100)
                 explore_leads.append({
                     "id": f"sub_{sub_id}",
@@ -436,11 +451,11 @@ class GraphBuilder:
                     "display_name": sub_info["name"],
                     "type": "subdomain",
                     "three_d_score": score,
-                    **s_stats
+                    **s_stats_final
                 })
 
             for domain_id, domain_name in domains_list:
-                d_stats = {"service_count": 0, "verified_service_count": 0, "vuln_count": 0, "has_kev": False, "kev_count": 0, "critical_count": 0, "high_count": 0, "max_epss": 0.0, "high_epss_count": 0, "poc_count": 0}
+                d_stats = {"service_count": 0, "verified_service_count": 0, "vuln_count": 0, "has_kev": False, "kev_count": 0, "critical_count": 0, "high_count": 0, "max_epss": 0.0, "high_epss_count": 0, "poc_count": 0, "service_ids": set(), "vuln_ids": set()}
                 for ip_id in domain_to_ips.get(domain_id, set()):
                     if ip_id in ip_stats:
                         st = ip_stats[ip_id]
@@ -448,6 +463,8 @@ class GraphBuilder:
                             d_stats[k] += st[k]
                         d_stats["has_kev"] = d_stats["has_kev"] or st["has_kev"]
                         d_stats["max_epss"] = max(d_stats["max_epss"], st["max_epss"])
+                        d_stats["service_ids"].update(st.get("service_ids", []))
+                        d_stats["vuln_ids"].update(st.get("vuln_ids", []))
                 for sub_id, sub_info in subdomain_info_map.items():
                     if sub_info["domain_id"] == domain_id:
                         st = subdomain_stats.get(sub_id, {})
@@ -456,7 +473,10 @@ class GraphBuilder:
                                 d_stats[k] += st.get(k, 0)
                             d_stats["has_kev"] = d_stats["has_kev"] or st.get("has_kev", False)
                             d_stats["max_epss"] = max(d_stats["max_epss"], st.get("max_epss", 0.0))
+                            d_stats["service_ids"].update(st.get("service_ids", []))
+                            d_stats["vuln_ids"].update(st.get("vuln_ids", []))
                 
+                d_stats_final = {**d_stats, "service_ids": list(d_stats["service_ids"]), "vuln_ids": list(d_stats["vuln_ids"])}
                 score = (d_stats["kev_count"] * 1000000) + (d_stats["poc_count"] * 200000) + (d_stats["high_epss_count"] * 100000) + (d_stats["max_epss"] * 50000) + (d_stats["critical_count"] * 50000) + (d_stats["high_count"] * 20000) + (d_stats["verified_service_count"] * 5000) + (d_stats["vuln_count"] * 1000) + (d_stats["service_count"] * 100)
                 explore_leads.append({
                     "id": f"dom_{domain_id}",
@@ -464,7 +484,7 @@ class GraphBuilder:
                     "display_name": domain_name,
                     "type": "domain",
                     "three_d_score": score,
-                    **d_stats
+                    **d_stats_final
                 })
             
             root_target_node["data"]["explore_leads"] = explore_leads
@@ -495,6 +515,23 @@ class GraphBuilder:
             FROM ip_addresses
         """)
         ip_rows = cursor.fetchall()
+
+        cursor_stats = conn.execute("""
+            SELECT ip.id, 
+                   GROUP_CONCAT(DISTINCT s.id) as srv_ids,
+                   GROUP_CONCAT(DISTINCT (CASE WHEN v.cve_id IS NOT NULL AND TRIM(v.cve_id) != '' AND UPPER(v.cve_id) != 'UNKNOWN' THEN LOWER(REPLACE(v.cve_id, ' ', '_')) ELSE v.id END)) as vuln_ids
+            FROM ip_addresses ip
+            LEFT JOIN services s ON ip.id = s.ip_id
+            LEFT JOIN vulnerabilities v ON ip.id = v.ip_id OR s.id = v.service_id
+            GROUP BY ip.id
+        """)
+        ip_extra_stats = {}
+        for row in cursor_stats.fetchall():
+            ip_id_stat, srv_ids_str, vuln_ids_str = row
+            ip_extra_stats[ip_id_stat] = {
+                "service_ids": [f"srv_{x}" for x in str(srv_ids_str).split(",")] if srv_ids_str else [],
+                "vuln_ids": [f"vuln_{x}" for x in str(vuln_ids_str).split(",")] if vuln_ids_str else []
+            }
 
         cursor_fqdns = conn.execute("""
             SELECT DISTINCT si.ip_id, s.name
@@ -530,6 +567,7 @@ class GraphBuilder:
         for ip_id, ip, org, country, city, region_code, asn, postal_code, latitude, longitude in ip_rows:
             fqdns = ip_to_fqdns.get(str(ip_id), [])
             is_explicit_ip_tgt = bool((ip and ip.strip().lower() in targets_set) or str(ip_id) in targets_set)
+            extra = ip_extra_stats.get(ip_id, {"service_ids": [], "vuln_ids": []})
             node_dict = {
                 "data": {
                     "id": f"ip_{ip_id}",
@@ -546,6 +584,8 @@ class GraphBuilder:
                     "asn": asn or "Unknown",
                     "fqdns": fqdns,
                     "fqdn_count": len(fqdns),
+                    "service_ids": extra["service_ids"],
+                    "vuln_ids": extra["vuln_ids"],
                     "is_target": is_explicit_ip_tgt
                 }
             }
