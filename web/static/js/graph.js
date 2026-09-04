@@ -657,13 +657,25 @@ class EASMDashboard {
             if (!preserveSelection) {
                 this.selectedLeads.clear();
                 
-                // Auto-select leads that are already marked as targets in the backend
+                // Auto-select leads that are explicitly marked as targets (via CLI or backend)
+                let hydratedTargets = false;
                 this.leads.forEach(lead => {
+                    if (lead.is_target) {
+                        const targetName = lead.display_name || lead.label;
+                        if (targetName && !this.markedTargets.has(targetName)) {
+                            this.markedTargets.add(targetName);
+                            hydratedTargets = true;
+                        }
+                    }
+                    
                     if (this.isTargetMarked(lead.display_name || lead.label)) {
                         this.selectedLeads.add(lead.id);
                     }
                 });
                 
+                if (hydratedTargets) {
+                    this.renderTargetsList();
+                }
                 // If no targets were selected from backend, fallback to Tier 1
                 if (this.selectedLeads.size === 0) {
                     const tier1Leads = this.leads.filter(l => l.is_tier1);

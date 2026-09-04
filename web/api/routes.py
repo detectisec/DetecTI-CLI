@@ -303,6 +303,33 @@ async def get_graph_data(db: Optional[DatabaseManager] = Depends(get_db_manager)
         active_target_keys = list(_target_registry.keys())
         builder = GraphBuilder(db)
         graph_data = builder.build_graph(active_targets=active_target_keys)
+        
+        # Hydrate _target_registry with explicit targets discovered from graph generation
+        # This ensures CLI-passed targets are preserved across sessions
+        for node in graph_data.get("elements", {}).get("nodes", []):
+            if node.get("data", {}).get("is_target"):
+                t = node["data"].get("ip") or node["data"].get("name")
+                if t and t not in _target_registry:
+                    target_type = "ip"
+                    try:
+                        import ipaddress
+                        ipaddress.ip_address(t)
+                    except ValueError:
+                        target_type = "fqdn"
+                        
+                    _target_registry[t] = {
+                        "ip": t,
+                        "target_type": target_type,
+                        "status": "idle",
+                        "nuclei_status": "idle",
+                        "ports_count": 0,
+                        "vulns_count": 0,
+                        "ports": [],
+                        "error": None,
+                        "last_scan": None,
+                        "last_nuclei_scan": None
+                    }
+                    
         return graph_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to build graph: {str(e)}")
