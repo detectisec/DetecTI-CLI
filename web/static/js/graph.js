@@ -4790,14 +4790,16 @@ class EASMDashboard {
                 let relatedSubs = Array.isArray(data.related_subdomains) ? data.related_subdomains : [];
 
                 if (relatedSubs.length > 0) {
-                    const subNamesList = relatedSubs.map(s => s.id ? s.id.replace(/^(dom_|sub_)/, '') : (s.name || s.label));
+                    const subNamesList = relatedSubs.map(s => s.name || s.label || s.id.replace(/^(dom_|sub_)/, ''));
                     const allMarked = subNamesList.length > 0 && subNamesList.every(name => this.isTargetMarked(name));
                     const subListHtml = relatedSubs.map((sub) => {
-                        const subName = sub.id ? sub.id.replace(/^(dom_|sub_)/, '') : (sub.name || sub.label);
+                        const subName = sub.name || sub.label || sub.id.replace(/^(dom_|sub_)/, '');
                         const isMarked = this.isTargetMarked(subName);
-                        const ipsBadges = (sub.ips || []).map(ip => `
-                            <span style="font-family: monospace; font-size: 0.68rem; color: #93c5fd; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 3px; padding: 1px 4px;">${ip}</span>
-                        `).join('');
+                        const ipsBadges = (sub.resolved_ips || sub.ips || []).map(ipObj => {
+                            const ipStr = typeof ipObj === 'string' ? ipObj : (ipObj.ip || '');
+                            if (!ipStr) return '';
+                            return `<span style="font-family: monospace; font-size: 0.68rem; color: #93c5fd; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 3px; padding: 1px 4px;">${ipStr}</span>`;
+                        }).join('');
 
                         return `
                             <div class="domain-subdomain-item" data-subdomain="${(subName || '').toLowerCase()}" style="display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; margin-bottom: 5px; background: rgba(78, 205, 196, 0.07); border: 1px solid rgba(78, 205, 196, 0.22); border-radius: 4px;">
