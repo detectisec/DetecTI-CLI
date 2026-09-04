@@ -2654,10 +2654,6 @@ html, body {
 
 /* Mobile & Small Tablets (<= 768px) */
 @media (max-width: 768px) {
-    .dashboard-header {
-        padding: 0.6rem 0.85rem;
-    }
-
     .header-content {
         gap: 0.6rem;
         flex-wrap: wrap;
