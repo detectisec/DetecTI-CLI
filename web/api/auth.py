@@ -22,7 +22,8 @@ class Token(BaseModel):
 
 def get_config_db():
     from pathlib import Path
-    db_path = Path.cwd() / "data" / "config.sqlite"
+    project_root = Path(__file__).parent.parent.parent
+    db_path = project_root / "data" / "config.sqlite"
     return ConfigDBManager(db_path)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
