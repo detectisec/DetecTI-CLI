@@ -4649,9 +4649,11 @@ class EASMDashboard {
                     const allMarked = subNames.length > 0 && subNames.every(name => this.isTargetMarked(name));
                     const subListHtml = allSubs.map(s => {
                         const isMarked = this.isTargetMarked(s.name);
-                        const ipsBadges = (s.ips || []).map(ip => `
-                            <span style="font-family: monospace; font-size: 0.7rem; color: #93c5fd; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 3px; padding: 1px 4px;">${ip}</span>
-                        `).join('');
+                        const ipsBadges = (s.resolved_ips || s.ips || []).map(ipObj => {
+                            const ipStr = typeof ipObj === 'string' ? ipObj : (ipObj.ip || '');
+                            if (!ipStr) return '';
+                            return `<span style="font-family: monospace; font-size: 0.7rem; color: #93c5fd; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 3px; padding: 1px 4px;">${ipStr}</span>`;
+                        }).join('');
 
                         return `
                             <div class="root-subdomain-item" data-subdomain="${(s.name || '').toLowerCase()}" style="display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; margin-bottom: 5px; background: rgba(78, 205, 196, 0.07); border: 1px solid rgba(78, 205, 196, 0.22); border-radius: 4px;">
