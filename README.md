@@ -289,7 +289,9 @@ git clone https://github.com/detectisec/DetecTI-CLI.git
 cd DetecTI-CLI
 chmod +x detecti-cli
 
-# Run automated setup (verifies prerequisites, directories, dependencies, and capabilities)
+# Run automated setup
+# (Verifies prerequisites, installs dependencies, configures capabilities, 
+# and sets up your secure Web Dashboard admin credentials)
 ./detecti-cli setup
 ```
 
@@ -431,6 +433,7 @@ Explore the mapped attack surface visually via the interactive web application f
 ```
 
 #### 🌟 Web Dashboard & Cytoscape Graph Highlights:
+- **🔒 Secure Authentication (JWT)**: Fully protected dashboard access. The `./detecti-cli setup` securely generates a persistent `JWT_SECRET_KEY` in your `.env` derived from your admin password. Includes 30-minute HttpOnly cookie expiration and explicit Session Termination controls.
 - **Dynamic Database Switcher**: Switch between any saved SQLite database in `./data/dbs/` directly from the header dropdown without restarting the server.
 - **Strict 2-State Service Semantics**:
   - `⚠️ Awaiting Active Confirmation`: Dark slate hexagon with dashed amber border for passive recon findings.
