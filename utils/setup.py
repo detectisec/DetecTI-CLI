@@ -239,18 +239,67 @@ class SetupManager:
 
     def run_automated_setup(self) -> bool:
         """Run automated setup: creates directories, .env file, configures capabilities, and updates databases."""
-        self.console.print("\n[bold cyan]🚀 Starting DetecTI-CLI Automated Environment Setup...[/bold cyan]\n")
+        self.console.print("
+[bold cyan]🚀 Starting DetecTI-CLI Automated Environment Setup...[/bold cyan]
+")
 
         all_success = True
 
+        # Step 0: Dashboard Admin Password Setup
+        self.console.print("🔐 [bold white]Step 0/7: Configuring DetecTIHound Dashboard Admin...[/bold white]")
+        try:
+            import getpass
+            import sys
+            import os
+            sys.path.insert(0, str(self.root_dir))
+            from core.database.config_db import ConfigDBManager, get_password_hash
+            
+            db_dir = self.root_dir / "data" / "dbs"
+            db_dir.mkdir(parents=True, exist_ok=True)
+            config_db = ConfigDBManager(db_dir / "config.sqlite")
+            
+            if config_db.user_exists("admin"):
+                change = self.console.input("  [yellow]Admin user already exists. Do you want to change the password? (y/N): [/yellow]").strip().lower()
+                if change == 'y':
+                    while True:
+                        pwd1 = getpass.getpass("  Enter new password for 'admin': ")
+                        pwd2 = getpass.getpass("  Confirm new password: ")
+                        if pwd1 == pwd2 and len(pwd1) >= 4:
+                            config_db.update_user_password("admin", get_password_hash(pwd1))
+                            self.console.print("  [green]✔ Admin password updated successfully.[/green]")
+                            break
+                        elif len(pwd1) < 4:
+                            self.console.print("  [red]Password must be at least 4 characters.[/red]")
+                        else:
+                            self.console.print("  [red]Passwords do not match. Try again.[/red]")
+                else:
+                    self.console.print("  [green]✔ Admin configuration skipped.[/green]")
+            else:
+                self.console.print("  [cyan]Creating default 'admin' user for the web dashboard.[/cyan]")
+                while True:
+                    pwd1 = getpass.getpass("  Enter password for 'admin': ")
+                    pwd2 = getpass.getpass("  Confirm password: ")
+                    if pwd1 == pwd2 and len(pwd1) >= 4:
+                        config_db.create_user("admin", get_password_hash(pwd1))
+                        self.console.print("  [green]✔ Admin user created successfully.[/green]")
+                        break
+                    elif len(pwd1) < 4:
+                        self.console.print("  [red]Password must be at least 4 characters.[/red]")
+                    else:
+                        self.console.print("  [red]Passwords do not match. Try again.[/red]")
+        except Exception as e:
+            self.console.print(f"  [red]⚠ Failed to configure admin: {e}[/red]")
+            import traceback
+            traceback.print_exc()
+
         # Step 1: Create Directories
-        self.console.print("📁 [bold white]Step 1/6: Initializing project directories...[/bold white]")
+        self.console.print("📁 [bold white]Step 1/7: Initializing project directories...[/bold white]")
         for d in [self.root_dir / "data" / "dbs", self.root_dir / "reports"]:
             d.mkdir(parents=True, exist_ok=True)
         self.console.print("  [green]✔ Operational directories verified (data/dbs, reports).[/green]")
 
         # Step 2: Configure .env
-        self.console.print("\n⚙️ [bold white]Step 2/6: Checking environment configuration (.env)...[/bold white]")
+        self.console.print("\n⚙️ [bold white]Step 2/7: Checking environment configuration (.env)...[/bold white]")
         env_file = self.root_dir / ".env"
         env_example = self.root_dir / ".env.example"
         if not env_file.exists() and env_example.exists():
@@ -262,7 +311,7 @@ class SetupManager:
             self.console.print("  [yellow]⚠ No .env template found. Skipped.[/yellow]")
 
         # Step 3: Python dependencies check / install
-        self.console.print("\n🐍 [bold white]Step 3/6: Verifying Python dependencies...[/bold white]")
+        self.console.print("\n🐍 [bold white]Step 3/7: Verifying Python dependencies...[/bold white]")
         req_file = self.root_dir / "requirements.txt"
         dep_check = self.check_python_modules()
         if not dep_check["ok"] and req_file.exists():
@@ -277,7 +326,7 @@ class SetupManager:
             self.console.print("  [green]✔ All Python core dependencies are satisfied.[/green]")
 
         # Step 4: Masscan capabilities configuration
-        self.console.print("\n⚡ [bold white]Step 4/6: Configuring Masscan network capabilities...[/bold white]")
+        self.console.print("\n⚡ [bold white]Step 4/7: Configuring Masscan network capabilities...[/bold white]")
         masscan_bin = shutil.which("masscan")
         if masscan_bin:
             is_root = hasattr(os, "geteuid") and os.geteuid() == 0
@@ -303,7 +352,7 @@ class SetupManager:
             self.console.print("    [dim]Install on Linux with: sudo apt install -y masscan (or pacman/dnf)[/dim]")
 
         # Step 5: ExploitDB Cache Update
-        self.console.print("\n💣 [bold white]Step 5/6: Initializing ExploitDB vulnerability mapping...[/bold white]")
+        self.console.print("\n💣 [bold white]Step 5/7: Initializing ExploitDB vulnerability mapping...[/bold white]")
         try:
             from modules.exploitdb import ExploitDBModule
             ExploitDBModule.update_database()
@@ -312,7 +361,7 @@ class SetupManager:
             self.console.print(f"  [yellow]⚠ ExploitDB update notice: {exc}[/yellow]")
 
         # Step 6: Nuclei Templates Check
-        self.console.print("\n🛡️ [bold white]Step 6/6: Checking Nuclei vulnerability engine...[/bold white]")
+        self.console.print("\n🛡️ [bold white]Step 6/7: Checking Nuclei vulnerability engine...[/bold white]")
         nuclei_bin = shutil.which("nuclei")
         if nuclei_bin:
             try:

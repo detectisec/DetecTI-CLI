@@ -11,7 +11,7 @@ sys.path.insert(0, str(project_root))
 
 try:
     import uvicorn
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, Request
     from fastapi.staticfiles import StaticFiles
     from fastapi.responses import FileResponse
     from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +26,9 @@ except ImportError:
 
 from core.database.storage import DatabaseManager
 from web.api.routes import router as api_router
+from web.api.auth import router as auth_router, get_current_user
+from jose import jwt, JWTError
+from web.api.auth import SECRET_KEY, ALGORITHM, get_config_db
 
 
 def create_app(db_path: str = None) -> FastAPI:
@@ -85,7 +88,9 @@ def create_app(db_path: str = None) -> FastAPI:
         app.state.db_path = None
     
     # Include API routes
-    app.include_router(api_router, prefix="/api/v1")
+    from fastapi import Depends
+    app.include_router(auth_router, prefix="/api/v1/auth")
+    app.include_router(api_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
     
     # Serve static files
     static_dir = Path(__file__).parent / "static"
@@ -93,11 +98,32 @@ def create_app(db_path: str = None) -> FastAPI:
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
     
     @app.get("/")
-    async def serve_dashboard():
-        """Serve the main dashboard SPA."""
+    async def serve_dashboard(request: Request):
+        """Serve the main dashboard SPA or login page."""
         static_dir = Path(__file__).parent / "static"
-        index_file = static_dir / "index.html"
         
+        # Check authentication
+        token = request.cookies.get("detecti_token")
+        authenticated = False
+        if token:
+            try:
+                payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+                username = payload.get("sub")
+                if username:
+                    config_db = get_config_db()
+                    if config_db.user_exists(username):
+                        authenticated = True
+            except JWTError:
+                pass
+                
+        if not authenticated:
+            login_file = static_dir / "login.html"
+            if login_file.exists():
+                return FileResponse(login_file)
+            else:
+                return {"message": "Login required but login.html not found"}
+                
+        index_file = static_dir / "index.html"
         if index_file.exists():
             return FileResponse(index_file)
         else:
