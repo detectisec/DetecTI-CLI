@@ -373,18 +373,18 @@ class EASMDashboard {
             console.log('Initializing Cytoscape...');
             this.initCytoscape();
             
-            // Load and render graph
+            // Setup Target Management & Load Targets FIRST so markedTargets is populated
+            console.log('Setting up Target Management...');
+            this.setupTargetManagement();
+            await this.loadTargets();
+
+            // Load and render graph (now populateLeadSelector will see markedTargets)
             console.log('Loading graph data...');
             await this.loadGraph();
             
             // Setup event listeners
             console.log('Setting up event listeners...');
             this.setupEventListeners();
-
-            // Setup Target Management & Load Targets
-            console.log('Setting up Target Management...');
-            this.setupTargetManagement();
-            await this.loadTargets();
             
             // Set the correct default layout in the selector
             this.updateLayoutSelector();
@@ -492,130 +492,125 @@ class EASMDashboard {
             // Debug: Log first few nodes to see structure
             console.log('First 3 nodes structure:', elements.nodes.slice(0, 3));
             
-            // Extract leads from graph nodes (IP, domain, subdomain)
-            let leadNodes = elements.nodes.filter(node => {
-                const nodeData = node.data || node;
-                const nodeType = nodeData.type;
-                return ['ip', 'domain', 'subdomain'].includes(nodeType);
-            });
+
+            // 1. Look for pre-calculated explore_leads data from the backend
+            const rootNode = elements.nodes.find(n => (n.data || n).id === 'target_root');
+            const rootData = rootNode ? (rootNode.data || rootNode) : null;
             
-            // IMMEDIATE FALLBACK: If no standard leads, create from ALL nodes
-            if (leadNodes.length === 0) {
-                leadNodes = elements.nodes.slice();
-            }
+            if (rootData && rootData.explore_leads && Array.isArray(rootData.explore_leads)) {
+                console.log(`Using pre-calculated explore_leads from backend: ${rootData.explore_leads.length} leads`);
+                this.leads = rootData.explore_leads.map(lead => ({
+                    id: lead.id,
+                    label: lead.label,
+                    display_name: lead.display_name || lead.label,
+                    type: lead.type,
+                    vuln_count: lead.vuln_count || 0,
+                    service_count: lead.service_count || 0,
+                    verified_service_count: lead.verified_service_count || 0,
+                    kev_count: lead.kev_count || 0,
+                    has_kev: lead.has_kev || false,
+                    critical_count: lead.critical_count || 0,
+                    has_critical: (lead.critical_count || 0) > 0,
+                    high_count: lead.high_count || 0,
+                    poc_count: lead.poc_count || 0,
+                    max_epss: lead.max_epss || 0,
+                    high_epss_count: lead.high_epss_count || 0,
+                    three_d_score: lead.three_d_score || 0,
+                    is_target: false // Explicit target state handled separately
+                }));
+            } else {
+
+            // 1. Look for pre-calculated explore_leads data from the backend
+            const rootNode = elements.nodes.find(n => (n.data || n).id === 'target_root');
+            const rootData = rootNode ? (rootNode.data || rootNode) : null;
             
-            if (leadNodes.length === 0) {
-                leadList.innerHTML = `
-                    <div class="lead-loading" style="color: #ff4757;">
-                        No lead nodes found in database.<br>
-                        <button onclick="location.reload()" style="margin-top: 10px; padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer;">Reload Page</button>
-                    </div>
-                `;
-                return;
-            }
-            
-            // Process each lead node
-            leadNodes.forEach((node, index) => {
-                try {
+            if (rootData && rootData.explore_leads && Array.isArray(rootData.explore_leads)) {
+                console.log(`Using pre-calculated explore_leads from backend: ${rootData.explore_leads.length} leads`);
+                this.leads = rootData.explore_leads.map(lead => ({
+                    id: lead.id,
+                    label: lead.label,
+                    display_name: lead.display_name || lead.label,
+                    type: lead.type,
+                    vuln_count: lead.vuln_count || 0,
+                    service_count: lead.service_count || 0,
+                    verified_service_count: lead.verified_service_count || 0,
+                    kev_count: lead.kev_count || 0,
+                    has_kev: lead.has_kev || false,
+                    critical_count: lead.critical_count || 0,
+                    has_critical: (lead.critical_count || 0) > 0,
+                    high_count: lead.high_count || 0,
+                    poc_count: lead.poc_count || 0,
+                    max_epss: lead.max_epss || 0,
+                    high_epss_count: lead.high_epss_count || 0,
+                    three_d_score: lead.three_d_score || 0,
+                    is_target: false // Explicit target state handled separately
+                }));
+            } else {
+                console.warn('explore_leads data not found, falling back to graph traversal...');
+                let leadNodes = elements.nodes.filter(node => {
                     const nodeData = node.data || node;
-                    
-                    // Find connected vulnerabilities and services to determine 3D Risk level
-                    const connectedVulns = this.findConnectedVulnerabilities(nodeData.id, elements);
-                    const connectedServices = this.findConnectedServices(nodeData.id, elements);
-                    
-                    // Threat indicators according to 3D Risk Matrix
-                    const vulnCount = connectedVulns.length;
-                    const kevVulns = connectedVulns.filter(v => v.is_cisa_kev === true || v.is_cisa_kev === 'true' || v.is_cisa_kev === 1);
-                    const kevCount = kevVulns.length;
-                    const hasKev = kevCount > 0;
-                    
-                    const criticalVulns = connectedVulns.filter(v => String(v.severity || '').toUpperCase() === 'CRITICAL');
-                    const criticalCount = criticalVulns.length;
-                    const hasCritical = criticalCount > 0;
-
-                    const highVulns = connectedVulns.filter(v => String(v.severity || '').toUpperCase() === 'HIGH');
-                    const highCount = highVulns.length;
-
-                    // PoC weaponization count
-                    const pocCount = connectedVulns.reduce((sum, v) => {
-                        const cnt = (v.exploits && v.exploits.length) || v.exploit_count || 0;
-                        return sum + (cnt > 0 ? cnt : 0);
-                    }, 0);
-
-                    // EPSS metrics
-                    let maxEpss = 0.0;
-                    let highEpssCount = 0;
-                    connectedVulns.forEach(v => {
-                        const epss = parseFloat(v.epss_score) || 0.0;
-                        if (epss > maxEpss) maxEpss = epss;
-                        if (epss >= 0.20) highEpssCount++;
-                    });
-
-                    // Dimension 1: Active Services & Verified Active Services
-                    const serviceCount = connectedServices.length;
-                    const verifiedServiceCount = connectedServices.filter(s => 
-                        s.verified_active === true || s.verified === true || s.status === 'active' || s.verified_active === 1
-                    ).length;
-
-                    // 3D Composite Risk Score
-                    // Dim 3: CISA KEV (1M each), PoCs (200k each), High EPSS >=20% (100k each + maxEpss*50k)
-                    // Dim 2: Critical (50k each), High (20k each), Total Vulns (1k each)
-                    // Dim 1: Verified Active (5k each), Total Services (100 each)
-                    const threeDScore = (kevCount * 1000000) +
-                                        (pocCount * 200000) +
-                                        (highEpssCount * 100000) +
-                                        (maxEpss * 50000) +
-                                        (criticalCount * 50000) +
-                                        (highCount * 20000) +
-                                        (verifiedServiceCount * 5000) +
-                                        (vulnCount * 1000) +
-                                        (serviceCount * 100);
-                    
-                    // Create lead object with clean display name handling
-                    let displayName = nodeData.label || nodeData.name || nodeData.ip || nodeData.id;
-                    
-                    // Clean up display name for IPs
-                    if (nodeData.type === 'ip' && nodeData.ip) {
-                        displayName = nodeData.ip;
-                    }
-                    
-                    // Check if node is a Tier 1 Target (strictly requires CONTAINS_TARGET edge from target_root)
-                    let isTier1 = false;
-                    if (elements.edges) {
-                        isTier1 = elements.edges.some(edge => {
-                            const edgeData = edge.data || edge;
-                            return edgeData.label === 'CONTAINS_TARGET' && edgeData.target === nodeData.id && (edgeData.source === 'target_root' || edgeData.source === 'root');
-                        });
-                    }
-                    
-                    const lead = {
-                        id: nodeData.id,
-                        type: nodeData.type || 'unknown',
-                        name: nodeData.name || nodeData.ip || nodeData.label || nodeData.id,
-                        display_name: displayName,
-                        org: nodeData.org || 'Unknown',
-                        country: nodeData.country || 'Unknown',
-                        service_count: serviceCount,
-                        verified_service_count: verifiedServiceCount,
-                        vuln_count: vulnCount,
-                        has_kev: hasKev,
-                        kev_count: kevCount,
-                        has_critical: hasCritical,
-                        critical_count: criticalCount,
-                        high_count: highCount,
-                        poc_count: pocCount,
-                        max_epss: maxEpss,
-                        high_epss_count: highEpssCount,
-                        three_d_score: threeDScore,
-                        is_tier1: isTier1,
-                        ip_count: nodeData.type === 'domain' ? this.countConnectedIPs(nodeData.id, elements) : 0
-                    };
-                    
-                    this.leads.push(lead);
-                } catch (error) {
-                    console.error(`Error processing lead node ${index}:`, error);
+                    const nodeType = nodeData.type;
+                    return ['ip', 'domain', 'subdomain'].includes(nodeType);
+                });
+                if (leadNodes.length === 0) leadNodes = elements.nodes.slice();
+                if (leadNodes.length === 0) {
+                    leadList.innerHTML = `<div class="lead-loading" style="color: #ff4757;">No lead nodes found in database.</div>`;
+                    return;
                 }
-            });
+                
+                leadNodes.forEach((node, index) => {
+                    try {
+                        const nodeData = node.data || node;
+                        const connectedVulns = this.findConnectedVulnerabilities(nodeData.id, elements);
+                        const connectedServices = this.findConnectedServices(nodeData.id, elements);
+                        
+                        const vulnCount = connectedVulns.length;
+                        const kevVulns = connectedVulns.filter(v => v.is_cisa_kev === true || v.is_cisa_kev === 'true' || v.is_cisa_kev === 1);
+                        const kevCount = kevVulns.length;
+                        const criticalVulns = connectedVulns.filter(v => String(v.severity || '').toUpperCase() === 'CRITICAL');
+                        const criticalCount = criticalVulns.length;
+                        const highVulns = connectedVulns.filter(v => String(v.severity || '').toUpperCase() === 'HIGH');
+                        const highCount = highVulns.length;
+                        const pocCount = connectedVulns.reduce((sum, v) => sum + ((v.exploits && v.exploits.length) || v.exploit_count || 0 > 0 ? ((v.exploits && v.exploits.length) || v.exploit_count || 0) : 0), 0);
+                        let maxEpss = 0.0;
+                        let highEpssCount = 0;
+                        connectedVulns.forEach(v => {
+                            const epss = parseFloat(v.epss_score) || 0.0;
+                            if (epss > maxEpss) maxEpss = epss;
+                            if (epss >= 0.20) highEpssCount++;
+                        });
+                        const serviceCount = connectedServices.length;
+                        const verifiedServiceCount = connectedServices.filter(s => s.verified_active === true || s.verified === true || s.status === 'active' || s.verified_active === 1).length;
+                        
+                        const threeDScore = (kevCount * 1000000) + (pocCount * 200000) + (highEpssCount * 100000) + (maxEpss * 50000) + (criticalCount * 50000) + (highCount * 20000) + (verifiedServiceCount * 5000) + (vulnCount * 1000) + (serviceCount * 100);
+                        let displayName = nodeData.type === 'ip' && nodeData.ip ? nodeData.ip : (nodeData.label || nodeData.name || nodeData.ip || nodeData.id);
+                        
+                        this.leads.push({
+                            id: nodeData.id,
+                            label: nodeData.label || nodeData.id,
+                            display_name: displayName,
+                            type: nodeData.type || 'unknown',
+                            vuln_count: vulnCount,
+                            service_count: serviceCount,
+                            verified_service_count: verifiedServiceCount,
+                            kev_count: kevCount,
+                            has_kev: kevCount > 0,
+                            critical_count: criticalCount,
+                            has_critical: criticalCount > 0,
+                            high_count: highCount,
+                            poc_count: pocCount,
+                            max_epss: maxEpss,
+                            high_epss_count: highEpssCount,
+                            three_d_score: threeDScore,
+                            is_target: nodeData.is_target === true,
+                            node: nodeData
+                        });
+                    } catch (err) {
+                        console.error('Error processing lead node:', node, err);
+                    }
+                });
+            }
+            }
             
             // FINAL FALLBACK: If still no leads after processing, force create from raw data
             if (this.leads.length === 0 && elements.nodes.length > 0) {
@@ -662,10 +657,20 @@ class EASMDashboard {
             if (!preserveSelection) {
                 this.selectedLeads.clear();
                 
-                // Auto-select ONLY Tier 1 targets if their total is <= 50 to prevent blank graphs
-                const tier1Leads = this.leads.filter(l => l.is_tier1);
-                if (tier1Leads.length > 0 && tier1Leads.length <= 50) {
-                    tier1Leads.forEach(lead => this.selectedLeads.add(lead.id));
+                // Auto-select leads that are already marked as targets in the backend
+                this.leads.forEach(lead => {
+                    const cleanId = lead.id.replace(/^(ip_|dom_|sub_)/, '');
+                    if (this.markedTargets.has(cleanId)) {
+                        this.selectedLeads.add(lead.id);
+                    }
+                });
+                
+                // If no targets were selected from backend, fallback to Tier 1
+                if (this.selectedLeads.size === 0) {
+                    const tier1Leads = this.leads.filter(l => l.is_tier1);
+                    if (tier1Leads.length > 0 && tier1Leads.length <= 50) {
+                        tier1Leads.forEach(lead => this.selectedLeads.add(lead.id));
+                    }
                 }
             } else {
                 const currentLeadIds = new Set(this.leads.map(l => l.id));
@@ -1024,6 +1029,10 @@ class EASMDashboard {
                 }
             });
             
+            if (selfData && selfData.passive_vulns && Array.isArray(selfData.passive_vulns)) {
+                selfData.passive_vulns.forEach(vuln => vulnerabilities.push(vuln));
+            }
+            
             // Remove duplicates by CVE ID or ID
             const seenCveKeys = new Set();
             const uniqueVulns = [];
@@ -1093,6 +1102,10 @@ class EASMDashboard {
                     }
                 });
             });
+            
+            if (selfData && selfData.passive_services && Array.isArray(selfData.passive_services)) {
+                selfData.passive_services.forEach(srv => services.push(srv));
+            }
             
             // Remove duplicates
             const uniqueServices = services.filter((service, index, self) => 
@@ -1282,11 +1295,17 @@ class EASMDashboard {
                 riskClass = 'risk-low';
             }
 
+            const isSelected = this.selectedLeads.has(lead.id);
+            const iconName = isSelected ? 'check-circle' : 'crosshair';
+            const iconColor = isSelected ? '#10b981' : '#64748b';
+            
             leadItem.innerHTML = `
-                <input type="checkbox" id="chk_${lead.id}" class="lead-checkbox-input" style="margin-top: 0.25rem; cursor: pointer;">
-                <div class="lead-info">
+                <div class="lead-target-btn" style="cursor: pointer; margin-right: 10px; display: flex; align-items: center; justify-content: center; color: ${iconColor};">
+                    <i data-lucide="${iconName}" style="width: 18px; height: 18px;"></i>
+                </div>
+                <div class="lead-info" style="flex: 1;">
                     <div class="lead-header">
-                        <label for="chk_${lead.id}" class="lead-name" style="cursor: pointer;">${lead.display_name}</label>
+                        <span class="lead-name" style="cursor: pointer; font-weight: 500;">${lead.display_name}</span>
                         <div class="lead-type ${lead.type}">${lead.type.toUpperCase()}</div>
                     </div>
                     <div class="lead-badges">${badges.join('')}</div>
@@ -1295,23 +1314,37 @@ class EASMDashboard {
                 <div class="lead-risk-indicator ${riskClass}"></div>
             `;
 
-            // Prevent event bubbling when clicking the checkbox directly
-            const checkbox = leadItem.querySelector('.lead-checkbox-input');
-            checkbox.addEventListener('click', (e) => {
+            const toggleBtn = leadItem.querySelector('.lead-target-btn');
+            
+            const handleToggle = (e) => {
                 e.stopPropagation();
-                window.toggleLeadVisibility(lead.id, checkbox.checked);
-            });
-
-            leadItem.addEventListener('click', (e) => {
-                if (e.target !== checkbox && e.target.tagName !== 'LABEL') {
-                    checkbox.checked = !checkbox.checked;
-                    window.toggleLeadVisibility(lead.id, checkbox.checked);
+                const currentlySelected = this.selectedLeads.has(lead.id);
+                const willBeSelected = !currentlySelected;
+                
+                // Optimistic UI update
+                if (willBeSelected) {
+                    leadItem.classList.add('selected');
+                    toggleBtn.style.color = '#10b981';
+                    toggleBtn.innerHTML = '<i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>';
+                } else {
+                    leadItem.classList.remove('selected');
+                    toggleBtn.style.color = '#64748b';
+                    toggleBtn.innerHTML = '<i data-lucide="crosshair" style="width: 18px; height: 18px;"></i>';
                 }
+                if (typeof lucide !== 'undefined') lucide.createIcons({ root: toggleBtn });
+                
+                window.toggleLeadVisibility(lead.id, willBeSelected);
+            };
+
+            toggleBtn.addEventListener('click', handleToggle);
+            leadItem.addEventListener('click', (e) => {
+                // Ignore clicks on buttons/links inside the item (if any are added later)
+                if (e.target.closest('a') || e.target.closest('button')) return;
+                handleToggle(e);
             });
 
             // Set initial state
             if (this.selectedLeads.has(lead.id)) {
-                checkbox.checked = true;
                 leadItem.classList.add('selected');
             }
 
@@ -1344,27 +1377,25 @@ class EASMDashboard {
         this.applyLeadFilter({ relayout: true });
     }
 
-    selectAllLeads() {
+    async selectAllLeads() {
+        const ids = [];
         this.leads.forEach(lead => {
-            this.selectedLeads.add(lead.id);
-            const leadItem = document.querySelector(`[data-lead-id="${lead.id}"]`);
-            if (leadItem) {
-                leadItem.classList.add('selected');
-                const checkbox = leadItem.querySelector('.lead-checkbox-input');
-                if (checkbox) checkbox.checked = true;
+            if (!this.selectedLeads.has(lead.id)) {
+                this.selectedLeads.add(lead.id);
+                ids.push(lead.id);
             }
         });
+        await this.setTargetsBulk(ids);
+        this.renderLeadSelector(); // Re-render to update icons
         this.applyLeadFilter({ relayout: true });
     }
 
-    deselectAllLeads() {
+    async deselectAllLeads() {
+        const ids = Array.from(this.selectedLeads);
         this.selectedLeads.clear();
-        document.querySelectorAll('.lead-item').forEach(item => {
-            item.classList.remove('selected');
-            const checkbox = item.querySelector('.lead-checkbox-input');
-            if (checkbox) checkbox.checked = false;
-        });
-        this.applyLeadFilter({ relayout: false });
+        await this.removeTargetsBulk(ids);
+        this.renderLeadSelector();
+        this.applyLeadFilter({ relayout: true });
     }
 
     applyLeadFilter(options = {}) {
@@ -3000,26 +3031,17 @@ class EASMDashboard {
             }
         };
         
-        window.toggleLeadVisibility = (nodeId, isChecked) => {
+        window.toggleLeadVisibility = async (nodeId, isChecked) => {
+            const cleanId = nodeId.replace(/^(ip_|dom_|sub_)/, '');
             if (isChecked) {
                 this.selectedLeads.add(nodeId);
+                await this.setTarget(cleanId);
             } else {
                 this.selectedLeads.delete(nodeId);
+                await this.removeTarget(cleanId);
             }
             
-            // Update UI
-            const leadItem = document.querySelector(`[data-lead-id="${nodeId}"]`);
-            if (leadItem) {
-                if (isChecked) {
-                    leadItem.classList.add('selected');
-                } else {
-                    leadItem.classList.remove('selected');
-                }
-                const checkbox = leadItem.querySelector('.lead-checkbox-input');
-                if (checkbox && checkbox.checked !== isChecked) {
-                    checkbox.checked = isChecked;
-                }
-            }
+            // UI is updated optimistically before this is called
             
             // Apply lead filter to show/hide entire subtrees and frame active leads
             this.applyLeadFilter({ relayout: true });
@@ -4649,10 +4671,10 @@ class EASMDashboard {
 
                 const allIps = Array.isArray(data.all_ips) ? data.all_ips : [];
                 if (allIps.length > 0) {
-                    const ipStrings = allIps.map(item => item.ip);
+                    const ipStrings = allIps.map(item => item.id.replace('ip_', ''));
                     const allMarked = ipStrings.length > 0 && ipStrings.every(ip => this.isTargetMarked(ip));
                     const ipListHtml = allIps.map(item => {
-                        const isMarked = this.isTargetMarked(item.ip);
+                        const isMarked = this.isTargetMarked(item.id.replace('ip_', ''));
                         const fqdnsBadges = (item.fqdns || []).slice(0, 3).map(f => `
                             <span style="font-family: monospace; font-size: 0.68rem; color: #4ecdc4; background: rgba(78, 205, 196, 0.12); border: 1px solid rgba(78, 205, 196, 0.25); border-radius: 3px; padding: 1px 4px;">${f}</span>
                         `).join('');
@@ -4746,10 +4768,10 @@ class EASMDashboard {
                 }
 
                 if (relatedSubs.length > 0) {
-                    const subNamesList = relatedSubs.map(s => s.name || s.label);
+                    const subNamesList = relatedSubs.map(s => s.id ? s.id.replace(/^(dom_|sub_)/, '') : (s.name || s.label));
                     const allMarked = subNamesList.length > 0 && subNamesList.every(name => this.isTargetMarked(name));
                     const subListHtml = relatedSubs.map((sub) => {
-                        const subName = sub.name || sub.label;
+                        const subName = sub.id ? sub.id.replace(/^(dom_|sub_)/, '') : (sub.name || sub.label);
                         const isMarked = this.isTargetMarked(subName);
                         const ipsBadges = (sub.ips || []).map(ip => `
                             <span style="font-family: monospace; font-size: 0.68rem; color: #93c5fd; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 3px; padding: 1px 4px;">${ip}</span>
@@ -5536,7 +5558,7 @@ class EASMDashboard {
             });
             collapseActions.push({
                 id: 'ctx-action-expand-all',
-                label: 'Expand All Leads',
+                label: 'Target All Leads',
                 icon: 'layers',
                 disabled: false,
                 action: () => {
@@ -6011,10 +6033,29 @@ class EASMDashboard {
     // Target Management & Active Scan (Masscan) Implementation
     // =========================================================================
 
+    normalizeTargetId(target) {
+        if (!target) return target;
+        const targetStr = String(target).trim();
+        const targetLower = targetStr.toLowerCase();
+        
+        if (this.leads && Array.isArray(this.leads)) {
+            const matchingLead = this.leads.find(l => {
+                const lName = (l.name || l.display_name || '').toLowerCase();
+                const lId = (l.id || '').toLowerCase();
+                return lName === targetLower || lId === targetLower || lId === `dom_${targetLower}` || lId === `sub_${targetLower}` || lId === `ip_${targetLower}`;
+            });
+            
+            if (matchingLead) {
+                return matchingLead.id.replace(/^(ip_|dom_|sub_)/, '');
+            }
+        }
+        return targetStr.replace(/^(ip_|dom_|sub_|target_)/, '');
+    }
+
     isTargetMarked(ip) {
         if (!ip) return false;
-        const clean = String(ip).replace(/^(ip_|dom_|sub_|target_)/, '').trim();
-        return this.markedTargets.has(clean) || this.markedTargets.has(String(ip).trim());
+        const normalizedId = this.normalizeTargetId(ip);
+        return this.markedTargets.has(normalizedId) || this.markedTargets.has(String(ip).trim());
     }
 
     async toggleTargetMark(ip, node = null) {
@@ -6389,11 +6430,29 @@ class EASMDashboard {
             }
             this.updateTargetBadgeCount();
             this.renderTargetsList();
+            if (this.selectedNode) {
+                this.showNodeInspector(this.selectedNode);
+            }
             if (typeof this.showToast === 'function') {
                 this.showToast('success', `Marked ${cleanTargets.length} target(s)`);
             }
             await Promise.all(cleanTargets.map(t => window.api.setTarget(t)));
             await this.loadGraph(true);
+
+            // Sync Lead Selector
+            cleanTargets.forEach(target => {
+                const targetLower = target.toLowerCase();
+                const matchingLead = this.leads.find(l => {
+                    const lName = (l.name || l.display_name || '').toLowerCase();
+                    const lId = (l.id || '').toLowerCase();
+                    return lName === targetLower || lId === targetLower || lId === `dom_${targetLower}` || lId === `sub_${targetLower}` || lId === `ip_${targetLower}`;
+                });
+                if (matchingLead) {
+                    this.selectedLeads.add(matchingLead.id);
+                }
+            });
+            this.applyLeadFilter({ relayout: true });
+            this.renderLeadSelector();
         } catch (err) {
             console.error('Failed to set targets bulk:', err);
         }
@@ -6404,7 +6463,7 @@ class EASMDashboard {
         try {
             const cleanTargets = [];
             for (const raw of targets) {
-                const clean = String(raw || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
+                const clean = this.normalizeTargetId(raw);
                 if (clean) {
                     this.markedTargets.delete(clean);
                     delete this.targetStatuses[clean];
@@ -6414,11 +6473,29 @@ class EASMDashboard {
             this.syncTargetNodesStyling();
             this.updateTargetBadgeCount();
             this.renderTargetsList();
+            if (this.selectedNode) {
+                this.showNodeInspector(this.selectedNode);
+            }
             if (typeof this.showToast === 'function') {
                 this.showToast('info', `Removed ${cleanTargets.length} target(s) from scan list`);
             }
             await Promise.all(cleanTargets.map(t => window.api.removeTarget(t)));
             await this.loadGraph(true);
+
+            // Sync Lead Selector
+            cleanTargets.forEach(target => {
+                const targetLower = target.toLowerCase();
+                const matchingLead = this.leads.find(l => {
+                    const lName = (l.name || l.display_name || '').toLowerCase();
+                    const lId = (l.id || '').toLowerCase();
+                    return lName === targetLower || lId === targetLower || lId === `dom_${targetLower}` || lId === `sub_${targetLower}` || lId === `ip_${targetLower}`;
+                });
+                if (matchingLead) {
+                    this.selectedLeads.delete(matchingLead.id);
+                }
+            });
+            this.applyLeadFilter({ relayout: true });
+            this.renderLeadSelector();
         } catch (err) {
             console.error('Failed to remove targets bulk:', err);
         }
@@ -6429,7 +6506,7 @@ class EASMDashboard {
             if (node && (node.data('type') === 'target' || node.id() === 'target_root' || node.data('is_root') === true)) {
                 return;
             }
-            target = String(target || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
+            target = this.normalizeTargetId(target);
             if (!target || target === 'root') return;
             this.markedTargets.add(target);
             if (!this.targetStatuses[target]) {
@@ -6450,19 +6527,21 @@ class EASMDashboard {
             if (this.selectedNode) {
                 this.showNodeInspector(this.selectedNode);
             }
-            if (typeof this.showToast === 'function') {
-                this.showToast('success', `Target set: ${target}`);
-            }
-            await window.api.setTarget(target);
-            await this.loadGraph(true);
-
-            // Automatically activate the newly set target in the Lead Selector so it immediately renders
             const targetLower = target.toLowerCase();
             const matchingLead = this.leads.find(l => {
                 const lName = (l.name || l.display_name || '').toLowerCase();
                 const lId = (l.id || '').toLowerCase();
                 return lName === targetLower || lId === targetLower || lId === `dom_${targetLower}` || lId === `sub_${targetLower}` || lId === `ip_${targetLower}`;
             });
+            const displayName = matchingLead ? (matchingLead.name || matchingLead.display_name || matchingLead.label || target) : target;
+
+            if (typeof this.showToast === 'function') {
+                this.showToast('success', `Target set: ${displayName}`);
+            }
+            await window.api.setTarget(target);
+            await this.loadGraph(true);
+
+            // Automatically activate the newly set target in the Lead Selector so it immediately renders
             if (matchingLead) {
                 this.selectedLeads.add(matchingLead.id);
                 this.applyLeadFilter({ relayout: true });
@@ -6475,7 +6554,7 @@ class EASMDashboard {
 
     async removeTarget(target, node = null) {
         try {
-            target = String(target || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
+            target = this.normalizeTargetId(target);
             if (!target) return;
             this.markedTargets.delete(target);
             delete this.targetStatuses[target];
@@ -6485,11 +6564,26 @@ class EASMDashboard {
             if (this.selectedNode) {
                 this.showNodeInspector(this.selectedNode);
             }
+            const targetLower = target.toLowerCase();
+            const matchingLead = this.leads.find(l => {
+                const lName = (l.name || l.display_name || '').toLowerCase();
+                const lId = (l.id || '').toLowerCase();
+                return lName === targetLower || lId === targetLower || lId === `dom_${targetLower}` || lId === `sub_${targetLower}` || lId === `ip_${targetLower}`;
+            });
+            const displayName = matchingLead ? (matchingLead.name || matchingLead.display_name || matchingLead.label || target) : target;
+
             if (typeof this.showToast === 'function') {
-                this.showToast('info', `Target removed: ${target}`);
+                this.showToast('info', `Target removed: ${displayName}`);
             }
             await window.api.removeTarget(target);
             await this.loadGraph(true);
+
+            // Automatically deactivate the removed target in the Lead Selector
+            if (matchingLead) {
+                this.selectedLeads.delete(matchingLead.id);
+                this.applyLeadFilter({ relayout: true });
+                this.renderLeadSelector();
+            }
         } catch (err) {
             console.error(`Failed to remove target ${target}:`, err);
         }
@@ -6632,6 +6726,15 @@ class EASMDashboard {
 
         const targetsHtml = Array.from(this.markedTargets).map(ip => {
             const statusObj = this.targetStatuses[ip] || { status: 'idle', nuclei_status: 'idle', ports_count: 0 };
+            
+            let displayName = ip;
+            if (this.leads && Array.isArray(this.leads)) {
+                const lead = this.leads.find(l => l.id.replace(/^(ip_|dom_|sub_)/, '') === ip);
+                if (lead) displayName = lead.display_name || lead.label || ip;
+            } else if (this.nodeIndex) {
+                const node = this.nodeIndex.get(`ip_${ip}`) || this.nodeIndex.get(`dom_${ip}`) || this.nodeIndex.get(`sub_${ip}`);
+                if (node) displayName = node.display_name || node.label || node.name || node.ip || ip;
+            }
             const status = statusObj.status || 'idle';
             const nucleiStatus = statusObj.nuclei_status || 'idle';
             const portsCount = statusObj.ports_count || (Array.isArray(statusObj.ports) ? statusObj.ports.length : 0);
@@ -6658,7 +6761,7 @@ class EASMDashboard {
                 <div class="target-card-item" data-ip="${ip}">
                     <div class="target-card-left">
                         <div class="target-card-ip-row">
-                            <span class="target-card-ip">${ip}</span>
+                            <span class="target-card-ip">${displayName}</span>
                             <span class="target-status-tag ${status}" title="Port Scan: ${status}">${status}</span>
                             ${nucleiStatus !== 'idle' ? `<span class="target-status-tag ${nucleiStatus}" style="border-color: rgba(239, 68, 68, 0.5); color: #f87171;" title="Nuclei: ${nucleiStatus}">Nuclei: ${nucleiStatus}</span>` : ''}
                         </div>

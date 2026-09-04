@@ -58,12 +58,12 @@ class GraphBuilder:
                 root_target_node=root_target_node
             )
 
-            # Determine which IPs have actual topological connections on canvas (either via RESOLVES_TO or CONTAINS_TARGET)
-            connected_ip_ids = {n["data"]["id"] for n in ip_nodes}
-
-            # In Scope-driven mode (file, domain, subdomain), omit orphaned passive IPs from canvas
-            # In Discovery query mode, all IPs have CONTAINS_TARGET and are kept
-            visible_ip_nodes = ip_nodes
+            # Determine which IPs to spawn: only explicit targets or if in discovery mode
+            # We NO LONGER spawn IPs just because a parent FQDN is marked.
+            is_discovery = target_type == "discovery"
+            visible_ip_nodes = [n for n in ip_nodes if is_discovery or n["data"]["ip"].lower() in explicit_targets or str(n["data"]["id"]).replace("ip_", "").lower() in explicit_targets]
+            
+            connected_ip_ids = {n["data"]["id"] for n in visible_ip_nodes}
             nodes.extend(visible_ip_nodes)
             edges.extend(ip_edges)
             
@@ -83,10 +83,73 @@ class GraphBuilder:
             nodes.extend(visible_vuln_nodes)
             edges.extend(visible_vuln_edges)
         
+        # --- EMBED PASSIVE DATA FOR FQDN INSPECTOR ---
+        # To support the inspector showing data without spawning the nodes visually:
+        # Build lookups for all passive data
+        ip_data_map = {n["data"]["id"]: n["data"] for n in ip_nodes}
+        srv_data_map = {n["data"]["id"]: n["data"] for n in service_nodes}
+        vuln_data_map = {n["data"]["id"]: n["data"] for n in vuln_nodes}
+        
+        # Build relationship mappings (all edges, even if not spawned)
+        ip_to_srvs = {}
+        for e in service_edges:
+            src = e["data"]["source"]
+            tgt = e["data"]["target"]
+            if src not in ip_to_srvs: ip_to_srvs[src] = []
+            ip_to_srvs[src].append(tgt)
+            
+        srv_or_ip_to_vulns = {}
+        for e in vuln_edges:
+            src = e["data"]["source"]
+            tgt = e["data"]["target"]
+            if src not in srv_or_ip_to_vulns: srv_or_ip_to_vulns[src] = []
+            srv_or_ip_to_vulns[src].append(tgt)
+            
+        # For each spawned FQDN node, embed its unspawned passive data
+        for n in nodes:
+            if n["data"]["type"] in ("domain", "subdomain"):
+                nid = n["data"]["id"]
+                n_ips = []
+                n_srvs = []
+                n_vulns = []
+                
+                # Get IPs for this FQDN
+                ip_ids = set()
+                if n["data"]["type"] == "domain":
+                    dom_id = nid.replace("dom_", "")
+                    ip_ids = domain_to_ips.get(int(dom_id) if dom_id.isdigit() else dom_id, set())
+                else:
+                    sub_id = nid.replace("sub_", "")
+                    ip_ids = subdomain_to_ips.get(int(sub_id) if sub_id.isdigit() else sub_id, set())
+                    
+                for ip_id in ip_ids:
+                    ip_node_id = f"ip_{ip_id}"
+                    if ip_node_id in ip_data_map:
+                        n_ips.append(ip_data_map[ip_node_id])
+                    
+                    for srv_id in ip_to_srvs.get(ip_node_id, []):
+                        if srv_id in srv_data_map:
+                            n_srvs.append(srv_data_map[srv_id])
+                        for vuln_id in srv_or_ip_to_vulns.get(srv_id, []):
+                            if vuln_id in vuln_data_map:
+                                n_vulns.append(vuln_data_map[vuln_id])
+                                
+                    for vuln_id in srv_or_ip_to_vulns.get(ip_node_id, []):
+                        if vuln_id in vuln_data_map:
+                            n_vulns.append(vuln_data_map[vuln_id])
+                            
+                n["data"]["passive_ips"] = n_ips
+                n["data"]["passive_services"] = n_srvs
+                n["data"]["passive_vulns"] = n_vulns
+
+        # Filter edges to only keep those where both source and target are spawned
+        spawned_node_ids = {n["data"]["id"] for n in nodes}
+        valid_edges = [e for e in edges if e["data"]["source"] in spawned_node_ids and e["data"]["target"] in spawned_node_ids]
+        
         return {
             "elements": {
                 "nodes": nodes,
-                "edges": edges
+                "edges": valid_edges
             }
         }
     
@@ -151,42 +214,39 @@ class GraphBuilder:
             elif target_type in ("domain", "ip", "subdomain"):
                 targets_list = [target_name]
 
-            def _normalize_target_item(t: str) -> str:
-                t = str(t).strip().lower()
-                if t.startswith("http://"):
-                    t = t[7:]
-                elif t.startswith("https://"):
-                    t = t[8:]
-                if "/" in t:
-                    t = t.split("/")[0]
-                if ":" in t:
-                    if t.startswith("[") and "]" in t:
-                        # Handle IPv6 with port: [2001:db8::1]:80 -> 2001:db8::1
-                        t = t.split("]")[0][1:]
-                    elif t.count(":") == 1:
-                        # Handle IPv4 or Domain with port: 192.168.1.1:80 -> 192.168.1.1
-                        t = t.split(":")[0]
-                    # If count > 1 and no brackets, it's a raw IPv6 (e.g. 2001:db8::1), leave as is.
-                return t
+        def _normalize_target_item(t: str) -> str:
+            t = str(t).strip().lower()
+            if t.startswith("http://"):
+                t = t[7:]
+            elif t.startswith("https://"):
+                t = t[8:]
+            if "/" in t:
+                t = t.split("/")[0]
+            if ":" in t:
+                if t.startswith("[") and "]" in t:
+                    t = t.split("]")[0][1:]
+                elif t.count(":") == 1:
+                    t = t.split(":")[0]
+            return t
 
-            explicit_targets = {_normalize_target_item(t) for t in targets_list if _normalize_target_item(t)}
-            if active_targets:
-                for at in active_targets:
-                    norm = _normalize_target_item(at)
-                    if norm:
-                        explicit_targets.add(norm)
+        explicit_targets = {_normalize_target_item(t) for t in targets_list if _normalize_target_item(t)}
+        if active_targets:
+            for at in active_targets:
+                norm = _normalize_target_item(at)
+                if norm:
+                    explicit_targets.add(norm)
 
-            root_target_node = {
-                "data": {
-                    "id": "target_root",
-                    "label": target_name,
-                    "type": "target",
-                    "name": target_name,
-                    "target_type": target_type or "query",
-                    "targets_list": targets_list,
-                    "is_root": True
-                }
+        root_target_node = {
+            "data": {
+                "id": "target_root",
+                "label": target_name or "Target Root",
+                "type": "target",
+                "name": target_name or "Target Root",
+                "target_type": target_type or "query",
+                "targets_list": targets_list,
+                "is_root": True
             }
+        }
 
         # Query all subdomains and their resolved IPs
         cursor_subs = conn.execute("""
@@ -231,64 +291,175 @@ class GraphBuilder:
             root_target_node["data"]["total_domains"] = len(all_domains)
             root_target_node["data"]["total_subdomains"] = len(all_subdomains)
 
+
+
 # 2. Topologically hierarchical node spawning
-        # Spawn ALL domains and subdomains so they are available in the frontend Explore Leads modal.
-        # Explicit targets get CONTAINS_TARGET (Tier 1 auto-render). Passive discoveries get MATCHES_DOMAIN.
-        domains_to_spawn = set(d[0] for d in domains_list)
-        subdomains_to_spawn = set(subdomain_info_map.keys())
+        domains_to_spawn = set()
+        subdomains_to_spawn = set()
 
         # Determine which domains are explicit targets (or parents of explicit targets) to receive CONTAINS_TARGET
         explicit_domains = set()
         for domain_id, domain_name in domains_list:
-            if domain_name.lower() in explicit_targets:
+            if domain_name.lower() in explicit_targets or str(domain_id).lower() in explicit_targets:
+                domains_to_spawn.add(domain_id)
                 explicit_domains.add(domain_id)
         
         for sub_id, sub_info in subdomain_info_map.items():
-            if sub_info["name"].lower() in explicit_targets or any(ip in explicit_targets for ip in sub_info["ips"]):
+            if sub_info["name"].lower() in explicit_targets or str(sub_id).lower() in explicit_targets:
+                subdomains_to_spawn.add(sub_id)
+                domains_to_spawn.add(sub_info["domain_id"])
+                explicit_domains.add(sub_info["domain_id"])
+            elif any(ip in explicit_targets for ip in sub_info["ips"]):
+                subdomains_to_spawn.add(sub_id)
+                domains_to_spawn.add(sub_info["domain_id"])
                 explicit_domains.add(sub_info["domain_id"])
                 
         cursor_all_ips = conn.execute("SELECT id, ip FROM ip_addresses")
         ip_id_to_str = {str(r[0]): r[1].lower() for r in cursor_all_ips.fetchall()}
         for domain_id, ip_ids in domain_to_ips.items():
-            if any(ip_id_to_str.get(str(ip_id)) in explicit_targets for ip_id in ip_ids):
-                explicit_domains.add(domain_id)
+            if domain_id not in domains_to_spawn:
+                if any(ip_id_to_str.get(str(ip_id)) in explicit_targets or str(ip_id).lower() in explicit_targets for ip_id in ip_ids):
+                    domains_to_spawn.add(domain_id)
+                    explicit_domains.add(domain_id)
 
         for domain_id, domain_name in domains_list:
-            dname_lower = domain_name.lower()
-            domain_subs = [s for s in all_subdomains if s.get("domain_id") == domain_id or s.get("domain_name", "").lower() == dname_lower]
-            node_data = {
-                "id": f"dom_{domain_id}",
-                "label": domain_name,
-                "type": "domain",
-                "name": domain_name,
-                "related_subdomains": domain_subs,
-                "subdomain_count": len(domain_subs),
-                "is_target": (dname_lower in explicit_targets),
-                "is_root": False
-            }
-            nodes.append({"data": node_data, "classes": "is-target" if node_data["is_target"] else ""})
-            
-            if root_target_node:
-                if domain_id in explicit_domains:
-                    edges.append({"data": {"id": f"e_target_dom_{domain_id}", "source": "target_root", "target": f"dom_{domain_id}", "label": "CONTAINS_TARGET"}})
-                else:
-                    edges.append({"data": {"id": f"e_target_dom_{domain_id}", "source": "target_root", "target": f"dom_{domain_id}", "label": "MATCHES_DOMAIN"}})
+            if domain_id in domains_to_spawn:
+                dname_lower = domain_name.lower()
+                domain_subs = [s for s in all_subdomains if s.get("domain_id") == domain_id or s.get("domain_name", "").lower() == dname_lower]
+                node_data = {
+                    "id": f"dom_{domain_id}",
+                    "label": domain_name,
+                    "type": "domain",
+                    "name": domain_name,
+                    "related_subdomains": domain_subs,
+                    "subdomain_count": len(domain_subs),
+                    "is_target": (dname_lower in explicit_targets),
+                    "is_root": False
+                }
+                nodes.append({"data": node_data, "classes": "is-target" if node_data["is_target"] else ""})
+                
+                if root_target_node:
+                    if domain_id in explicit_domains:
+                        edges.append({"data": {"id": f"e_target_dom_{domain_id}", "source": "target_root", "target": f"dom_{domain_id}", "label": "CONTAINS_TARGET"}})
+                    else:
+                        edges.append({"data": {"id": f"e_target_dom_{domain_id}", "source": "target_root", "target": f"dom_{domain_id}", "label": "MATCHES_DOMAIN"}})
 
         for sub_id, sub_info in subdomain_info_map.items():
-            sname_lower = sub_info["name"].lower()
-            node_data = {
-                "id": f"sub_{sub_id}",
-                "label": sub_info["name"],
-                "type": "subdomain",
-                "name": sub_info["name"],
-                "domain_id": sub_info["domain_id"],
-                "domain_name": sub_info["domain_name"],
-                "is_target": (sname_lower in explicit_targets)
-            }
-            nodes.append({"data": node_data, "classes": "is-target" if node_data["is_target"] else ""})
+            if sub_id in subdomains_to_spawn:
+                sname_lower = sub_info["name"].lower()
+                node_data = {
+                    "id": f"sub_{sub_id}",
+                    "label": sub_info["name"],
+                    "type": "subdomain",
+                    "name": sub_info["name"],
+                    "domain_id": sub_info["domain_id"],
+                    "domain_name": sub_info["domain_name"],
+                    "is_target": (sname_lower in explicit_targets)
+                }
+                nodes.append({"data": node_data, "classes": "is-target" if node_data["is_target"] else ""})
+                
+                parent_dom_id = sub_info["domain_id"]
+                edges.append({"data": {"id": f"e_dom_sub_{sub_id}", "source": f"dom_{parent_dom_id}", "target": f"sub_{sub_id}", "label": "HAS_SUBDOMAIN"}})
+
+        if root_target_node:
+            explore_leads = []
+            ip_stats = {}
+            cursor_ips = conn.execute("""
+                SELECT ip.id, ip.ip,
+                       COUNT(DISTINCT s.id) as service_count,
+                       COUNT(DISTINCT CASE WHEN s.sources LIKE '%masscan%' OR s.sources LIKE '%active%' THEN s.id END) as verified_service_count,
+                       COUNT(DISTINCT v.id) as vuln_count,
+                       MAX(CASE WHEN v.is_cisa_kev = 1 THEN 1 ELSE 0 END) as has_kev,
+                       COUNT(DISTINCT CASE WHEN v.is_cisa_kev = 1 THEN v.id END) as kev_count,
+                       COUNT(DISTINCT CASE WHEN v.severity = 'CRITICAL' THEN v.id END) as critical_count,
+                       COUNT(DISTINCT CASE WHEN v.severity = 'HIGH' THEN v.id END) as high_count,
+                       MAX(v.epss_score) as max_epss,
+                       COUNT(DISTINCT CASE WHEN v.epss_score >= 0.20 THEN v.id END) as high_epss_count,
+                       COUNT(DISTINCT e.id) as poc_count
+                FROM ip_addresses ip
+                LEFT JOIN services s ON ip.id = s.ip_id
+                LEFT JOIN vulnerabilities v ON ip.id = v.ip_id OR s.id = v.service_id
+                LEFT JOIN exploits e ON v.id = e.vulnerability_id
+                GROUP BY ip.id, ip.ip
+            """)
+            for row in cursor_ips.fetchall():
+                ip_id, ip, s_cnt, vs_cnt, v_cnt, has_kev, k_cnt, c_cnt, h_cnt, max_epss, h_epss_cnt, poc_cnt = row
+                max_epss = max_epss or 0.0
+                stats = {
+                    "service_count": s_cnt,
+                    "verified_service_count": vs_cnt,
+                    "vuln_count": v_cnt,
+                    "has_kev": bool(has_kev),
+                    "kev_count": k_cnt,
+                    "critical_count": c_cnt,
+                    "high_count": h_cnt,
+                    "max_epss": max_epss,
+                    "high_epss_count": h_epss_cnt,
+                    "poc_count": poc_cnt
+                }
+                ip_stats[ip_id] = stats
+                score = (k_cnt * 1000000) + (poc_cnt * 200000) + (h_epss_cnt * 100000) + (max_epss * 50000) + (c_cnt * 50000) + (h_cnt * 20000) + (vs_cnt * 5000) + (v_cnt * 1000) + (s_cnt * 100)
+                explore_leads.append({
+                    "id": f"ip_{ip_id}",
+                    "label": ip,
+                    "display_name": ip,
+                    "type": "ip",
+                    "three_d_score": score,
+                    **stats
+                })
             
-            parent_dom_id = sub_info["domain_id"]
-            edges.append({"data": {"id": f"e_dom_sub_{sub_id}", "source": f"dom_{parent_dom_id}", "target": f"sub_{sub_id}", "label": "HAS_SUBDOMAIN"}})
+            subdomain_stats = {}
+            for sub_id, sub_info in subdomain_info_map.items():
+                s_stats = {"service_count": 0, "verified_service_count": 0, "vuln_count": 0, "has_kev": False, "kev_count": 0, "critical_count": 0, "high_count": 0, "max_epss": 0.0, "high_epss_count": 0, "poc_count": 0}
+                ips = subdomain_to_ips.get(sub_id, set())
+                for ip_id in ips:
+                    if ip_id in ip_stats:
+                        st = ip_stats[ip_id]
+                        for k in ["service_count", "verified_service_count", "vuln_count", "kev_count", "critical_count", "high_count", "high_epss_count", "poc_count"]:
+                            s_stats[k] += st[k]
+                        s_stats["has_kev"] = s_stats["has_kev"] or st["has_kev"]
+                        s_stats["max_epss"] = max(s_stats["max_epss"], st["max_epss"])
+                subdomain_stats[sub_id] = s_stats
+                score = (s_stats["kev_count"] * 1000000) + (s_stats["poc_count"] * 200000) + (s_stats["high_epss_count"] * 100000) + (s_stats["max_epss"] * 50000) + (s_stats["critical_count"] * 50000) + (s_stats["high_count"] * 20000) + (s_stats["verified_service_count"] * 5000) + (s_stats["vuln_count"] * 1000) + (s_stats["service_count"] * 100)
+                explore_leads.append({
+                    "id": f"sub_{sub_id}",
+                    "label": sub_info["name"],
+                    "display_name": sub_info["name"],
+                    "type": "subdomain",
+                    "three_d_score": score,
+                    **s_stats
+                })
+
+            for domain_id, domain_name in domains_list:
+                d_stats = {"service_count": 0, "verified_service_count": 0, "vuln_count": 0, "has_kev": False, "kev_count": 0, "critical_count": 0, "high_count": 0, "max_epss": 0.0, "high_epss_count": 0, "poc_count": 0}
+                for ip_id in domain_to_ips.get(domain_id, set()):
+                    if ip_id in ip_stats:
+                        st = ip_stats[ip_id]
+                        for k in ["service_count", "verified_service_count", "vuln_count", "kev_count", "critical_count", "high_count", "high_epss_count", "poc_count"]:
+                            d_stats[k] += st[k]
+                        d_stats["has_kev"] = d_stats["has_kev"] or st["has_kev"]
+                        d_stats["max_epss"] = max(d_stats["max_epss"], st["max_epss"])
+                for sub_id, sub_info in subdomain_info_map.items():
+                    if sub_info["domain_id"] == domain_id:
+                        st = subdomain_stats.get(sub_id, {})
+                        if st:
+                            for k in ["service_count", "verified_service_count", "vuln_count", "kev_count", "critical_count", "high_count", "high_epss_count", "poc_count"]:
+                                d_stats[k] += st.get(k, 0)
+                            d_stats["has_kev"] = d_stats["has_kev"] or st.get("has_kev", False)
+                            d_stats["max_epss"] = max(d_stats["max_epss"], st.get("max_epss", 0.0))
+                
+                score = (d_stats["kev_count"] * 1000000) + (d_stats["poc_count"] * 200000) + (d_stats["high_epss_count"] * 100000) + (d_stats["max_epss"] * 50000) + (d_stats["critical_count"] * 50000) + (d_stats["high_count"] * 20000) + (d_stats["verified_service_count"] * 5000) + (d_stats["vuln_count"] * 1000) + (d_stats["service_count"] * 100)
+                explore_leads.append({
+                    "id": f"dom_{domain_id}",
+                    "label": domain_name,
+                    "display_name": domain_name,
+                    "type": "domain",
+                    "three_d_score": score,
+                    **d_stats
+                })
+            
+            root_target_node["data"]["explore_leads"] = explore_leads
+
 
         return nodes, edges, root_target_node, subdomain_to_ips, domain_to_ips, explicit_targets
     
@@ -349,7 +520,7 @@ class GraphBuilder:
 
         for ip_id, ip, org, country, city, region_code, asn, postal_code, latitude, longitude in ip_rows:
             fqdns = ip_to_fqdns.get(str(ip_id), [])
-            is_explicit_ip_tgt = bool(ip and ip.strip().lower() in targets_set)
+            is_explicit_ip_tgt = bool((ip and ip.strip().lower() in targets_set) or str(ip_id) in targets_set)
             node_dict = {
                 "data": {
                     "id": f"ip_{ip_id}",
@@ -378,7 +549,7 @@ class GraphBuilder:
             # 2. Strict Lineage Rule: NEVER connect to root if it has a visible FQDN parent (Domain/Subdomain).
             has_visible_fqdn_parent = str(ip_id) in ips_resolved_by_visible_fqdns
             # Always connect to target_root if the IP has no FQDN parent, so it doesn't float!
-            should_connect_root_to_ip = not has_visible_fqdn_parent
+            should_connect_root_to_ip = (is_explicit_ip_tgt or is_query_discovery) and not has_visible_fqdn_parent
 
             if root_target_node and should_connect_root_to_ip:
                 edges.append({
