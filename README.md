@@ -439,7 +439,9 @@ Explore the mapped attack surface visually via the interactive web application f
   - `⚠️ Awaiting Active Confirmation`: Dark slate hexagon with dashed amber border for passive recon findings.
   - `✅ Confirmed Active`: Canonical **Emerald Green** solid hexagon (`#27ae60`) once validated by Masscan active scan.
 - **Export Data Menu**: Instant one-click download of the active scan in **JSON**, **Markdown**, or standalone **HTML** format (with built-in print/PDF styling).
-- **Interactive Graph Visualization**: Full Cytoscape.js topology with multiple layout algorithms (`⚡ Force-Directed Adv`, `🌳 Hierarchical`, `🎯 Concentric`, `▦ Grid`).
+- **Interactive Graph Visualization**: Full Cytoscape.js topology with multiple layout algorithms (`⚡ Force-Directed Adv`, `🌳 Hierarchical`, `🎯 Concentric`, `▦ Grid`) featuring a minimalist, floating DetecTI logo as the root target node.
+- **Explore Leads Real-Time Search**: Instant search box inside the Explore Leads modal to quickly filter subdomains, IPs, and hostnames across massive attack surfaces.
+- **Cross-Session Target Hydration & Sanitization**: Strict CLI-level URL sanitization ensures pure FQDN ingestion (preventing duplicates), while explicit targets are dynamically rehydrated and auto-rendered across multiple dashboard sessions.
 - **Target Management & Active Scans**: In-app Masscan port scanner and Nuclei vulnerability runner with live stream logs.
 - **Official Documentation**: Direct integration to the official [DetecTI-CLI Documentation](https://detecti.com.br/docs/detecti-cli/en.html) from the header and sidebar.
 
