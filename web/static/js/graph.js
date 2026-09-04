@@ -2540,7 +2540,8 @@ class EASMDashboard {
         });
 
         // Core (Canvas) Right-Click Handler
-        this.cy.on('cxttap', 'core', (event) => {
+        this.cy.on('cxttap', (event) => {
+            if (event.target !== this.cy) return;
             const originalEvent = event.originalEvent;
             if (originalEvent) {
                 originalEvent.preventDefault();
