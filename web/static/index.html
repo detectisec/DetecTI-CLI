@@ -630,6 +630,9 @@
             <button onclick="window.dashboard.selectAllLeads()" style="flex: 1; padding: 8px; background: rgba(0, 240, 255, 0.15); color: #00f0ff; border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 4px; cursor: pointer; font-weight: bold;">Expand All Leads</button>
             <button onclick="window.dashboard.deselectAllLeads()" style="flex: 1; padding: 8px; background: rgba(255, 255, 255, 0.05); color: #ccc; border: 1px solid #444; border-radius: 4px; cursor: pointer;">Collapse All</button>
         </div>
+        <div style="padding: 10px 15px; border-bottom: 1px solid #333; background: #1e1e2d;">
+            <input type="text" id="explore-leads-search" placeholder="Search leads by name or IP..." onkeyup="window.dashboard.filterExploreLeads(this.value)" style="width: 100%; box-sizing: border-box; padding: 8px 12px; background: #252536; border: 1px solid #444; border-radius: 4px; color: #fff; font-size: 0.9rem;">
+        </div>
         <div id="floating-leads-content" style="padding: 15px; overflow-y: auto; flex: 1;">
             <div id="lead-list" class="lead-list">
                 <div class="lead-loading">Fetching leads...</div>

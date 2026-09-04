@@ -1416,6 +1416,21 @@ class EASMDashboard {
         this.renderLeadSelector();
         this.applyLeadFilter({ relayout: true });
     }
+    filterExploreLeads(query) {
+        const q = String(query || '').trim().toLowerCase();
+        const leadList = document.getElementById('lead-list');
+        if (!leadList) return;
+        
+        const items = leadList.querySelectorAll('.lead-item');
+        items.forEach(item => {
+            const textContent = item.textContent || item.innerText || '';
+            if (!q || textContent.toLowerCase().includes(q)) {
+                item.style.display = 'flex';
+            } else {
+                item.style.display = 'none';
+            }
+        });
+    }
 
     applyLeadFilter(options = {}) {
         if (!this.cy) return;
