@@ -1,6 +1,18 @@
+import logging
 import sqlite3
 import hashlib
 from pathlib import Path
+
+# Suppress passlib bcrypt warning
+try:
+    import bcrypt
+    if not hasattr(bcrypt, "__about__"):
+        class AboutMock:
+            __version__ = bcrypt.__version__
+        bcrypt.__about__ = AboutMock()
+except ImportError:
+    pass
+
 from passlib.context import CryptContext
 from pydantic_settings import BaseSettings
 
