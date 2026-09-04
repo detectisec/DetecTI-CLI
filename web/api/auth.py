@@ -12,7 +12,7 @@ from core.database.config_db import ConfigDBManager, verify_password
 # Secret key for JWT (can be stored in .env in production, using a default for simplicity if missing)
 SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "b33ff8f39572c0ecfc115b882650eb340e4f8d22797e887d2ef1c1d683701254")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
+ACCESS_TOKEN_EXPIRE_MINUTES = 30  # 30 minutos
 
 router = APIRouter(tags=["Auth"])
 
