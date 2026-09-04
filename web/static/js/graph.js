@@ -4701,10 +4701,10 @@ class EASMDashboard {
 
                 const allIps = Array.isArray(data.all_ips) ? data.all_ips : [];
                 if (allIps.length > 0) {
-                    const ipStrings = allIps.map(item => item.id.replace('ip_', ''));
+                    const ipStrings = allIps.map(item => item.ip);
                     const allMarked = ipStrings.length > 0 && ipStrings.every(ip => this.isTargetMarked(ip));
                     const ipListHtml = allIps.map(item => {
-                        const isMarked = this.isTargetMarked(item.id.replace('ip_', ''));
+                        const isMarked = this.isTargetMarked(item.ip);
                         const fqdnsBadges = (item.fqdns || []).slice(0, 3).map(f => `
                             <span style="font-family: monospace; font-size: 0.68rem; color: #4ecdc4; background: rgba(78, 205, 196, 0.12); border: 1px solid rgba(78, 205, 196, 0.25); border-radius: 3px; padding: 1px 4px;">${f}</span>
                         `).join('');
