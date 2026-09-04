@@ -254,7 +254,7 @@ class SetupManager:
             
             db_dir = self.root_dir / "data" / "dbs"
             db_dir.mkdir(parents=True, exist_ok=True)
-            config_db = ConfigDBManager(db_dir / "config.sqlite")
+            config_db = ConfigDBManager(self.root_dir / "data" / "config.sqlite")
             
             if config_db.user_exists("admin"):
                 change = self.console.input("  [yellow]Admin user already exists. Do you want to change the password? (y/N): [/yellow]").strip().lower()
