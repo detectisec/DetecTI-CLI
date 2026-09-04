@@ -2979,14 +2979,16 @@ class EASMDashboard {
                 }, animDuration + 20);
             } else {
                 // Physics-based layouts (cose, cose-bilkent, etc.)
+                // Force randomize: false so it uses current positions and just smoothly applies gravity/repulsion
                 const layout = target.layout({
                     ...layoutOptions,
                     name: layoutOptions.name || layoutName,
                     fit: true,
                     padding: 40,
+                    randomize: false,
                     animate: true,
-                    animationDuration: 650,
-                    animationEasing: 'ease-in-out'
+                    animationDuration: 1000,
+                    animationEasing: 'ease-out-cubic'
                 });
 
                 layout.on('layoutstop', () => {
