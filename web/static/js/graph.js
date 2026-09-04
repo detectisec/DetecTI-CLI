@@ -6507,8 +6507,8 @@ class EASMDashboard {
         try {
             const cleanTargets = [];
             for (const raw of targets) {
-                const clean = String(raw || '').replace(/^(ip_|dom_|sub_|target_)/, '').trim();
-                if (clean) {
+                const clean = this.normalizeTargetId(raw);
+                if (clean && clean !== 'root') {
                     this.markedTargets.add(clean);
                     if (!this.targetStatuses[clean]) {
                         this.targetStatuses[clean] = {
@@ -6564,7 +6564,7 @@ class EASMDashboard {
             const cleanTargets = [];
             for (const raw of targets) {
                 const clean = this.normalizeTargetId(raw);
-                if (clean) {
+                if (clean && clean !== 'root') {
                     this.markedTargets.delete(clean);
                     delete this.targetStatuses[clean];
                     cleanTargets.push(clean);
