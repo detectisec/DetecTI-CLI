@@ -60,7 +60,7 @@ class GraphBuilder:
 
             # Determine which IPs to spawn: only explicit targets or if in discovery mode
             # We NO LONGER spawn IPs just because a parent FQDN is marked.
-            is_discovery = target_type == "discovery"
+            is_discovery = (target_type == "discovery" or not explicit_targets)
             visible_ip_nodes = [n for n in ip_nodes if is_discovery or n["data"]["ip"].lower() in explicit_targets or str(n["data"]["id"]).replace("ip_", "").lower() in explicit_targets]
             
             connected_ip_ids = {n["data"]["id"] for n in visible_ip_nodes}
@@ -210,11 +210,7 @@ class GraphBuilder:
                         pass
                 
                 if not targets_list:
-                    cursor_ips = conn.execute("SELECT ip FROM ip_addresses ORDER BY ip")
-                    file_ips = [r[0] for r in cursor_ips.fetchall()]
-                    file_doms = [d[1] for d in domains_list]
-                    file_subs = [s[1] for s in all_subs_raw]
-                    targets_list = sorted(list(set(file_doms + file_subs + file_ips)))
+                    targets_list = []
             elif target_type in ("domain", "ip", "subdomain"):
                 targets_list = [target_name]
 
