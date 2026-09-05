@@ -3544,6 +3544,7 @@ class EASMDashboard {
                 this.loadSummary()
             ]);
             await this.loadGraph();
+            await this.loadTargetsList();
 
             if (loadingEl) {
                 loadingEl.style.display = 'none';
