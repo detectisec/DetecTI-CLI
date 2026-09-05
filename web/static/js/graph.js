@@ -526,25 +526,29 @@ class EASMDashboard {
             
             if (rootData && rootData.explore_leads && Array.isArray(rootData.explore_leads)) {
                 console.log(`Using pre-calculated explore_leads from backend: ${rootData.explore_leads.length} leads`);
-                this.leads = rootData.explore_leads.map(lead => ({
-                    id: lead.id,
-                    label: lead.label,
-                    display_name: lead.display_name || lead.label,
-                    type: lead.type,
-                    vuln_count: lead.vuln_count || 0,
-                    service_count: lead.service_count || 0,
-                    verified_service_count: lead.verified_service_count || 0,
-                    kev_count: lead.kev_count || 0,
-                    has_kev: lead.has_kev || false,
-                    critical_count: lead.critical_count || 0,
-                    has_critical: (lead.critical_count || 0) > 0,
-                    high_count: lead.high_count || 0,
-                    poc_count: lead.poc_count || 0,
-                    max_epss: lead.max_epss || 0,
-                    high_epss_count: lead.high_epss_count || 0,
-                    three_d_score: lead.three_d_score || 0,
-                    is_target: false // Explicit target state handled separately
-                }));
+                this.leads = rootData.explore_leads.map(lead => {
+                    const matchedNode = elements.nodes.find(n => (n.data || n).id === lead.id);
+                    const isTarget = matchedNode ? ((matchedNode.data || matchedNode).is_target === true || (matchedNode.data || matchedNode).is_target === 'true') : false;
+                    return {
+                        id: lead.id,
+                        label: lead.label,
+                        display_name: lead.display_name || lead.label,
+                        type: lead.type,
+                        vuln_count: lead.vuln_count || 0,
+                        service_count: lead.service_count || 0,
+                        verified_service_count: lead.verified_service_count || 0,
+                        kev_count: lead.kev_count || 0,
+                        has_kev: lead.has_kev || false,
+                        critical_count: lead.critical_count || 0,
+                        has_critical: (lead.critical_count || 0) > 0,
+                        high_count: lead.high_count || 0,
+                        poc_count: lead.poc_count || 0,
+                        max_epss: lead.max_epss || 0,
+                        high_epss_count: lead.high_epss_count || 0,
+                        three_d_score: lead.three_d_score || 0,
+                        is_target: isTarget
+                    };
+                });
             } else {
                 console.warn('explore_leads data not found, falling back to graph traversal...');
                 let leadNodes = elements.nodes.filter(node => {
