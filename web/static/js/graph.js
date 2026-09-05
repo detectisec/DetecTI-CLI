@@ -3322,7 +3322,7 @@ class EASMDashboard {
             if (databases.length === 0) {
                 listEl.innerHTML = `
                     <div style="padding: 0.8rem; text-align: center; color: var(--text-muted); font-size: 0.78rem;">
-                        No databases found in ./data/dbs/
+                        No databases found in ~/.detecti/data/dbs/
                     </div>
                 `;
                 return;

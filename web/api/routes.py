@@ -37,8 +37,13 @@ class DeleteDbRequest(BaseModel):
 
 @router.get("/databases")
 async def list_databases(request: Request) -> Dict:
-    """List all available SQLite databases in ./data/dbs/ and return the currently active one."""
-    data_dir = Path.cwd() / "data" / "dbs"
+    """List all available SQLite databases in DETECTI_HOME/data/dbs/ and return the currently active one."""
+    try:
+        from config import DETECTI_HOME
+    except ImportError:
+        DETECTI_HOME = Path.home() / ".detecti"
+        
+    data_dir = DETECTI_HOME / "data" / "dbs"
     databases = []
     
     current_db_path = getattr(request.app.state, "db_path", None)

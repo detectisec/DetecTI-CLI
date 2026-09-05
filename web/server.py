@@ -52,16 +52,22 @@ def create_app(db_path: str = None) -> FastAPI:
         allow_headers=["*"],
     )
     
+    # Load DETECTI_HOME for global path resolution
+    try:
+        from config import DETECTI_HOME
+    except ImportError:
+        DETECTI_HOME = Path.home() / ".detecti"
+
     # Check if db_path was provided or auto-discover from data/dbs/
     resolved_db_path = None
     if db_path:
         p = Path(db_path)
         if not p.is_absolute():
-            candidate = Path.cwd() / "data" / "dbs" / db_path
+            candidate = DETECTI_HOME / "data" / "dbs" / db_path
             if candidate.exists():
                 p = candidate
             elif not db_path.endswith(".sqlite"):
-                cand_ext = Path.cwd() / "data" / "dbs" / f"{db_path}.sqlite"
+                cand_ext = DETECTI_HOME / "data" / "dbs" / f"{db_path}.sqlite"
                 if cand_ext.exists():
                     p = cand_ext
         if p.exists():
@@ -69,13 +75,13 @@ def create_app(db_path: str = None) -> FastAPI:
     
     if not resolved_db_path:
         # Auto-discover databases in data/dbs/ - Prioritize example.com.sqlite as default if present
-        dbs_dir = Path.cwd() / "data" / "dbs"
+        dbs_dir = DETECTI_HOME / "data" / "dbs"
         if dbs_dir.exists():
             example_db = dbs_dir / "example.com.sqlite"
             if example_db.exists():
                 resolved_db_path = str(example_db.resolve())
             else:
-                existing_dbs = sorted(list(dbs_dir.glob("*.sqlite")))
+                existing_dbs = sorted(list(dbs_dir.glob("*.sqlite")), key=lambda x: x.stat().st_mtime, reverse=True)
                 if existing_dbs:
                     resolved_db_path = str(existing_dbs[0].resolve())
     
