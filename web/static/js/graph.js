@@ -529,6 +529,11 @@ class EASMDashboard {
                 this.leads = rootData.explore_leads.map(lead => {
                     const matchedNode = elements.nodes.find(n => (n.data || n).id === lead.id);
                     const isTarget = matchedNode ? ((matchedNode.data || matchedNode).is_target === true || (matchedNode.data || matchedNode).is_target === 'true') : false;
+                    
+                    if (isTarget) {
+                        console.log(`[DEBUG] Matched Target Lead: ${lead.id} | TargetName: ${lead.display_name || lead.label}`);
+                    }
+                    
                     return {
                         id: lead.id,
                         label: lead.label,
