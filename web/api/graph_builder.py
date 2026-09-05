@@ -178,20 +178,24 @@ class GraphBuilder:
         if target_name:
             if target_type == "file":
                 from pathlib import Path
+                try:
+                    from config import DETECTI_HOME
+                except ImportError:
+                    DETECTI_HOME = Path.home() / ".detecti"
                 clean_path = str(target_name).strip()
                 candidates = [
                     Path(clean_path),
-                    Path.cwd() / clean_path,
-                    Path.cwd() / "data" / clean_path,
-                    Path.cwd() / "data" / "targets" / clean_path,
-                    Path.cwd() / "tests" / clean_path,
+                    DETECTI_HOME / clean_path,
+                    DETECTI_HOME / "data" / clean_path,
+                    DETECTI_HOME / "data" / "targets" / clean_path,
+                    DETECTI_HOME / "tests" / clean_path,
                 ]
                 # Also try adding standard text extensions
                 if "." not in clean_path:
                     for ext in [".txt", ".scope", ".list"]:
                         candidates.append(Path(f"{clean_path}{ext}"))
-                        candidates.append(Path.cwd() / f"{clean_path}{ext}")
-                        candidates.append(Path.cwd() / "data" / f"{clean_path}{ext}")
+                        candidates.append(DETECTI_HOME / f"{clean_path}{ext}")
+                        candidates.append(DETECTI_HOME / "data" / f"{clean_path}{ext}")
 
                 file_obj = None
                 for cand in candidates:

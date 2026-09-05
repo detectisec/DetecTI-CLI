@@ -126,13 +126,13 @@ async def select_database(req: SelectDbRequest, request: Request) -> Dict:
 
 
 def _get_dbs_dir() -> Path:
-    base = Path.cwd() / "data" / "dbs"
-    if base.exists():
-        return base
-    repo_base = Path(__file__).resolve().parent.parent.parent / "data" / "dbs"
-    if repo_base.exists():
-        return repo_base
-    base.mkdir(parents=True, exist_ok=True)
+    try:
+        from config import DETECTI_HOME
+    except ImportError:
+        DETECTI_HOME = Path.home() / ".detecti"
+    base = DETECTI_HOME / "data" / "dbs"
+    if not base.exists():
+        base.mkdir(parents=True, exist_ok=True)
     return base
 
 
@@ -683,13 +683,13 @@ def _resolve_db_manager(request: Optional[Request] = None, db: Optional[Database
         if app_db and Path(app_db.db_path).exists():
             return app_db
     if target:
-        cand = Path.cwd() / "data" / "dbs" / f"{target}.sqlite"
+        cand = _get_dbs_dir() / f"{target}.sqlite"
         if cand.exists():
             return DatabaseManager(cand)
-        cand_raw = Path.cwd() / "data" / "dbs" / target
+        cand_raw = _get_dbs_dir() / target
         if cand_raw.exists():
             return DatabaseManager(cand_raw)
-    dbs_dir = Path.cwd() / "data" / "dbs"
+    dbs_dir = _get_dbs_dir()
     if dbs_dir.exists():
         dbs = sorted(list(dbs_dir.glob("*.sqlite")))
         if dbs:
@@ -800,7 +800,7 @@ async def start_active_scan(
                     active_db = DatabaseManager(Path(current_db_path))
                     request.app.state.db_manager = active_db
                 else:
-                    dbs_dir = Path.cwd() / "data" / "dbs"
+                    dbs_dir = _get_dbs_dir()
                     if dbs_dir.exists():
                         existing_dbs = list(dbs_dir.glob("*.sqlite"))
                         if existing_dbs:
@@ -1265,7 +1265,7 @@ async def start_nuclei_scan(
             active_db = DatabaseManager(Path(current_db_path))
             request.app.state.db_manager = active_db
         else:
-            dbs_dir = Path.cwd() / "data" / "dbs"
+            dbs_dir = _get_dbs_dir()
             if dbs_dir.exists():
                 existing_dbs = list(dbs_dir.glob("*.sqlite"))
                 if existing_dbs:
