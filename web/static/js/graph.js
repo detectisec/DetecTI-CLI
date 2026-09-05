@@ -3517,6 +3517,12 @@ class EASMDashboard {
             this.manualCollapsedClusters.clear();
             this._hasRunInitialLayout = false;
             this.searchTerm = '';
+            
+            // Clear Target Management state
+            this.markedTargets.clear();
+            this.targetStatuses = {};
+            this.renderTargetsList();
+            
             const searchInput = document.getElementById('search-input');
             if (searchInput) searchInput.value = '';
             this.closeInspector();
