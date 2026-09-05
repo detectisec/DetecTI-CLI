@@ -3544,7 +3544,7 @@ class EASMDashboard {
                 this.loadSummary()
             ]);
             await this.loadGraph();
-            await this.loadTargetsList();
+            await this.syncTargetsFromBackend();
 
             if (loadingEl) {
                 loadingEl.style.display = 'none';
@@ -3555,6 +3555,22 @@ class EASMDashboard {
             const loadingEl = document.getElementById('graph-loading');
             if (loadingEl) loadingEl.style.display = 'none';
             await this.loadDatabases();
+        }
+    }
+
+    async syncTargetsFromBackend() {
+        try {
+            const status = await window.api.getScanStatus();
+            if (status && Array.isArray(status.targets)) {
+                status.targets.forEach(t => {
+                    this.markedTargets.add(t.ip);
+                    this.targetStatuses[t.ip] = t;
+                });
+                this.updateTargetBadgeCount();
+                this.renderTargetsList();
+            }
+        } catch (e) {
+            console.warn('Failed to sync targets from backend:', e);
         }
     }
 
