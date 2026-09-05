@@ -210,7 +210,14 @@ class GraphBuilder:
                         pass
                 
                 if not targets_list:
-                    targets_list = []
+                    try:
+                        cursor_logs = conn.execute(
+                            "SELECT DISTINCT input_target FROM scan_logs WHERE input_target IS NOT NULL AND input_target != ?",
+                            (target_name,)
+                        )
+                        targets_list = [r[0].strip() for r in cursor_logs.fetchall() if r[0] and r[0].strip()]
+                    except Exception:
+                        pass
             elif target_type in ("domain", "ip", "subdomain"):
                 targets_list = [target_name]
 
