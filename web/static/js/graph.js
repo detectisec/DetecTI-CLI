@@ -3567,12 +3567,30 @@ class EASMDashboard {
         try {
             const status = await window.api.getScanStatus();
             if (status && Array.isArray(status.targets)) {
+                let changed = false;
                 status.targets.forEach(t => {
-                    this.markedTargets.add(t.ip);
+                    if (!this.markedTargets.has(t.ip)) {
+                        this.markedTargets.add(t.ip);
+                        changed = true;
+                    }
                     this.targetStatuses[t.ip] = t;
                 });
+                
                 this.updateTargetBadgeCount();
                 this.renderTargetsList();
+                
+                if (this.cy) {
+                    this.syncTargetNodesStyling();
+                }
+
+                if (changed && this.leads && this.leads.length > 0) {
+                    this.leads.forEach(lead => {
+                        if (this.isTargetMarked(lead.display_name || lead.label)) {
+                            this.selectedLeads.add(lead.id);
+                        }
+                    });
+                    this.applyLeadFilter({ relayout: true });
+                }
             }
         } catch (e) {
             console.warn('Failed to sync targets from backend:', e);
