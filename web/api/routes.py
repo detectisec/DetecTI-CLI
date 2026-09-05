@@ -117,8 +117,13 @@ async def select_database(req: SelectDbRequest, request: Request) -> Dict:
     request.app.state.db_manager = DatabaseManager(db_file)
     request.app.state.db_path = str(db_file.resolve())
     
+    # Clear global state associated with previous DB
+    _target_registry.clear()
+    
     return {
         "success": True,
+        "message": f"Switched to database: {safe_filename}",
+        "new_active_db": safe_filename,
         "current_db": db_file.name,
         "clean_name": db_file.stem,
         "db_path": str(db_file.resolve())
