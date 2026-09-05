@@ -38,12 +38,27 @@ def install_dependencies() -> None:
     if req_file.exists():
         print_step("Bootstrapping Python dependencies...")
         try:
-            # We use check_call to ensure it completes successfully before proceeding
-            subprocess.check_call(
+            # First attempt standard installation
+            result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", "-r", str(req_file)],
-                stdout=subprocess.DEVNULL, # Keep it clean unless there's an error
-                stderr=subprocess.STDOUT
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True
             )
+            
+            if result.returncode != 0:
+                if "externally-managed-environment" in result.stderr:
+                    # PEP 668 bypass for Debian/Kali/Ubuntu modern versions
+                    subprocess.check_call(
+                        [sys.executable, "-m", "pip", "install", "--break-system-packages", "-r", str(req_file)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.STDOUT
+                    )
+                else:
+                    print_error("Failed to install dependencies.")
+                    print(result.stderr)
+                    sys.exit(1)
+                    
             print_success("Core dependencies installed successfully.")
         except subprocess.CalledProcessError as e:
             print_error("Failed to install dependencies.")
