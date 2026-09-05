@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from rich.console import Console
 from rich.table import Table
 
+from config import DETECTI_HOME
 
 class SetupManager:
     """Manages prerequisite diagnostics and automated system setup for DetecTI-CLI."""
@@ -82,21 +83,21 @@ class SetupManager:
     def check_directories(self) -> Dict[str, Any]:
         """Ensure required operational directories exist."""
         dirs = [
-            self.root_dir / "data" / "dbs",
-            self.root_dir / "reports",
+            DETECTI_HOME / "data" / "dbs",
+            Path.cwd() / "reports",
         ]
         missing = [d for d in dirs if not d.exists()]
         return {
             "name": "Project Directories",
             "status": "Ready" if not missing else f"Missing {len(missing)} folders",
             "ok": len(missing) == 0,
-            "missing": [str(d.relative_to(self.root_dir)) for d in missing],
-            "message": "Operational directories (./data/dbs, ./reports) are configured." if not missing else f"Folders need creation: {', '.join([str(d.relative_to(self.root_dir)) for d in missing])}",
+            "missing": [str(d) for d in missing],
+            "message": "Operational directories (./data/dbs, ./reports) are configured." if not missing else f"Folders need creation: {', '.join([str(d) for d in missing])}",
         }
 
     def check_env_file(self) -> Dict[str, Any]:
         """Check if .env configuration file exists."""
-        env_path = self.root_dir / ".env"
+        env_path = DETECTI_HOME / ".env"
         exists = env_path.is_file()
         return {
             "name": "Environment Configuration (.env)",
@@ -202,7 +203,7 @@ class SetupManager:
 
     def check_demo_database(self) -> Dict[str, Any]:
         """Check default demo graph database."""
-        db_path = self.root_dir / "data" / "dbs" / "example.com.sqlite"
+        db_path = DETECTI_HOME / "data" / "dbs" / "example.com.sqlite"
         exists = db_path.is_file()
         return {
             "name": "Default Demo Graph Dataset",
@@ -244,7 +245,7 @@ class SetupManager:
         all_success = True
 
         # Step 0: Dashboard Admin Password Setup
-        self.console.print("🔐 [bold white]Step 0/7: Configuring DetecTIHound Dashboard Admin...[/bold white]")
+        self.console.print("🔐 [bold white]Step 0/8: Configuring DetecTIHound Dashboard Admin...[/bold white]")
         try:
             import getpass
             import sys
@@ -252,7 +253,7 @@ class SetupManager:
                 import hashlib
                 import re
                 jwt_secret = hashlib.sha256(password.encode('utf-8')).hexdigest()
-                env_path = self.root_dir / '.env'
+                env_path = DETECTI_HOME / '.env'
                 if env_path.exists():
                     with open(env_path, 'r') as f:
                         env_content = f.read()
@@ -271,9 +272,9 @@ class SetupManager:
             sys.path.insert(0, str(self.root_dir))
             from core.database.config_db import ConfigDBManager, get_password_hash
             
-            db_dir = self.root_dir / "data" / "dbs"
+            db_dir = DETECTI_HOME / "data" / "dbs"
             db_dir.mkdir(parents=True, exist_ok=True)
-            config_db = ConfigDBManager(self.root_dir / "data" / "config.sqlite")
+            config_db = ConfigDBManager(DETECTI_HOME / "data" / "config.sqlite")
             
             if config_db.user_exists("admin"):
                 change = self.console.input("  [yellow]Admin user already exists. Do you want to change the password? (y/N): [/yellow]").strip().lower()
@@ -311,26 +312,33 @@ class SetupManager:
             import traceback
             traceback.print_exc()
 
-        # Step 1: Create Directories
-        self.console.print("📁 [bold white]Step 1/7: Initializing project directories...[/bold white]")
-        for d in [self.root_dir / "data" / "dbs", self.root_dir / "reports"]:
+        # Step 1: Create Directories & Copy Demo DB
+        self.console.print("📁 [bold white]Step 1/8: Initializing project directories...[/bold white]")
+        for d in [DETECTI_HOME / "data" / "dbs", Path.cwd() / "reports"]:
             d.mkdir(parents=True, exist_ok=True)
+            
+        demo_db_src = self.root_dir / "data" / "dbs" / "example.com.sqlite"
+        demo_db_dst = DETECTI_HOME / "data" / "dbs" / "example.com.sqlite"
+        if demo_db_src.exists() and not demo_db_dst.exists():
+            shutil.copy2(demo_db_src, demo_db_dst)
+            self.console.print("  [green]✔ Demo database (example.com.sqlite) initialized.[/green]")
+            
         self.console.print("  [green]✔ Operational directories verified (data/dbs, reports).[/green]")
 
         # Step 2: Configure .env
-        self.console.print("\n⚙️ [bold white]Step 2/7: Checking environment configuration (.env)...[/bold white]")
-        env_file = self.root_dir / ".env"
+        self.console.print("\n⚙️ [bold white]Step 2/8: Checking environment configuration (.env)...[/bold white]")
+        env_file = DETECTI_HOME / ".env"
         env_example = self.root_dir / ".env.example"
         if not env_file.exists() and env_example.exists():
             shutil.copy(env_example, env_file)
-            self.console.print("  [green]✔ Created .env file from .env.example template.[/green]")
+            self.console.print(f"  [green]✔ Created .env file at {env_file} from template.[/green]")
         elif env_file.exists():
-            self.console.print("  [green]✔ Existing .env file detected and preserved.[/green]")
+            self.console.print(f"  [green]✔ Existing .env file detected at {env_file} and preserved.[/green]")
         else:
             self.console.print("  [yellow]⚠ No .env template found. Skipped.[/yellow]")
 
         # Step 3: Python dependencies check / install
-        self.console.print("\n🐍 [bold white]Step 3/7: Verifying Python dependencies...[/bold white]")
+        self.console.print("\n🐍 [bold white]Step 3/8: Verifying Python dependencies...[/bold white]")
         req_file = self.root_dir / "requirements.txt"
         dep_check = self.check_python_modules()
         if not dep_check["ok"] and req_file.exists():
@@ -345,7 +353,7 @@ class SetupManager:
             self.console.print("  [green]✔ All Python core dependencies are satisfied.[/green]")
 
         # Step 4: Masscan capabilities configuration
-        self.console.print("\n⚡ [bold white]Step 4/7: Configuring Masscan network capabilities...[/bold white]")
+        self.console.print("\n⚡ [bold white]Step 4/8: Configuring Masscan network capabilities...[/bold white]")
         masscan_bin = shutil.which("masscan")
         if masscan_bin:
             is_root = hasattr(os, "geteuid") and os.geteuid() == 0
@@ -371,7 +379,7 @@ class SetupManager:
             self.console.print("    [dim]Install on Linux with: sudo apt install -y masscan (or pacman/dnf)[/dim]")
 
         # Step 5: ExploitDB Cache Update
-        self.console.print("\n💣 [bold white]Step 5/7: Initializing ExploitDB vulnerability mapping...[/bold white]")
+        self.console.print("\n💣 [bold white]Step 5/8: Initializing ExploitDB vulnerability mapping...[/bold white]")
         try:
             from modules.exploitdb import ExploitDBModule
             ExploitDBModule.update_database()
@@ -380,7 +388,7 @@ class SetupManager:
             self.console.print(f"  [yellow]⚠ ExploitDB update notice: {exc}[/yellow]")
 
         # Step 6: Nuclei Templates Check
-        self.console.print("\n🛡️ [bold white]Step 6/7: Checking Nuclei vulnerability engine...[/bold white]")
+        self.console.print("\n🛡️ [bold white]Step 6/8: Checking Nuclei vulnerability engine...[/bold white]")
         nuclei_bin = shutil.which("nuclei")
         if nuclei_bin:
             try:
@@ -391,6 +399,55 @@ class SetupManager:
                 self.console.print("  [green]✔ Nuclei engine is active.[/green]")
         else:
             self.console.print("  [dim]Nuclei is optional and not currently installed.[/dim]")
+
+        # Step 7: Configure Global Executable & Install Source
+        self.console.print("\n🌍 [bold white]Step 7/8: Installing Source & Configuring Global Executable...[/bold white]")
+        try:
+            is_root = hasattr(os, "geteuid") and os.geteuid() == 0
+            if is_root:
+                bin_dir = Path("/usr/local/bin")
+                install_dir = Path("/opt/detecti-cli")
+            else:
+                bin_dir = Path.home() / ".local" / "bin"
+                install_dir = DETECTI_HOME / "app"
+            
+            if self.root_dir.resolve() == install_dir.resolve():
+                self.console.print(f"  [cyan]Running from installed location ({install_dir}). Skipping source copy.[/cyan]")
+            else:
+                self.console.print(f"  [cyan]Copying source code to {install_dir}...[/cyan]")
+                
+                # Remove old install dir if exists to ensure clean install
+                if install_dir.exists():
+                    shutil.rmtree(install_dir)
+                    
+                # Copy source code, ignoring unnecessary/heavy folders
+                shutil.copytree(
+                    self.root_dir,
+                    install_dir,
+                    ignore=shutil.ignore_patterns('.git', '__pycache__', 'node_modules', 'reports', '.pytest_cache')
+                )
+            
+            bin_dir.mkdir(parents=True, exist_ok=True)
+            wrapper_path = bin_dir / "detecti-cli"
+            
+            # The actual python script is now in the install_dir
+            target_script = install_dir / "cli.py"
+            
+            wrapper_content = f"""#!/usr/bin/env bash
+# DetecTI-CLI Global Wrapper
+python3 "{target_script}" "$@"
+"""
+            wrapper_path.write_text(wrapper_content)
+            # Make it executable (chmod +x)
+            wrapper_path.chmod(wrapper_path.stat().st_mode | 0o111)
+            
+            self.console.print(f"  [green]✔ Source installed securely in {install_dir}[/green]")
+            self.console.print(f"  [green]✔ Global executable created at {wrapper_path}[/green]")
+            if not is_root:
+                self.console.print(f"  [cyan]ℹ Make sure {bin_dir} is in your PATH.[/cyan]")
+        except Exception as exc:
+            self.console.print(f"  [red]✘ Failed to install source or create global executable: {exc}[/red]")
+            all_success = False
 
         self.console.print("\n[bold green]✅ DetecTI-CLI setup routine completed![/bold green]\n")
         return all_success

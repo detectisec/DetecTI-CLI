@@ -36,7 +36,7 @@ try:
 except (ImportError, ModuleNotFoundError):
     __version__ = "2.0.0"
 
-from config import settings
+from config import settings, DETECTI_HOME
 from core.engine import ThreatTrackEngine, DetectIEngine
 from modules.exploitdb import ExploitDBModule
 from reporters.html_reporter import HTMLReporter
@@ -67,8 +67,8 @@ def _banner_format_help(self, ctx, formatter):
 
 click.Command.format_help = _banner_format_help
 
-# Get the actual CLI name from sys.argv[0]
-cli_name = Path(sys.argv[0]).name if sys.argv else "detecti-cli"
+# Hardcode cli_name for global wrapper execution
+cli_name = "detecti-cli"
 
 app = typer.Typer(
     name=cli_name,
@@ -208,7 +208,7 @@ def scan_command(
             else:
                 db_name = target_to_db_name(target)
             
-            dbs_dir = Path.cwd() / "data" / "dbs"
+            dbs_dir = DETECTI_HOME / "data" / "dbs"
             dbs_dir.mkdir(parents=True, exist_ok=True)
             final_db_path = dbs_dir / db_name
             final_db_name = db_name
@@ -393,17 +393,6 @@ def config_check_command(
         )
 
 
-@app.command(name="setup")
-def setup_command() -> None:
-    """Automated initial installation and prerequisite configuration routine."""
-    print_banner()
-    from utils.setup import SetupManager
-    setup_mgr = SetupManager(console=console)
-    setup_mgr.run_automated_setup()
-
-    print_section_header("Verification Diagnostics")
-    checks = setup_mgr.check_all()
-    setup_mgr.render_diagnostics_table(checks)
 
     print_section_header("API Credentials Status")
     engine = ThreatTrackEngine()
@@ -585,7 +574,7 @@ def list_databases() -> None:
     """List all available EASM target SQLite databases in ./data/dbs/."""
     print_banner()
     
-    data_dir = Path.cwd() / "data" / "dbs"
+    data_dir = DETECTI_HOME / "data" / "dbs"
     if not data_dir.exists():
         print_warning("No databases directory found. Run a scan with --persist to create databases.")
         return
@@ -641,7 +630,7 @@ def version_command() -> None:
 
 def main() -> None:
     """Main CLI entry point."""
-    app()
+    app(prog_name="detecti-cli")
 
 
 if __name__ == "__main__":

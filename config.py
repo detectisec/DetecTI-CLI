@@ -9,6 +9,12 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+# Define the global base directory for DetecTI-CLI data
+custom_path = os.getenv("DETECTI_HOME", str(Path.home() / ".detecti"))
+DETECTI_HOME = Path(custom_path)
+DETECTI_HOME.mkdir(parents=True, exist_ok=True)
+
+
 def is_placeholder_key(val: Optional[str]) -> bool:
     """Check if a string represents an unconfigured placeholder or template value."""
     if not val or not isinstance(val, str):
@@ -50,6 +56,7 @@ def sanitize_api_key(val: Optional[str]) -> Optional[str]:
 def _find_legacy_api_key() -> Optional[str]:
     """Look for legacy API.txt file in working directory or package root."""
     candidate_paths = [
+        DETECTI_HOME / "API.txt",
         Path.cwd() / "API.txt",
         Path(__file__).resolve().parent / "API.txt",
         Path(__file__).resolve().parent.parent / "API.txt",
@@ -70,7 +77,7 @@ class Settings(BaseSettings):
     """DetecTI Application Settings."""
 
     model_config = SettingsConfigDict(
-        env_file=(".env", "detecti-cli/.env", "threattrack/.env"),
+        env_file=(str(DETECTI_HOME / ".env"), ".env", "detecti-cli/.env", "threattrack/.env"),
         env_file_encoding="utf-8",
         extra="ignore",
         env_prefix="DETECTI_",

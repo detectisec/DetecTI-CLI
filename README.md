@@ -287,12 +287,14 @@ flowchart TD
 ```bash
 git clone https://github.com/detectisec/DetecTI-CLI.git
 cd DetecTI-CLI
-chmod +x detecti-cli
 
-# Run automated setup
-# (Verifies prerequisites, installs dependencies, configures capabilities, 
-# and sets up your secure Web Dashboard admin credentials)
-./detecti-cli setup
+# Run the automated installer
+# (Bootstraps dependencies, configures capabilities, creates directories,
+# sets up your secure Web Dashboard admin credentials, and creates the global executable)
+python3 install.py
+
+# The command is now available globally! You can safely delete the cloned folder.
+detecti-cli --help
 ```
 
 ---
