@@ -454,7 +454,7 @@ Explore the mapped attack surface visually via the interactive web application f
 
 ```
 DetecTI-CLI/
-├── detecti-cli              # Typer & Rich Command Line Interface entrypoint
+├── cli.py                   # Typer & Rich Command Line Interface entrypoint
 ├── config.py                # Pydantic Settings, .env & Environment Loader
 ├── data/                    # Central Scan Data Directory
 │   └── dbs/                 # Persistent SQLite Attack Surface Databases (.sqlite)
@@ -476,6 +476,7 @@ DetecTI-CLI/
 │   ├── nvd.py               # NVD 2.0 (CVSS/CWE) + EPSS Probability + CISA KEV
 │   └── exploitdb.py         # ExploitDB (searchsploit) & GitHub PoC Collector
 ├── reporters/               # Report Generation Subsystem
+│   ├── csv_reporter.py      # Flat CSV Exporter for Spreadsheet Analysis
 │   ├── html_reporter.py     # Standalone Styled HTML Exporter (Browser & Print-Ready)
 │   ├── json_reporter.py     # Formatted JSON Exporter
 │   └── markdown_reporter.py # Executive Markdown Exporter
