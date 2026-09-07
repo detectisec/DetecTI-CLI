@@ -245,7 +245,7 @@ class SetupManager:
         all_success = True
 
         # Step 0: Dashboard Admin Password Setup
-        self.console.print("🔐 [bold white]Step 0/8: Configuring DetecTIHound Dashboard Admin...[/bold white]")
+        self.console.print("🔐 [bold white]Step 0/6: Configuring DetecTIHound Dashboard Admin...[/bold white]")
         try:
             import getpass
             import sys
@@ -313,7 +313,7 @@ class SetupManager:
             traceback.print_exc()
 
         # Step 1: Create Directories & Copy Demo DB
-        self.console.print("📁 [bold white]Step 1/8: Initializing project directories...[/bold white]")
+        self.console.print("📁 [bold white]Step 1/6: Initializing project directories...[/bold white]")
         for d in [DETECTI_HOME / "data" / "dbs", Path.cwd() / "reports"]:
             d.mkdir(parents=True, exist_ok=True)
             
@@ -326,19 +326,17 @@ class SetupManager:
         self.console.print("  [green]✔ Operational directories verified (data/dbs, reports).[/green]")
 
         # Step 2: Configure .env
-        self.console.print("\n⚙️ [bold white]Step 2/8: Checking environment configuration (.env)...[/bold white]")
+        self.console.print("\n⚙️ [bold white]Step 2/6: Checking environment configuration (.env)...[/bold white]")
         env_file = DETECTI_HOME / ".env"
-        env_example = self.root_dir / ".env.example"
-        if not env_file.exists() and env_example.exists():
-            shutil.copy(env_example, env_file)
-            self.console.print(f"  [green]✔ Created .env file at {env_file} from template.[/green]")
-        elif env_file.exists():
+        if env_file.exists():
             self.console.print(f"  [green]✔ Existing .env file detected at {env_file} and preserved.[/green]")
         else:
-            self.console.print("  [yellow]⚠ No .env template found. Skipped.[/yellow]")
+            env_content = "# DetecTI-CLI Configuration\n# Add your API Keys here for enhanced intelligence\nSHODAN_API_KEY=\nCENSYS_API_ID=\nCENSYS_API_SECRET=\nGITHUB_TOKEN=\n"
+            env_file.write_text(env_content)
+            self.console.print(f"  [green]✔ Created default .env file at {env_file}.[/green]")
 
         # Step 3: Python dependencies check / install
-        self.console.print("\n🐍 [bold white]Step 3/8: Verifying Python dependencies...[/bold white]")
+        self.console.print("\n🐍 [bold white]Step 3/6: Verifying Python dependencies...[/bold white]")
         req_file = self.root_dir / "requirements.txt"
         dep_check = self.check_python_modules()
         if not dep_check["ok"] and req_file.exists():
@@ -353,7 +351,7 @@ class SetupManager:
             self.console.print("  [green]✔ All Python core dependencies are satisfied.[/green]")
 
         # Step 4: Masscan capabilities configuration
-        self.console.print("\n⚡ [bold white]Step 4/8: Configuring Masscan network capabilities...[/bold white]")
+        self.console.print("\n⚡ [bold white]Step 4/6: Configuring Masscan network capabilities...[/bold white]")
         masscan_bin = shutil.which("masscan")
         if masscan_bin:
             is_root = hasattr(os, "geteuid") and os.geteuid() == 0
@@ -379,7 +377,7 @@ class SetupManager:
             self.console.print("    [dim]Install on Linux with: sudo apt install -y masscan (or pacman/dnf)[/dim]")
 
         # Step 5: ExploitDB Cache Update
-        self.console.print("\n💣 [bold white]Step 5/8: Initializing ExploitDB vulnerability mapping...[/bold white]")
+        self.console.print("\n💣 [bold white]Step 5/6: Initializing ExploitDB vulnerability mapping...[/bold white]")
         try:
             from modules.exploitdb import ExploitDBModule
             ExploitDBModule.update_database()
@@ -388,7 +386,7 @@ class SetupManager:
             self.console.print(f"  [yellow]⚠ ExploitDB update notice: {exc}[/yellow]")
 
         # Step 6: Nuclei Templates Check
-        self.console.print("\n🛡️ [bold white]Step 6/8: Checking Nuclei vulnerability engine...[/bold white]")
+        self.console.print("\n🛡️ [bold white]Step 6/6: Checking Nuclei vulnerability engine...[/bold white]")
         nuclei_bin = shutil.which("nuclei")
         if nuclei_bin:
             try:
@@ -400,54 +398,6 @@ class SetupManager:
         else:
             self.console.print("  [dim]Nuclei is optional and not currently installed.[/dim]")
 
-        # Step 7: Configure Global Executable & Install Source
-        self.console.print("\n🌍 [bold white]Step 7/8: Installing Source & Configuring Global Executable...[/bold white]")
-        try:
-            is_root = hasattr(os, "geteuid") and os.geteuid() == 0
-            if is_root:
-                bin_dir = Path("/usr/local/bin")
-                install_dir = Path("/opt/detecti-cli")
-            else:
-                bin_dir = Path.home() / ".local" / "bin"
-                install_dir = DETECTI_HOME / "app"
-            
-            if self.root_dir.resolve() == install_dir.resolve():
-                self.console.print(f"  [cyan]Running from installed location ({install_dir}). Skipping source copy.[/cyan]")
-            else:
-                self.console.print(f"  [cyan]Copying source code to {install_dir}...[/cyan]")
-                
-                # Remove old install dir if exists to ensure clean install
-                if install_dir.exists():
-                    shutil.rmtree(install_dir)
-                    
-                # Copy source code, ignoring unnecessary/heavy folders
-                shutil.copytree(
-                    self.root_dir,
-                    install_dir,
-                    ignore=shutil.ignore_patterns('.git', '__pycache__', 'node_modules', 'reports', '.pytest_cache')
-                )
-            
-            bin_dir.mkdir(parents=True, exist_ok=True)
-            wrapper_path = bin_dir / "detecti-cli"
-            
-            # The actual python script is now in the install_dir
-            target_script = install_dir / "cli.py"
-            
-            wrapper_content = f"""#!/usr/bin/env bash
-# DetecTI-CLI Global Wrapper
-python3 "{target_script}" "$@"
-"""
-            wrapper_path.write_text(wrapper_content)
-            # Make it executable (chmod +x)
-            wrapper_path.chmod(wrapper_path.stat().st_mode | 0o111)
-            
-            self.console.print(f"  [green]✔ Source installed securely in {install_dir}[/green]")
-            self.console.print(f"  [green]✔ Global executable created at {wrapper_path}[/green]")
-            if not is_root:
-                self.console.print(f"  [cyan]ℹ Make sure {bin_dir} is in your PATH.[/cyan]")
-        except Exception as exc:
-            self.console.print(f"  [red]✘ Failed to install source or create global executable: {exc}[/red]")
-            all_success = False
 
         self.console.print("\n[bold green]✅ DetecTI-CLI setup routine completed![/bold green]\n")
         return all_success
