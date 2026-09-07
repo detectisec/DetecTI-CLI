@@ -153,8 +153,8 @@ class SetupManager:
         if not nuclei_path:
             return {
                 "name": "Nuclei Vulnerability Scanner",
-                "status": "Optional / Not Installed",
-                "ok": True,  # Nuclei is optional but recommended
+                "status": "Not Installed",
+                "ok": False,
                 "installed": False,
                 "path": None,
                 "message": "Nuclei binary not found in PATH. Install to enable active vulnerability verification.",
