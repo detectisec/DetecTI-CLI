@@ -59,6 +59,12 @@ class ConfigDBManager:
             conn.commit()
             return cursor.rowcount > 0
 
+    def get_user(self, username: str):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("SELECT * FROM users WHERE username = ?", (username,))
+            return cursor.fetchone()
+
     def get_user_hash(self, username: str) -> str:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("SELECT password_hash FROM users WHERE username = ?", (username,))

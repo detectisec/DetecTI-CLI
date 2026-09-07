@@ -28,9 +28,8 @@ class Token(BaseModel):
     token_type: str
 
 def get_config_db():
-    from pathlib import Path
-    project_root = Path(__file__).parent.parent.parent
-    db_path = project_root / "data" / "config.sqlite"
+    from detecti.config import DETECTI_HOME
+    db_path = DETECTI_HOME / "data" / "config.sqlite"
     return ConfigDBManager(db_path)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
