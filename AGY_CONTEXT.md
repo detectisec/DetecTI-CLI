@@ -205,3 +205,12 @@ Esses rascunhos descartáveis devem ser sumariamente apagados após cumprirem su
 - **Single Source of Truth**: The project version is strictly controlled by `pyproject.toml` (`version = "X.Y.Z"`). 
 - The application runtime (`detecti-cli version`) dynamically reads this version using `importlib.metadata`. Never hardcode version strings in Python files.
 - When fixing bugs or pushing new features destined for PyPI, always bump the `version` field in `pyproject.toml` and instruct the user to create a matching GitHub Release (`vX.Y.Z`) to trigger the deployment.
+
+### PyPI Packaging & Import Architecture (detecti namespace)
+- **Module Restructure**: The codebase operates exclusively as a unified pip package under the `detecti` namespace. Absolute internal imports MUST strictly use `from detecti.*` (e.g. `from detecti.core.database...`). This includes all **deferred or indented imports** inside function blocks to avoid `ModuleNotFoundError`.
+- **Legacy Files Eradicated**: `install.py`, `.env.example`, and manual source copying to `/opt/detecti-cli` are deprecated and removed. The `pyproject.toml` natively handles creating the CLI entrypoint `/usr/local/bin/detecti-cli` securely during pip installation.
+- **State & Data Paths**: Application state, configuration, and SQLite targets live permanently in `~/.detecti/` (i.e. `DETECTI_HOME`). The codebase must never use `Path(__file__)` traversal to reach `.env` or `config.sqlite`, as the module resides read-only in system `dist-packages/`.
+
+### Password Hashing (bcrypt vs passlib)
+- **Zero Passlib Tolerance**: The `passlib` library is banned and permanently removed from dependencies due to its critical `detect_wrap_bug` incompatibility with modern `bcrypt >= 4.1.0`. All password hashing must securely use the pure standard Python `bcrypt` library (`gensalt()`, `hashpw()`, `checkpw()`).
+
