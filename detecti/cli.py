@@ -98,7 +98,7 @@ def target_to_db_name(target: str) -> str:
         return f"{base}.sqlite"
 
     try:
-        from core.engine import ThreatTrackEngine
+        from detecti.core.engine import ThreatTrackEngine
         engine = ThreatTrackEngine()
         meta = engine.parse_target_metadata(t)
         clean_target = meta.get("clean_target") or t
@@ -204,7 +204,7 @@ def scan_command(
     final_db_name = None
     if not is_cve:
         try:
-            from core.database.storage import DatabaseManager
+            from detecti.core.database.storage import DatabaseManager
             if create_db:
                 db_name = create_db if create_db.endswith('.sqlite') else f"{create_db}.sqlite"
             else:
@@ -258,7 +258,7 @@ def scan_command(
 
             # Automatically launch DetecTIHound WebGUI (only if not already running)
             try:
-                from web.process_manager import WebServerManager
+                from detecti.web.process_manager import WebServerManager
                 
                 ws_manager = WebServerManager()
                 host = "0.0.0.0"
@@ -368,7 +368,7 @@ def config_check_command(
     """Check prerequisites, API keys, environment health, or run automated setup."""
     print_banner()
 
-    from utils.setup import SetupManager
+    from detecti.utils.setup import SetupManager
     setup_mgr = SetupManager(console=console)
 
     if setup:
@@ -454,7 +454,7 @@ def start_server(
         return
     
     try:
-        from web.process_manager import WebServerManager
+        from detecti.web.process_manager import WebServerManager
         
         manager = WebServerManager()
         
@@ -509,7 +509,7 @@ def server_status() -> None:
         return
     
     try:
-        from web.process_manager import WebServerManager
+        from detecti.web.process_manager import WebServerManager
         from rich.table import Table
         
         manager = WebServerManager()
@@ -563,7 +563,7 @@ def stop_server() -> None:
         return
     
     try:
-        from web.process_manager import WebServerManager
+        from detecti.web.process_manager import WebServerManager
         
         manager = WebServerManager()
         
@@ -615,7 +615,7 @@ def list_databases() -> None:
         # Try to get target from database
         target = "Unknown"
         try:
-            from core.database.storage import DatabaseManager
+            from detecti.core.database.storage import DatabaseManager
             db_manager = DatabaseManager(db_file)
             stats = db_manager.get_summary_stats()
             if 'target' in stats:

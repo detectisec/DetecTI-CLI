@@ -423,7 +423,7 @@ async def export_graph_data(
                 }
             )
         elif format == "csv":
-            from reporters.csv_reporter import CSVReporter
+            from detecti.reporters.csv_reporter import CSVReporter
             csv_content = CSVReporter.generate(scan_result)
             filename = f"detecti_{safe_target}_{timestamp}.csv"
             return Response(

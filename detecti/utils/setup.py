@@ -270,7 +270,7 @@ class SetupManager:
                         f.write(f'JWT_SECRET_KEY={jwt_secret}\n')
             import os
             sys.path.insert(0, str(self.root_dir))
-            from core.database.config_db import ConfigDBManager, get_password_hash
+            from detecti.core.database.config_db import ConfigDBManager, get_password_hash
             
             db_dir = DETECTI_HOME / "data" / "dbs"
             db_dir.mkdir(parents=True, exist_ok=True)
@@ -379,7 +379,7 @@ class SetupManager:
         # Step 5: ExploitDB Cache Update
         self.console.print("\n💣 [bold white]Step 5/6: Initializing ExploitDB vulnerability mapping...[/bold white]")
         try:
-            from modules.exploitdb import ExploitDBModule
+            from detecti.modules.exploitdb import ExploitDBModule
             ExploitDBModule.update_database()
             self.console.print("  [green]✔ ExploitDB mapping database initialized & updated.[/green]")
         except Exception as exc:
