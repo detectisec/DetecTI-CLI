@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "detecti-cli"
-version = "2.0.0"
+version = "2.0.1"
 description = "Modern Attack Surface Management & Threat Intelligence Engine"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -47,6 +47,14 @@ dependencies = [
     "rich>=13.7.0",
     "shodan>=1.31.0",
     "cve-searchsploit>=0.3.0",
+    "requests>=2.31.0",
+    "sqlalchemy>=2.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "psutil>=5.9.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-jose[cryptography]>=3.3.0",
+    "python-multipart>=0.0.6",
 ]
 
 [project.optional-dependencies]
