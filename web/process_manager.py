@@ -123,6 +123,19 @@ class WebServerManager:
     
     def start_server(self, db_path: Optional[str] = None, host: str = "127.0.0.1", port: int = 8000) -> bool:
         """Start web server in background process."""
+        # Check if user wants to override host/port via .webserver.json
+        if self.state_file.exists():
+            try:
+                import json
+                state = json.loads(self.state_file.read_text(encoding="utf-8"))
+                if not self.is_running():
+                    if "host" in state and host == "127.0.0.1":
+                        host = state["host"]
+                    if "port" in state and port == 8000:
+                        port = state["port"]
+            except Exception:
+                pass
+                
         if self.is_running():
             return False  # Already running
         
