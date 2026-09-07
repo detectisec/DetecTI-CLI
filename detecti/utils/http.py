@@ -8,7 +8,7 @@ import random
 import time
 from typing import Any, Dict, Optional
 import httpx
-from config import settings
+from detecti.config import settings
 
 logger = logging.getLogger("detecti.http")
 

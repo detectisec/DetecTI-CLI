@@ -7,7 +7,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from jose import JWTError, jwt
 
-from core.database.config_db import ConfigDBManager, verify_password
+from detecti.core.database.config_db import ConfigDBManager, verify_password
 
 from dotenv import load_dotenv
 load_dotenv()

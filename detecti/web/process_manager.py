@@ -16,7 +16,7 @@ except ImportError:
     psutil = None
     PSUTIL_AVAILABLE = False
 
-from config import DETECTI_HOME
+from detecti.config import DETECTI_HOME
 
 
 class WebServerManager:

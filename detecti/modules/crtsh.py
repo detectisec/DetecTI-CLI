@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 import re
 from typing import Any, Dict, List, Optional, Set
-from config import settings
-from core.models import Finding, FindingType
-from modules.base import BaseModule
+from detecti.config import settings
+from detecti.core.models import Finding, FindingType
+from detecti.modules.base import BaseModule
 
 logger = logging.getLogger("detecti.crtsh")
 

@@ -1,18 +1,18 @@
 """DetecTI-CLI intelligence and data collection modules package."""
 
-from modules.base import BaseModule
-from modules.censys import (
+from detecti.modules.base import BaseModule
+from detecti.modules.censys import (
     CensysAPIError,
     CensysAuthError,
     CensysModule,
     CensysPlatformClient,
     CensysRateLimitError,
 )
-from modules.crtsh import CrtshModule
-from modules.exploitdb import ExploitDBModule
-from modules.nvd import NVDModule
-from modules.reverse_whois import ReverseWhoisModule
-from modules.shodan import ShodanModule
+from detecti.modules.crtsh import CrtshModule
+from detecti.modules.exploitdb import ExploitDBModule
+from detecti.modules.nvd import NVDModule
+from detecti.modules.reverse_whois import ReverseWhoisModule
+from detecti.modules.shodan import ShodanModule
 
 __all__ = [
     "BaseModule",

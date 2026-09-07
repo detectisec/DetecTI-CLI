@@ -11,16 +11,16 @@ import uuid
 from typing import Any, Dict, List, Optional
 import requests
 
-from config import settings
-from core.models import (
+from detecti.config import settings
+from detecti.core.models import (
     Finding,
     FindingType,
     HostInfoData,
     PortData,
     VulnerabilityData,
 )
-from modules.base import BaseModule
-from utils.http import AsyncHTTPClient, http_client
+from detecti.modules.base import BaseModule
+from detecti.utils.http import AsyncHTTPClient, http_client
 
 logger = logging.getLogger("detecti.censys")
 

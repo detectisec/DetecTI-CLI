@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any, Dict, List, Optional, Set
-from config import settings
-from core.models import (
+from detecti.config import settings
+from detecti.core.models import (
     CISAKEVData,
     EPSSData,
     Finding,
@@ -14,7 +14,7 @@ from core.models import (
     SeverityLevel,
     VulnerabilityData,
 )
-from modules.base import BaseModule
+from detecti.modules.base import BaseModule
 
 logger = logging.getLogger("detecti.nvd")
 

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from core.models import (
+from detecti.core.models import (
     CISAKEVData,
     EPSSData,
     ExploitData,

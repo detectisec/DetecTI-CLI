@@ -24,11 +24,11 @@ except ImportError:
     class HTTPException(Exception):
         pass
 
-from core.database.storage import DatabaseManager
-from web.api.routes import router as api_router
-from web.api.auth import router as auth_router, get_current_user
+from detecti.core.database.storage import DatabaseManager
+from detecti.web.api.routes import router as api_router
+from detecti.web.api.auth import router as auth_router, get_current_user
 from jose import jwt, JWTError
-from web.api.auth import SECRET_KEY, ALGORITHM, get_config_db
+from detecti.web.api.auth import SECRET_KEY, ALGORITHM, get_config_db
 
 
 def create_app(db_path: str = None) -> FastAPI:

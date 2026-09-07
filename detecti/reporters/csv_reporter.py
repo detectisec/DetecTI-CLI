@@ -3,7 +3,7 @@
 import csv
 import io
 from pathlib import Path
-from core.models import ScanResult
+from detecti.core.models import ScanResult
 
 class CSVReporter:
     """Exports ScanResult to CSV."""

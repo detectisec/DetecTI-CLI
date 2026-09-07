@@ -2,7 +2,7 @@
 
 import sqlite3
 from typing import Dict, List, Optional, Set
-from core.database.storage import DatabaseManager
+from detecti.core.database.storage import DatabaseManager
 
 
 class GraphBuilder:

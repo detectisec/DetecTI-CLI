@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
-from core.models import Finding
-from utils.http import AsyncHTTPClient, http_client
+from detecti.core.models import Finding
+from detecti.utils.http import AsyncHTTPClient, http_client
 
 
 class BaseModule(ABC):

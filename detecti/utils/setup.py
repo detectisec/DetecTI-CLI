@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from rich.console import Console
 from rich.table import Table
 
-from config import DETECTI_HOME
+from detecti.config import DETECTI_HOME
 
 class SetupManager:
     """Manages prerequisite diagnostics and automated system setup for DetecTI-CLI."""

@@ -12,9 +12,9 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 import httpx
 import tldextract
-from config import settings
+from detecti.config import settings
 
-from core.models import (
+from detecti.core.models import (
     Finding,
     FindingType,
     HostInfoData,
@@ -24,14 +24,14 @@ from core.models import (
     SeverityLevel,
     VulnerabilityData,
 )
-from modules.base import BaseModule
-from modules.censys import CensysModule
-from modules.crtsh import CrtshModule
-from modules.exploitdb import ExploitDBModule
-from modules.nvd import NVDModule
-from modules.reverse_whois import ReverseWhoisModule
-from modules.shodan import ShodanModule
-from utils.http import AsyncHTTPClient, http_client
+from detecti.modules.base import BaseModule
+from detecti.modules.censys import CensysModule
+from detecti.modules.crtsh import CrtshModule
+from detecti.modules.exploitdb import ExploitDBModule
+from detecti.modules.nvd import NVDModule
+from detecti.modules.reverse_whois import ReverseWhoisModule
+from detecti.modules.shodan import ShodanModule
+from detecti.utils.http import AsyncHTTPClient, http_client
 
 logger = logging.getLogger("detecti.engine")
 

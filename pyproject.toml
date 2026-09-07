@@ -58,9 +58,12 @@ dev = [
 ]
 
 [project.scripts]
-detecti = "cli:app"
-detecti-cli = "cli:app"
+detecti = "detecti.cli:app"
+detecti-cli = "detecti.cli:app"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["detecti"]

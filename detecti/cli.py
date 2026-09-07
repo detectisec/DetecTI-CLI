@@ -36,14 +36,14 @@ try:
 except (ImportError, ModuleNotFoundError):
     __version__ = "2.0.0"
 
-from config import settings, DETECTI_HOME
-from core.engine import ThreatTrackEngine, DetectIEngine
-from modules.exploitdb import ExploitDBModule
-from reporters.html_reporter import HTMLReporter
-from reporters.json_reporter import JSONReporter
-from reporters.markdown_reporter import MarkdownReporter
-from reporters.csv_reporter import CSVReporter
-from utils.logger import (
+from detecti.config import settings, DETECTI_HOME
+from detecti.core.engine import ThreatTrackEngine, DetectIEngine
+from detecti.modules.exploitdb import ExploitDBModule
+from detecti.reporters.html_reporter import HTMLReporter
+from detecti.reporters.json_reporter import JSONReporter
+from detecti.reporters.markdown_reporter import MarkdownReporter
+from detecti.reporters.csv_reporter import CSVReporter
+from detecti.utils.logger import (
     console,
     get_real_ip,
     print_banner,

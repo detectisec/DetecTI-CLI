@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, List, Set
-from core.models import FindingType, ScanResult, SeverityLevel
+from detecti.core.models import FindingType, ScanResult, SeverityLevel
 
 
 class MarkdownReporter:

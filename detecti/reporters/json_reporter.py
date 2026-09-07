@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Optional
-from core.models import ScanResult
+from detecti.core.models import ScanResult
 
 
 class JSONReporter:

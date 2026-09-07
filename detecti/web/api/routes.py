@@ -13,10 +13,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.requests import Request
 from pydantic import BaseModel
 
-from core.database.storage import DatabaseManager
-from reporters.html_reporter import HTMLReporter
-from reporters.json_reporter import JSONReporter
-from reporters.markdown_reporter import MarkdownReporter
+from detecti.core.database.storage import DatabaseManager
+from detecti.reporters.html_reporter import HTMLReporter
+from detecti.reporters.json_reporter import JSONReporter
+from detecti.reporters.markdown_reporter import MarkdownReporter
 from .graph_builder import GraphBuilder
 
 router = APIRouter()
@@ -453,14 +453,14 @@ async def export_graph_data(
 # Target Management & Active Scan Endpoints
 # ----------------------------------------------------------------------
 
-from modules.masscan import (
+from detecti.modules.masscan import (
     MasscanRunner,
     build_port_ranges_excluding,
     filter_ports_excluding,
     parse_port_spec_to_set,
     calculate_dynamic_timeout,
 )
-from modules.nuclei import NucleiRunner
+from detecti.modules.nuclei import NucleiRunner
 
 # In-memory target registry and running tasks tracking
 _target_registry: Dict[str, Dict] = {}

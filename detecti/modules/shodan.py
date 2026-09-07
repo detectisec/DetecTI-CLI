@@ -6,15 +6,15 @@ import asyncio
 import ipaddress
 import logging
 from typing import Any, Dict, List, Optional, Set
-from config import settings
-from core.models import (
+from detecti.config import settings
+from detecti.core.models import (
     Finding,
     FindingType,
     HostInfoData,
     PortData,
     VulnerabilityData,
 )
-from modules.base import BaseModule
+from detecti.modules.base import BaseModule
 
 logger = logging.getLogger("detecti.shodan")
 

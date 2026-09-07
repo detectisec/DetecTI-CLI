@@ -16,8 +16,8 @@ try:
 except ImportError:
     MARKDOWN_LIB_AVAILABLE = False
 
-from core.models import ScanResult
-from reporters.markdown_reporter import MarkdownReporter
+from detecti.core.models import ScanResult
+from detecti.reporters.markdown_reporter import MarkdownReporter
 
 
 class HTMLReporter:
