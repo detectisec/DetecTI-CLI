@@ -387,7 +387,7 @@ async def get_assets(db: Optional[DatabaseManager] = Depends(get_db_manager)) ->
 
 @router.get("/export")
 async def export_graph_data(
-    format: str = Query("json", pattern="^(json|markdown|md|html)$"),
+    format: str = Query("json", pattern="^(json|markdown|md|html|csv)$"),
     db: Optional[DatabaseManager] = Depends(get_db_manager)
 ):
     """Export current scan results in JSON, Markdown or HTML format, matching CLI export structure."""
@@ -418,6 +418,17 @@ async def export_graph_data(
             return Response(
                 content=html_content,
                 media_type="text/html; charset=utf-8",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"'
+                }
+            )
+        elif format == "csv":
+            from reporters.csv_reporter import CSVReporter
+            csv_content = CSVReporter.generate(scan_result)
+            filename = f"detecti_{safe_target}_{timestamp}.csv"
+            return Response(
+                content=csv_content,
+                media_type="text/csv; charset=utf-8",
                 headers={
                     "Content-Disposition": f'attachment; filename="{filename}"'
                 }

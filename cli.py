@@ -42,6 +42,7 @@ from modules.exploitdb import ExploitDBModule
 from reporters.html_reporter import HTMLReporter
 from reporters.json_reporter import JSONReporter
 from reporters.markdown_reporter import MarkdownReporter
+from reporters.csv_reporter import CSVReporter
 from utils.logger import (
     console,
     get_real_ip,
@@ -131,13 +132,13 @@ def scan_command(
         "table",
         "-o",
         "--format",
-        help="Output report format: table, json, markdown, html, all",
+        help="Output report format: table, json, markdown, html, csv, all",
     ),
     output_file: Optional[Path] = typer.Option(
         None,
         "-f",
         "--output-file",
-        help="Custom file path to export the report (e.g., report.json, report.md, or report.html)",
+        help="Custom file path to export the report (e.g., report.json, report.md, report.html, or report.csv)",
     ),
     output_dir: Optional[Path] = typer.Option(
         None,
@@ -298,6 +299,7 @@ def scan_command(
     export_json = fmt in ("json", "all") or (output_file and output_file.suffix == ".json")
     export_md = fmt in ("markdown", "md", "all") or (output_file and output_file.suffix in (".md", ".markdown"))
     export_html = fmt in ("html", "all") or (output_file and output_file.suffix in (".html", ".htm"))
+    export_csv = fmt in ("csv", "all") or (output_file and output_file.suffix == ".csv")
 
     # JSON Export
     if export_json:
@@ -308,6 +310,16 @@ def scan_command(
         )
         JSONReporter.save(result, json_path)
         print_success(f"JSON report saved to: [bold underline]{json_path.resolve()}[/bold underline]")
+
+    # CSV Export
+    if export_csv:
+        csv_path = (
+            output_file
+            if output_file and output_file.suffix == ".csv"
+            else save_dir / f"detecti_{safe_target}_{timestamp}.csv"
+        )
+        CSVReporter.save(result, csv_path)
+        print_success(f"CSV report saved to: [bold underline]{csv_path.resolve()}[/bold underline]")
 
     # Markdown Export
     if export_md:

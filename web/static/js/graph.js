@@ -3253,6 +3253,7 @@ class EASMDashboard {
         const exportItemJson = document.getElementById('export-item-json');
         const exportItemMd = document.getElementById('export-item-md');
         const exportItemHtml = document.getElementById('export-item-html');
+        const exportItemCsv = document.getElementById('export-item-csv');
 
         if (btnExportDropdown && exportDropdownWrapper) {
             btnExportDropdown.addEventListener('click', (e) => {
@@ -3289,6 +3290,13 @@ class EASMDashboard {
             exportItemHtml.addEventListener('click', () => {
                 if (exportDropdownWrapper) exportDropdownWrapper.classList.remove('active');
                 this.triggerExport('html');
+            });
+        }
+
+        if (exportItemCsv) {
+            exportItemCsv.addEventListener('click', () => {
+                if (exportDropdownWrapper) exportDropdownWrapper.classList.remove('active');
+                this.triggerExport('csv');
             });
         }
     }
