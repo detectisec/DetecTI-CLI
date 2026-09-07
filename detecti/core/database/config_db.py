@@ -1,28 +1,18 @@
 import logging
 import sqlite3
 import hashlib
+import bcrypt
 from pathlib import Path
 
-# Suppress passlib bcrypt warning
-try:
-    import bcrypt
-    if not hasattr(bcrypt, "__about__"):
-        class AboutMock:
-            __version__ = bcrypt.__version__
-        bcrypt.__about__ = AboutMock()
-except ImportError:
-    pass
-
-from passlib.context import CryptContext
-from pydantic_settings import BaseSettings
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    except Exception:
+        return False
 
 class ConfigDBManager:
     def __init__(self, db_path: Path):
@@ -43,31 +33,34 @@ class ConfigDBManager:
             ''')
             conn.commit()
 
-    def create_user(self, username: str, password_hash: str, role: str = 'admin'):
+    def user_exists(self, username: str) -> bool:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+            return cursor.fetchone() is not None
+
+    def create_user(self, username: str, password_hash: str, role: str = "admin") -> bool:
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute('''
-                    INSERT INTO users (username, password_hash, role)
-                    VALUES (?, ?, ?)
-                ''', (username, password_hash, role))
+                conn.execute(
+                    "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+                    (username, password_hash, role)
+                )
                 conn.commit()
-                return True
+            return True
         except sqlite3.IntegrityError:
             return False
 
-    def update_user_password(self, username: str, password_hash: str):
+    def update_user_password(self, username: str, new_password_hash: str) -> bool:
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                UPDATE users SET password_hash = ? WHERE username = ?
-            ''', (password_hash, username))
+            cursor = conn.execute(
+                "UPDATE users SET password_hash = ? WHERE username = ?",
+                (new_password_hash, username)
+            )
             conn.commit()
+            return cursor.rowcount > 0
 
-    def get_user(self, username: str):
+    def get_user_hash(self, username: str) -> str:
         with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute("SELECT * FROM users WHERE username = ?", (username,))
-            return cursor.fetchone()
-
-    def user_exists(self, username: str) -> bool:
-        return self.get_user(username) is not None
-
+            cursor = conn.execute("SELECT password_hash FROM users WHERE username = ?", (username,))
+            row = cursor.fetchone()
+            return row[0] if row else None
