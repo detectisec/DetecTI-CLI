@@ -31,10 +31,11 @@ def _compat_make_metavar(self, ctx=None):
 
 click.Option.make_metavar = _compat_make_metavar
 
+import importlib.metadata
 try:
-    from __init__ import __version__
-except (ImportError, ModuleNotFoundError):
-    __version__ = "2.0.0"
+    __version__ = importlib.metadata.version("detecti-cli")
+except importlib.metadata.PackageNotFoundError:
+    __version__ = "dev"
 
 from detecti.config import settings, DETECTI_HOME
 from detecti.core.engine import ThreatTrackEngine, DetectIEngine
