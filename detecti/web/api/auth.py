@@ -10,7 +10,8 @@ from jose import JWTError, jwt
 from detecti.core.database.config_db import ConfigDBManager, verify_password
 
 from dotenv import load_dotenv
-load_dotenv()
+from detecti.config import DETECTI_HOME
+load_dotenv(DETECTI_HOME / ".env")
 
 # Secret key for JWT
 SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
