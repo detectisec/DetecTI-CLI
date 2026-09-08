@@ -12,8 +12,14 @@ def check_for_updates(current_version: str) -> None:
         try:
             data = json.loads(cache_file.read_text())
             if time.time() - data.get("last_check", 0) < 43200: # 12 hours
-                if data.get("newer_version"):
-                    _print_update_warning(current_version, data["newer_version"])
+                cached_newer = data.get("newer_version")
+                if cached_newer:
+                    from packaging.version import parse, InvalidVersion
+                    try:
+                        if parse(cached_newer) > parse(current_version):
+                            _print_update_warning(current_version, cached_newer)
+                    except InvalidVersion:
+                        pass
                 return
         except Exception:
             pass
