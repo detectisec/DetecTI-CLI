@@ -88,6 +88,18 @@ hound_app = typer.Typer(
 )
 app.add_typer(hound_app, name="hound")
 
+@app.callback(invoke_without_command=True)
+def global_callback(ctx: typer.Context):
+    """Global callback to execute logic before subcommands."""
+    # Check for updates only if a command is actually going to run
+    if ctx.invoked_subcommand is not None:
+        try:
+            from detecti.utils.updater import check_for_updates
+            check_for_updates(__version__)
+        except Exception:
+            pass
+
+
 
 def target_to_db_name(target: str) -> str:
     """Convert target string to a clean SQLite database filename (e.g. example.com.sqlite)."""
