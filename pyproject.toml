@@ -56,6 +56,7 @@ dependencies = [
     "bcrypt>=4.0.0",
     "python-jose[cryptography]>=3.3.0",
     "python-multipart>=0.0.6",
+    "markdown>=3.4.0",
 ]
 
 [project.optional-dependencies]
