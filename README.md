@@ -285,15 +285,15 @@ flowchart TD
 
 ### Quick Installation & Automated Setup
 ```bash
-git clone https://github.com/detectisec/DetecTI-CLI.git
-cd DetecTI-CLI
+# 1. Download and install the package globally from PyPI
+pip install detecti-cli
 
-# Run the automated installer
+# 2. Run the automated setup routine
 # (Bootstraps dependencies, configures capabilities, creates directories,
-# sets up your secure Web Dashboard admin credentials, and creates the global executable)
-python3 install.py
+# and sets up your secure Web Dashboard admin credentials)
+detecti-cli config-check --setup
 
-# The command is now available globally! You can safely delete the cloned folder.
+# The command is now ready!
 detecti-cli --help
 ```
 
@@ -492,7 +492,9 @@ DetecTI-CLI/
 │   └── server.py            # Asynchronous FastAPI & Uvicorn Server
 ├── utils/                   
 │   ├── http.py              # Centralized Async HTTPX Client (Retries, Limits & Headers)
-│   └── logger.py            # Rich Console Theme, Colored Risk Badges & Tables
+│   ├── logger.py            # Rich Console Theme, Colored Risk Badges & Tables
+│   ├── setup.py             # Pre-flight Configuration & Requirements Bootstrap
+│   └── updater.py           # Automatic PyPI Version Check & Caching
 ├── tests/                   # Pytest Unit & Integration Test Suite
 └── pyproject.toml           # Modern Packaging & Dependency Definition
 ```
