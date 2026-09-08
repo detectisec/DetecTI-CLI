@@ -25,8 +25,13 @@ def check_for_updates(current_version: str) -> None:
         if resp.status_code == 200:
             latest_version = resp.json()["info"]["version"]
             
-            from packaging.version import parse
-            is_newer = parse(latest_version) > parse(current_version)
+            from packaging.version import parse, InvalidVersion
+            try:
+                cv = parse(current_version)
+                lv = parse(latest_version)
+                is_newer = lv > cv
+            except InvalidVersion:
+                is_newer = False
             
             # Save to cache
             cache_file.parent.mkdir(parents=True, exist_ok=True)
